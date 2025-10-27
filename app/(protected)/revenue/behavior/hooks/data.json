@@ -1,0 +1,132 @@
+{
+  "name": "Home Energizers",
+  "customers": [
+    {
+      "customerId": "02c3d092-0828-456d-a1d5-ae0da2944c46",
+      "fullname": "Kathriarachchige Don Bandurathna",
+      "imei": 862487061364101,
+      "avgSwaps": 0,
+      "avgSwapRevenue": 0,
+      "avgHomeCharges": 3.9,
+      "avgHomeChargeRevenue": 441.1,
+      "avgTotalRevenue": 441.1,
+      "avgDistance": 132.907676574
+    },
+    {
+      "customerId": "02d5090f-eef6-44a2-9165-f89d2dbba075",
+      "fullname": "Bogagoda Arachchilage Malkanthi jayasinghe",
+      "imei": 862487061363624,
+      "avgSwaps": 1.5,
+      "avgSwapRevenue": 306.5,
+      "avgHomeCharges": 3.9,
+      "avgHomeChargeRevenue": 570.35,
+      "avgTotalRevenue": 876.85,
+      "avgDistance": 289.807546869
+    },
+    {
+      "customerId": "03b100eb-460d-4273-b8bc-78cae0435a3e",
+      "fullname": "Madampage Sajini Malsha",
+      "imei": 862487061408924,
+      "avgSwaps": 0,
+      "avgSwapRevenue": 0,
+      "avgHomeCharges": 1.666667,
+      "avgHomeChargeRevenue": 305.06666667,
+      "avgTotalRevenue": 305.06666667,
+      "avgDistance": 37.235449693
+    },
+    {
+      "customerId": "051bb89e-15bc-425a-84c8-e8ebfe6c0998",
+      "fullname": "Abeyawardhana Arachchige Nishadhi Tharushika",
+      "imei": 862487061422107,
+      "avgSwaps": 0,
+      "avgSwapRevenue": 0,
+      "avgHomeCharges": 3,
+      "avgHomeChargeRevenue": 373.56,
+      "avgTotalRevenue": 373.56,
+      "avgDistance": 234.339185713
+    },
+    {
+      "customerId": "05361d03-f39b-4941-a4df-178db5360381",
+      "fullname": "Edirisinghe Nuwn",
+      "imei": 865209069546290,
+      "avgSwaps": 0,
+      "avgSwapRevenue": 0,
+      "avgHomeCharges": 5,
+      "avgHomeChargeRevenue": 718.8,
+      "avgTotalRevenue": 718.8,
+      "avgDistance": 0
+    },
+    {
+      "customerId": "0649a42d-ee04-45b1-9ec0-2311113ebbb6",
+      "fullname": "Rasiya Niroshika Sadamali",
+      "imei": 865209069518679,
+      "avgSwaps": 1.333333,
+      "avgSwapRevenue": 316.66666667,
+      "avgHomeCharges": 2,
+      "avgHomeChargeRevenue": 201.66666667,
+      "avgTotalRevenue": 518.33333333,
+      "avgDistance": 159.993163575
+    },
+    {
+      "customerId": "06d1171b-0dd4-4152-ab25-bf3e11deca39",
+      "fullname": "Walipitiyage Don Nimeshika Erandi",
+      "imei": 862487061422248,
+      "avgSwaps": 0,
+      "avgSwapRevenue": 0,
+      "avgHomeCharges": 3.833333,
+      "avgHomeChargeRevenue": 409.93333333,
+      "avgTotalRevenue": 409.93333333,
+      "avgDistance": 278.457188923
+    },
+    {
+      "customerId": "092c9c5d-e4f7-4fa7-99e3-0e7352435c3b",
+      "fullname": "karunapedidurayalage sachini maduwanthi",
+      "imei": 862487061405524,
+      "avgSwaps": 0,
+      "avgSwapRevenue": 0,
+      "avgHomeCharges": 1.625,
+      "avgHomeChargeRevenue": 143.6875,
+      "avgTotalRevenue": 143.6875,
+      "avgDistance": 58.863116357
+    },
+    {
+      "customerId": "09371a55-55bd-4ef4-b9e7-97ad4708f47d",
+      "fullname": "Suranjith Piumal silva Suranjith",
+      "imei": 865209069518968,
+      "avgSwaps": 0.4,
+      "avgSwapRevenue": 100,
+      "avgHomeCharges": 1.4,
+      "avgHomeChargeRevenue": 271.04,
+      "avgTotalRevenue": 371.04,
+      "avgDistance": 85.224527692
+    },
+    {
+      "customerId": "098db89b-445e-46e9-9e3e-35d13e3213c0",
+      "fullname": "Kumara Mohan",
+      "imei": 862487061331605,
+      "avgSwaps": 0,
+      "avgSwapRevenue": 0,
+      "avgHomeCharges": 2,
+      "avgHomeChargeRevenue": 145.2,
+      "avgTotalRevenue": 145.2,
+      "avgDistance": 0
+    },
+    {
+      "customerId": "0b4724dc-e1ae-4cdb-9879-516ec3aa3329",
+      "fullname": "Galuge Lameshi saundarika kumari fernando",
+      "imei": 862487061347700,
+      "avgSwaps": 0,
+      "avgSwapRevenue": 0,
+      "avgHomeCharges": 4.25,
+      "avgHomeChargeRevenue": 581.075,
+      "avgTotalRevenue": 581.075,
+      "avgDistance": 0
+    }
+  ],
+  "color": "hsl(var(--chart-4))",
+  "minSwaps": 0,
+  "count": 152,
+  "avgRevenue": 343.8426617444736,
+  "totalRevenue": 52264.08458515999,
+  "avgSwaps": 0.2279873223684211
+}
