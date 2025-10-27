@@ -56,6 +56,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { act, useState } from "react";
 import path from "path";
+import Image from "next/image";
 
 export function MainSidebar() {
   const pathname = usePathname();
@@ -416,9 +417,7 @@ export function MainSidebar() {
         <div className="flex items-center gap-x-3 mt-2">
           {/* Icon with glow */}
           <div className="relative flex items-center justify-center h-10 w-10">
-            <div className="w-10 h-10 bg-gradient-to-r from-cyan-400 to-blue-500 rounded-lg flex items-center justify-center">
-              <Zap className="w-7 h-7 text-white" />
-            </div>
+            <Image src="/icon.png" alt="Logo" width={40} height={40} />
             <div className="absolute inset-0 rounded-full bg-cyan-400/20 blur-md"></div>
           </div>
 
