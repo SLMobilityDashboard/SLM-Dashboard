@@ -19,6 +19,7 @@ import {
   CheckCircle,
   XCircle,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -67,6 +68,7 @@ export function Header() {
   const [notificationsError, setNotificationsError] = useState<string | null>(
     null
   );
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   // Set isClient to true once component mounts on client
   useEffect(() => {
@@ -86,13 +88,13 @@ export function Header() {
   useEffect(() => {
     if (isClient) {
       fetchNotifications();
-      // Poll for new notifications every 24 hours (86400000 ms)
-      const interval = setInterval(fetchNotifications, 24 * 60 * 60 * 1000);
+      // Poll for new notifications every 30 seconds
+      const interval = setInterval(fetchNotifications, 30000);
       return () => clearInterval(interval);
     }
   }, [isClient]);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = async (forceRefresh = false) => {
     setNotificationsLoading(true);
     setNotificationsError(null);
 
@@ -109,15 +111,15 @@ export function Header() {
           MESSAGE,
           IS_READ
         FROM SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
-        WHERE PROCESSED_AT >= DATEADD(day, -7, CURRENT_TIMESTAMP())
+        WHERE PROCESSED_AT >= DATEADD(day, -20, CURRENT_TIMESTAMP())
         ORDER BY PROCESSED_AT DESC
         LIMIT 50
       `;
 
-      const response = await fetch("/api/snowflake/query", {
+      const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql }),
+        body: JSON.stringify({ sql, noCache: forceRefresh }),
       });
 
       if (!response.ok) {
@@ -137,6 +139,7 @@ export function Header() {
   };
 
   const markAsRead = async (queryId: string) => {
+    setActionLoading(`read-${queryId}`);
     try {
       const sql = `
         UPDATE SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
@@ -144,76 +147,111 @@ export function Header() {
         WHERE QUERY_ID = '${queryId}'
       `;
 
-      await fetch("/api/snowflake/query", {
+      const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql }),
       });
 
+      if (!response.ok) throw new Error("Failed to mark as read");
+
+      // Optimistically update UI
       setNotifications((prev) =>
         prev.map((n) => (n.QUERY_ID === queryId ? { ...n, IS_READ: true } : n))
       );
+
+      // Refresh to get latest data
+      setTimeout(() => fetchNotifications(true), 500);
     } catch (error) {
       console.error("Failed to mark as read:", error);
+    } finally {
+      setActionLoading(null);
     }
   };
 
   const markAllAsRead = async () => {
+    setActionLoading("mark-all");
     try {
       const sql = `
         UPDATE SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
         SET IS_READ = TRUE
         WHERE IS_READ != TRUE
-        AND PROCESSED_AT >= DATEADD(day, -7, CURRENT_TIMESTAMP())
+        AND PROCESSED_AT >= DATEADD(day, -20, CURRENT_TIMESTAMP())
       `;
 
-      await fetch("/api/snowflake/query", {
+      const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql }),
       });
 
+      if (!response.ok) throw new Error("Failed to mark all as read");
+
+      // Optimistically update UI
       setNotifications((prev) => prev.map((n) => ({ ...n, IS_READ: true })));
+
+      // Refresh to get latest data
+      setTimeout(() => fetchNotifications(true), 500);
     } catch (error) {
       console.error("Failed to mark all as read:", error);
+    } finally {
+      setActionLoading(null);
     }
   };
 
   const removeNotification = async (queryId: string) => {
+    setActionLoading(`remove-${queryId}`);
     try {
       const sql = `
         DELETE FROM SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
         WHERE QUERY_ID = '${queryId}'
       `;
 
-      await fetch("/api/snowflake/query", {
+      const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql }),
       });
 
+      if (!response.ok) throw new Error("Failed to remove notification");
+
+      // Optimistically update UI
       setNotifications((prev) => prev.filter((n) => n.QUERY_ID !== queryId));
+
+      // Refresh to get latest data
+      setTimeout(() => fetchNotifications(true), 500);
     } catch (error) {
       console.error("Failed to remove notification:", error);
+    } finally {
+      setActionLoading(null);
     }
   };
 
   const clearAll = async () => {
+    setActionLoading("clear-all");
     try {
       const sql = `
         DELETE FROM SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
-        WHERE PROCESSED_AT >= DATEADD(day, -7, CURRENT_TIMESTAMP())
+        WHERE PROCESSED_AT >= DATEADD(day, -20, CURRENT_TIMESTAMP())
       `;
 
-      await fetch("/api/snowflake/query", {
+      const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql }),
       });
 
+      if (!response.ok) throw new Error("Failed to clear all");
+
+      // Optimistically update UI
       setNotifications([]);
+
+      // Refresh to get latest data
+      setTimeout(() => fetchNotifications(true), 500);
     } catch (error) {
       console.error("Failed to clear all:", error);
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -288,7 +326,6 @@ export function Header() {
     processedAt: string
   ) => {
     if (!end) return "Running...";
-    // Use start time if available, otherwise fall back to processed_at
     const startTime = start || processedAt;
     const duration = new Date(end).getTime() - new Date(startTime).getTime();
     const seconds = Math.floor(duration / 1000);
@@ -383,9 +420,14 @@ export function Header() {
                     variant="outline"
                     size="icon"
                     className="border-slate-700 bg-slate-900/50"
-                    onClick={fetchNotifications}
+                    onClick={() => fetchNotifications(true)}
+                    disabled={notificationsLoading}
                   >
-                    <RefreshCw className="h-4 w-4 text-slate-400" />
+                    <RefreshCw
+                      className={`h-4 w-4 text-slate-400 ${
+                        notificationsLoading ? "animate-spin" : ""
+                      }`}
+                    />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
@@ -412,7 +454,6 @@ export function Header() {
             </TooltipProvider>
           </div>
 
-          {/* Notifications Button */}
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -436,7 +477,6 @@ export function Header() {
             </Tooltip>
           </TooltipProvider>
 
-          {/* Theme Toggle */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -468,7 +508,6 @@ export function Header() {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* User Profile Dropdown */}
           {isClient && status === "authenticated" && session?.user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -535,7 +574,6 @@ export function Header() {
         </div>
       </header>
 
-      {/* Notifications Panel */}
       {isClient &&
         isNotificationsOpen &&
         createPortal(
@@ -568,7 +606,7 @@ export function Header() {
                             </h2>
                             <p className="text-blue-300 text-sm font-bold tracking-wide">
                               [ {unreadCount} UNREAD ALERTS •{" "}
-                              {notifications.length} TOTAL • LAST 7 DAYS ]
+                              {notifications.length} TOTAL • LAST 14 DAYS ]
                             </p>
                           </div>
                         </div>
@@ -581,32 +619,45 @@ export function Header() {
                       </div>
 
                       {notifications.length > 0 && (
-                        <div className="flex gap-3 mt-4">
+                        <div className="flex gap-3 mt-4 flex-wrap">
                           <button
-                            onClick={fetchNotifications}
-                            disabled={notificationsLoading}
+                            onClick={() => fetchNotifications(true)}
+                            disabled={
+                              notificationsLoading || actionLoading !== null
+                            }
                             className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 border border-blue-500/30 hover:border-blue-400/50 text-blue-300 hover:text-blue-200 transition-all duration-300 font-bold text-sm tracking-wide uppercase disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <Clock
-                              className={`w-4 h-4 ${
-                                notificationsLoading ? "animate-spin" : ""
-                              }`}
-                            />
+                            {notificationsLoading ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Clock className="w-4 h-4" />
+                            )}
                             Refresh
                           </button>
                           <button
                             onClick={markAllAsRead}
-                            disabled={unreadCount === 0}
+                            disabled={
+                              unreadCount === 0 || actionLoading !== null
+                            }
                             className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 border border-blue-500/30 hover:border-blue-400/50 text-blue-300 hover:text-blue-200 transition-all duration-300 font-bold text-sm tracking-wide uppercase disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <CheckCheck className="w-4 h-4" />
+                            {actionLoading === "mark-all" ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <CheckCheck className="w-4 h-4" />
+                            )}
                             Mark All Read
                           </button>
                           <button
                             onClick={clearAll}
-                            className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-red-900/30 border border-blue-500/30 hover:border-red-500/50 text-blue-300 hover:text-red-300 transition-all duration-300 font-bold text-sm tracking-wide uppercase"
+                            disabled={actionLoading !== null}
+                            className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-red-900/30 border border-blue-500/30 hover:border-red-500/50 text-blue-300 hover:text-red-300 transition-all duration-300 font-bold text-sm tracking-wide uppercase disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            {actionLoading === "clear-all" ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
                             Clear All
                           </button>
                         </div>
@@ -616,7 +667,7 @@ export function Header() {
                     <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
                       {notificationsLoading && notifications.length === 0 ? (
                         <div className="p-12 text-center">
-                          <Clock className="w-12 h-12 mx-auto mb-4 text-blue-400 animate-spin" />
+                          <Loader2 className="w-12 h-12 mx-auto mb-4 text-blue-400 animate-spin" />
                           <p className="text-blue-300 font-bold">
                             Loading notifications...
                           </p>
@@ -631,8 +682,9 @@ export function Header() {
                             {notificationsError}
                           </p>
                           <button
-                            onClick={fetchNotifications}
-                            className="mt-4 px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 border border-blue-500/30 text-blue-300 transition-all duration-300 font-bold text-sm tracking-wide uppercase"
+                            onClick={() => fetchNotifications(true)}
+                            disabled={notificationsLoading}
+                            className="mt-4 px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 border border-blue-500/30 text-blue-300 transition-all duration-300 font-bold text-sm tracking-wide uppercase disabled:opacity-50"
                           >
                             Retry
                           </button>
@@ -641,6 +693,12 @@ export function Header() {
                         <div className="p-4 space-y-3">
                           {notifications.map((notification, index) => {
                             const config = getStatusConfig(notification.STATUS);
+                            const isLoading =
+                              actionLoading ===
+                                `read-${notification.QUERY_ID}` ||
+                              actionLoading ===
+                                `remove-${notification.QUERY_ID}`;
+
                             return (
                               <div
                                 key={notification.QUERY_ID}
@@ -648,7 +706,7 @@ export function Header() {
                                   !notification.IS_READ
                                     ? "animate-slideIn"
                                     : "opacity-70 hover:opacity-100"
-                                }`}
+                                } ${isLoading ? "opacity-50" : ""}`}
                                 style={{ animationDelay: `${index * 0.05}s` }}
                               >
                                 <div
@@ -759,9 +817,17 @@ export function Header() {
                                               notification.QUERY_ID
                                             )
                                           }
-                                          className="text-slate-500 hover:text-red-400 transition-colors duration-300 p-1 hover:bg-slate-800/50 rounded"
+                                          disabled={
+                                            isLoading || actionLoading !== null
+                                          }
+                                          className="text-slate-500 hover:text-red-400 transition-colors duration-300 p-1 hover:bg-slate-800/50 rounded disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
-                                          <X className="w-5 h-5" />
+                                          {actionLoading ===
+                                          `remove-${notification.QUERY_ID}` ? (
+                                            <Loader2 className="w-5 h-5 animate-spin" />
+                                          ) : (
+                                            <X className="w-5 h-5" />
+                                          )}
                                         </button>
                                       </div>
 
@@ -778,9 +844,21 @@ export function Header() {
                                             onClick={() =>
                                               markAsRead(notification.QUERY_ID)
                                             }
-                                            className="ml-auto text-xs font-bold text-cyan-400 hover:text-cyan-300 transition-colors duration-300 uppercase tracking-wide hover:underline"
+                                            disabled={
+                                              isLoading ||
+                                              actionLoading !== null
+                                            }
+                                            className="ml-auto text-xs font-bold text-cyan-400 hover:text-cyan-300 transition-colors duration-300 uppercase tracking-wide hover:underline disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
                                           >
-                                            → Mark as Read
+                                            {actionLoading ===
+                                            `read-${notification.QUERY_ID}` ? (
+                                              <>
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                                Processing...
+                                              </>
+                                            ) : (
+                                              "→ Mark as Read"
+                                            )}
                                           </button>
                                         )}
                                       </div>
@@ -804,7 +882,7 @@ export function Header() {
                             No Task Logs Found
                           </p>
                           <p className="text-sm text-slate-600 mt-2 font-medium">
-                            No notifications in the last 7 days
+                            No notifications in the last 14 days
                           </p>
                         </div>
                       )}
@@ -814,8 +892,8 @@ export function Header() {
                       <div className="flex items-center justify-between text-xs text-blue-400 font-bold tracking-wider uppercase">
                         <span className="flex items-center gap-2">
                           <span>Snowflake Execution Monitor</span>
-                          {notificationsLoading && (
-                            <Clock className="w-3 h-3 animate-spin" />
+                          {(notificationsLoading || actionLoading !== null) && (
+                            <Loader2 className="w-3 h-3 animate-spin" />
                           )}
                         </span>
                         <span className="flex items-center gap-2">

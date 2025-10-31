@@ -1,6 +1,15 @@
 "use client";
 
-import { Bell, X, CheckCheck, Trash2, Clock, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import {
+  Bell,
+  X,
+  CheckCheck,
+  Trash2,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+} from "lucide-react";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 
@@ -10,7 +19,7 @@ interface TaskNotification {
   SCHEDULED_TIME: string;
   START_TIME: string;
   END_TIME: string | null;
-  STATUS: 'SUCCESS' | 'FAILED' | 'WARNING' | 'RUNNING' | 'PENDING';
+  STATUS: "SUCCESS" | "FAILED" | "WARNING" | "RUNNING" | "PENDING";
   MESSAGE: string;
   IS_READ: boolean;
 }
@@ -24,17 +33,18 @@ export default function TaskNotificationsPanel() {
 
   useEffect(() => {
     setMounted(true);
-    fetchNotifications();
-    
-    // Poll for new notifications every 30 seconds
-    const interval = setInterval(fetchNotifications, 30000);
+    // Initial fetch uses cache
+    fetchNotifications(false);
+
+    // Poll for new notifications every 30 seconds (uses cache)
+    const interval = setInterval(() => fetchNotifications(false), 30000);
     return () => clearInterval(interval);
   }, []);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const sql = `
         SELECT 
@@ -47,24 +57,30 @@ export default function TaskNotificationsPanel() {
           MESSAGE,
           IS_READ
         FROM SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
+        WHERE START_TIME >= DATEADD(day, -10, CURRENT_TIMESTAMP())
         ORDER BY START_TIME DESC
         LIMIT 50
       `;
-      
-      const response = await fetch('/api/snowflake/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql })
+
+      const response = await fetch("/api/snowflake/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sql,
+          noCache: forceRefresh, // Only bypass cache when explicitly requested
+        }),
       });
-      
+
       if (!response.ok) {
-        throw new Error(`Failed to fetch notifications: ${response.statusText}`);
+        throw new Error(
+          `Failed to fetch notifications: ${response.statusText}`
+        );
       }
-      
+
       const data = await response.json();
       setNotifications(data);
     } catch (err: any) {
-      console.error('Failed to fetch notifications:', err);
+      console.error("Failed to fetch notifications:", err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -80,18 +96,17 @@ export default function TaskNotificationsPanel() {
         SET IS_READ = TRUE
         WHERE QUERY_ID = '${queryId}'
       `;
-      
-      await fetch('/api/snowflake/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql })
+
+      await fetch("/api/snowflake/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql }),
       });
-      
-      setNotifications((prev) =>
-        prev.map((n) => (n.QUERY_ID === queryId ? { ...n, IS_READ: true } : n))
-      );
+
+      // Fetch fresh data from Snowflake after update (bypass cache)
+      await fetchNotifications(true);
     } catch (error) {
-      console.error('Failed to mark as read:', error);
+      console.error("Failed to mark as read:", error);
     }
   };
 
@@ -100,18 +115,19 @@ export default function TaskNotificationsPanel() {
       const sql = `
         UPDATE SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
         SET IS_READ = TRUE
-        WHERE IS_READ = FALSE
+        WHERE IS_READ = FALSE and PROCESSED_AT >= DATEADD(day, -10, CURRENT_TIMESTAMP())
       `;
-      
-      await fetch('/api/snowflake/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql })
+
+      await fetch("/api/snowflake/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql }),
       });
-      
-      setNotifications((prev) => prev.map((n) => ({ ...n, IS_READ: true })));
+
+      // Fetch fresh data from Snowflake after update (bypass cache)
+      await fetchNotifications(true);
     } catch (error) {
-      console.error('Failed to mark all as read:', error);
+      console.error("Failed to mark all as read:", error);
     }
   };
 
@@ -121,32 +137,34 @@ export default function TaskNotificationsPanel() {
         DELETE FROM SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
         WHERE QUERY_ID = '${queryId}'
       `;
-      
-      await fetch('/api/snowflake/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql })
+
+      await fetch("/api/snowflake/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql }),
       });
-      
-      setNotifications((prev) => prev.filter((n) => n.QUERY_ID !== queryId));
+
+      // Fetch fresh data from Snowflake after delete (bypass cache)
+      await fetchNotifications(true);
     } catch (error) {
-      console.error('Failed to remove notification:', error);
+      console.error("Failed to remove notification:", error);
     }
   };
 
   const clearAll = async () => {
     try {
       const sql = `TRUNCATE TABLE SOURCE_DATA.LOGS.TASK_EXECUTION_LOG`;
-      
-      await fetch('/api/snowflake/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql })
+
+      await fetch("/api/snowflake/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql }),
       });
-      
-      setNotifications([]);
+
+      // Fetch fresh data from Snowflake after truncate (bypass cache)
+      await fetchNotifications(true);
     } catch (error) {
-      console.error('Failed to clear all:', error);
+      console.error("Failed to clear all:", error);
     }
   };
 
@@ -161,7 +179,7 @@ export default function TaskNotificationsPanel() {
           textColor: "text-green-400",
           bgColor: "bg-green-500/10",
           shadowColor: "shadow-green-500/30",
-          title: "TASK COMPLETED"
+          title: "TASK COMPLETED",
         };
       case "FAILED":
         return {
@@ -172,7 +190,7 @@ export default function TaskNotificationsPanel() {
           textColor: "text-red-400",
           bgColor: "bg-red-500/10",
           shadowColor: "shadow-red-500/30",
-          title: "TASK FAILED"
+          title: "TASK FAILED",
         };
       case "WARNING":
         return {
@@ -183,7 +201,7 @@ export default function TaskNotificationsPanel() {
           textColor: "text-yellow-400",
           bgColor: "bg-yellow-500/10",
           shadowColor: "shadow-yellow-500/30",
-          title: "TASK WARNING"
+          title: "TASK WARNING",
         };
       case "RUNNING":
         return {
@@ -194,7 +212,7 @@ export default function TaskNotificationsPanel() {
           textColor: "text-blue-400",
           bgColor: "bg-blue-500/10",
           shadowColor: "shadow-blue-500/30",
-          title: "TASK RUNNING"
+          title: "TASK RUNNING",
         };
       case "PENDING":
         return {
@@ -205,7 +223,7 @@ export default function TaskNotificationsPanel() {
           textColor: "text-purple-400",
           bgColor: "bg-purple-500/10",
           shadowColor: "shadow-purple-500/30",
-          title: "TASK PENDING"
+          title: "TASK PENDING",
         };
       default:
         return {
@@ -216,7 +234,7 @@ export default function TaskNotificationsPanel() {
           textColor: "text-gray-400",
           bgColor: "bg-gray-500/10",
           shadowColor: "shadow-gray-500/30",
-          title: "TASK UPDATE"
+          title: "TASK UPDATE",
         };
     }
   };
@@ -227,26 +245,26 @@ export default function TaskNotificationsPanel() {
     const seconds = Math.floor(duration / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
-    
+
     if (hours > 0) return `${hours}h ${minutes % 60}m`;
     if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
     return `${seconds}s`;
   };
 
   const formatTime = (timestamp: string) => {
-    return new Date(timestamp).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
+    return new Date(timestamp).toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
     });
   };
 
   const formatDate = (timestamp: string) => {
-    return new Date(timestamp).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
+    return new Date(timestamp).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
     });
   };
 
@@ -260,7 +278,7 @@ export default function TaskNotificationsPanel() {
         <Bell className="w-5 h-5" />
         {unreadCount > 0 && (
           <div className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center text-xs font-bold bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full shadow-lg shadow-blue-500/50 animate-pulse">
-            {unreadCount > 99 ? '99+' : unreadCount}
+            {unreadCount > 99 ? "99+" : unreadCount}
           </div>
         )}
       </button>
@@ -303,7 +321,8 @@ export default function TaskNotificationsPanel() {
                               Task Execution Log
                             </h2>
                             <p className="text-blue-300 text-sm font-bold tracking-wide">
-                              [ {unreadCount} UNREAD ALERTS • {notifications.length} TOTAL ]
+                              [ {unreadCount} UNREAD ALERTS •{" "}
+                              {notifications.length} TOTAL ]
                             </p>
                           </div>
                         </div>
@@ -319,7 +338,7 @@ export default function TaskNotificationsPanel() {
                       {notifications.length > 0 && (
                         <div className="flex gap-3 mt-4">
                           <button
-                            onClick={fetchNotifications}
+                            onClick={() => fetchNotifications(true)}
                             className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 border border-blue-500/30 hover:border-blue-400/50 text-blue-300 hover:text-blue-200 transition-all duration-300 font-bold text-sm tracking-wide uppercase"
                           >
                             <Clock className="w-4 h-4" />
@@ -348,15 +367,19 @@ export default function TaskNotificationsPanel() {
                       {loading && notifications.length === 0 ? (
                         <div className="p-12 text-center">
                           <Clock className="w-12 h-12 mx-auto mb-4 text-blue-400 animate-spin" />
-                          <p className="text-blue-300 font-bold">Loading notifications...</p>
+                          <p className="text-blue-300 font-bold">
+                            Loading notifications...
+                          </p>
                         </div>
                       ) : error ? (
                         <div className="p-12 text-center">
                           <XCircle className="w-12 h-12 mx-auto mb-4 text-red-400" />
-                          <p className="text-red-300 font-bold mb-2">Failed to load notifications</p>
+                          <p className="text-red-300 font-bold mb-2">
+                            Failed to load notifications
+                          </p>
                           <p className="text-sm text-slate-400">{error}</p>
                           <button
-                            onClick={fetchNotifications}
+                            onClick={() => fetchNotifications(true)}
                             className="mt-4 px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 border border-blue-500/30 text-blue-300 transition-all duration-300 font-bold text-sm tracking-wide uppercase"
                           >
                             Retry
@@ -387,8 +410,14 @@ export default function TaskNotificationsPanel() {
                                   {/* Status Badge */}
                                   <div className="absolute -left-2 -top-2 w-10 h-10">
                                     <div
-                                      className={`w-full h-full bg-gradient-to-br ${config.color} rounded-full flex items-center justify-center text-xl shadow-lg ${config.shadowColor} ${
-                                        notification.STATUS === 'RUNNING' ? 'animate-pulse' : ''
+                                      className={`w-full h-full bg-gradient-to-br ${
+                                        config.color
+                                      } rounded-full flex items-center justify-center text-xl shadow-lg ${
+                                        config.shadowColor
+                                      } ${
+                                        notification.STATUS === "RUNNING"
+                                          ? "animate-pulse"
+                                          : ""
                                       }`}
                                     >
                                       {config.emoji}
@@ -401,10 +430,14 @@ export default function TaskNotificationsPanel() {
                                       <div className="flex items-start justify-between gap-2">
                                         <div className="flex-1">
                                           <div className="flex items-center gap-3 mb-2 flex-wrap">
-                                            <h4 className={`font-black text-base sm:text-lg uppercase tracking-wider system-font ${config.textColor}`}>
+                                            <h4
+                                              className={`font-black text-base sm:text-lg uppercase tracking-wider system-font ${config.textColor}`}
+                                            >
                                               {config.title}
                                             </h4>
-                                            <span className={`px-2 py-1 rounded text-xs font-bold ${config.bgColor} ${config.textColor} border ${config.borderColor}`}>
+                                            <span
+                                              className={`px-2 py-1 rounded text-xs font-bold ${config.bgColor} ${config.textColor} border ${config.borderColor}`}
+                                            >
                                               {notification.STATUS}
                                             </span>
                                           </div>
@@ -414,32 +447,67 @@ export default function TaskNotificationsPanel() {
                                           <p className="text-slate-300 text-sm font-medium leading-relaxed mb-3">
                                             {notification.MESSAGE}
                                           </p>
-                                          
+
                                           {/* Metadata Grid */}
                                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                                             <div className="flex flex-col gap-1 p-2 bg-slate-800/30 rounded border border-slate-700/30">
-                                              <span className="text-slate-500 font-bold uppercase tracking-wide">Scheduled</span>
-                                              <span className="text-cyan-400 font-mono">{formatTime(notification.SCHEDULED_TIME)}</span>
-                                              <span className="text-slate-400">{formatDate(notification.SCHEDULED_TIME)}</span>
+                                              <span className="text-slate-500 font-bold uppercase tracking-wide">
+                                                Scheduled
+                                              </span>
+                                              <span className="text-cyan-400 font-mono">
+                                                {formatTime(
+                                                  notification.SCHEDULED_TIME
+                                                )}
+                                              </span>
+                                              <span className="text-slate-400">
+                                                {formatDate(
+                                                  notification.SCHEDULED_TIME
+                                                )}
+                                              </span>
                                             </div>
                                             <div className="flex flex-col gap-1 p-2 bg-slate-800/30 rounded border border-slate-700/30">
-                                              <span className="text-slate-500 font-bold uppercase tracking-wide">Started</span>
-                                              <span className="text-blue-400 font-mono">{formatTime(notification.START_TIME)}</span>
-                                              <span className="text-slate-400">{formatDate(notification.START_TIME)}</span>
+                                              <span className="text-slate-500 font-bold uppercase tracking-wide">
+                                                Started
+                                              </span>
+                                              <span className="text-blue-400 font-mono">
+                                                {formatTime(
+                                                  notification.START_TIME
+                                                )}
+                                              </span>
+                                              <span className="text-slate-400">
+                                                {formatDate(
+                                                  notification.START_TIME
+                                                )}
+                                              </span>
                                             </div>
                                             {notification.END_TIME && (
                                               <div className="flex flex-col gap-1 p-2 bg-slate-800/30 rounded border border-slate-700/30">
-                                                <span className="text-slate-500 font-bold uppercase tracking-wide">Duration</span>
-                                                <span className={`font-mono font-bold ${config.textColor}`}>
-                                                  {formatDuration(notification.START_TIME, notification.END_TIME)}
+                                                <span className="text-slate-500 font-bold uppercase tracking-wide">
+                                                  Duration
                                                 </span>
-                                                <span className="text-slate-400">{formatTime(notification.END_TIME)}</span>
+                                                <span
+                                                  className={`font-mono font-bold ${config.textColor}`}
+                                                >
+                                                  {formatDuration(
+                                                    notification.START_TIME,
+                                                    notification.END_TIME
+                                                  )}
+                                                </span>
+                                                <span className="text-slate-400">
+                                                  {formatTime(
+                                                    notification.END_TIME
+                                                  )}
+                                                </span>
                                               </div>
                                             )}
                                           </div>
                                         </div>
                                         <button
-                                          onClick={() => removeNotification(notification.QUERY_ID)}
+                                          onClick={() =>
+                                            removeNotification(
+                                              notification.QUERY_ID
+                                            )
+                                          }
                                           className="text-slate-500 hover:text-red-400 transition-colors duration-300 p-1 hover:bg-slate-800/50 rounded"
                                         >
                                           <X className="w-5 h-5" />
@@ -449,11 +517,15 @@ export default function TaskNotificationsPanel() {
                                       {/* Footer */}
                                       <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-700/50 flex-wrap">
                                         <span className="text-xs text-slate-500 font-mono">
-                                          ID: {notification.QUERY_ID.slice(0, 12)}...
+                                          ID:{" "}
+                                          {notification.QUERY_ID.slice(0, 12)}
+                                          ...
                                         </span>
                                         {!notification.IS_READ && (
                                           <button
-                                            onClick={() => markAsRead(notification.QUERY_ID)}
+                                            onClick={() =>
+                                              markAsRead(notification.QUERY_ID)
+                                            }
                                             className="ml-auto text-xs font-bold text-cyan-400 hover:text-cyan-300 transition-colors duration-300 uppercase tracking-wide hover:underline"
                                           >
                                             → Mark as Read
@@ -492,11 +564,17 @@ export default function TaskNotificationsPanel() {
                       <div className="flex items-center justify-between text-xs text-blue-400 font-bold tracking-wider uppercase">
                         <span className="flex items-center gap-2">
                           <span>Snowflake Execution Monitor</span>
-                          {loading && <Clock className="w-3 h-3 animate-spin" />}
+                          {loading && (
+                            <Clock className="w-3 h-3 animate-spin" />
+                          )}
                         </span>
                         <span className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${error ? 'bg-red-400' : 'bg-blue-400 animate-pulse'}`} />
-                          {error ? 'Error' : 'Online'}
+                          <div
+                            className={`w-2 h-2 rounded-full ${
+                              error ? "bg-red-400" : "bg-blue-400 animate-pulse"
+                            }`}
+                          />
+                          {error ? "Error" : "Online"}
                         </span>
                       </div>
                     </div>

@@ -41,31 +41,53 @@ async function readFromCache(hash: string): Promise<any[] | null> {
   return data ? JSON.parse(data) : null;
 }
 
+// Helper to check if query should bypass cache
+function shouldBypassCache(sql: string): boolean {
+  const normalizedSql = sql.trim().toLowerCase();
+  
+  // Bypass cache for write operations
+  const writeOperations = ['update', 'insert', 'delete', 'merge', 'truncate', 'create', 'alter', 'drop'];
+  for (const op of writeOperations) {
+    if (normalizedSql.startsWith(op)) {
+      return true;
+    }
+  }
+  
+  return false;
+}
+
 // -------------------- API Handler --------------------
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
-    const { sql, userId } = await req.json();
+    const { sql, userId, noCache } = await req.json();
     if (!sql || typeof sql !== "string") {
       return NextResponse.json({ error: "Missing or invalid SQL" }, { status: 400 });
     }
 
     const queryHash = generateQueryHash(sql, userId);
     const shortHash = queryHash.substring(0, 8);
+    
+    // Determine if we should use cache
+    const bypassCache = noCache === true || shouldBypassCache(sql);
 
-    // 1️⃣ Check Redis cache
-    const cachedData = await readFromCache(queryHash);
-    if (cachedData) {
-      const duration = Date.now() - startTime;
-      console.log(`🟢 CACHE HIT [${shortHash}] - ${cachedData.length} rows - ${duration}ms`);
-      return NextResponse.json(cachedData, {
-        status: 200,
-        headers: { "X-Cache-Status": "HIT", "X-Cache-Hash": queryHash },
-      });
+    // 1️⃣ Check Redis cache (unless bypassed)
+    if (!bypassCache) {
+      const cachedData = await readFromCache(queryHash);
+      if (cachedData) {
+        const duration = Date.now() - startTime;
+        console.log(`🟢 CACHE HIT [${shortHash}] - ${cachedData.length} rows - ${duration}ms`);
+        return NextResponse.json(cachedData, {
+          status: 200,
+          headers: { "X-Cache-Status": "HIT", "X-Cache-Hash": queryHash },
+        });
+      }
+    } else {
+      console.log(`⚠️ CACHE BYPASSED [${shortHash}] - ${noCache ? 'Explicit noCache flag' : 'Write operation detected'}`);
     }
 
-    // 2️⃣ Cache miss → query Snowflake
+    // 2️⃣ Cache miss or bypassed → query Snowflake
     console.log(`🔴 CACHE MISS [${shortHash}] - Executing Snowflake`);
     await SnowflakeConnectionManager.connect();
     const connection = SnowflakeConnectionManager.getConnection();
@@ -84,15 +106,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No records found" }, { status: 404 });
     }
 
-    // 3️⃣ Cache the result
-    await writeToCache(queryHash, rows);
+    // 3️⃣ Cache the result (only if not bypassed and it's a SELECT)
+    if (!bypassCache) {
+      await writeToCache(queryHash, rows);
+    }
 
     const totalDuration = Date.now() - startTime;
     console.log(`✅ QUERY COMPLETE [${shortHash}] - ${rows.length} rows - ${totalDuration}ms`);
 
     return NextResponse.json(rows, {
       status: 200,
-      headers: { "X-Cache-Status": "MISS", "X-Cache-Hash": queryHash },
+      headers: { 
+        "X-Cache-Status": bypassCache ? "BYPASS" : "MISS", 
+        "X-Cache-Hash": queryHash 
+      },
     });
   } catch (err: any) {
     console.error(`❌ QUERY ERROR - Duration: ${Date.now() - startTime}ms`, err);
