@@ -18,9 +18,7 @@ import {
   RefreshCw,
   Activity,
   Gauge,
-  ThermometerSun,
   AlertTriangle,
-  Zap,
   Clock,
   CheckCircle,
   XCircle,
@@ -29,12 +27,23 @@ import {
   X,
   Radio,
   TrendingUp,
-  TrendingDown,
+  AlertCircle,
+  ChevronRight,
+  Shield,
+  Zap,
 } from "lucide-react";
 
 // ============================================================================
 // TYPES
 // ============================================================================
+
+interface Anomaly {
+  type: 'critical' | 'warning' | 'info';
+  category: 'signal' | 'health' | 'usage' | 'error';
+  message: string;
+  impact: number; // Score impact (higher = worse)
+  recommendation: string;
+}
 
 interface BatteryTelemetry {
   bmsId: string;
@@ -58,26 +67,155 @@ interface BatteryTelemetry {
   // Ingestion metadata
   dataIngestionTime: Date;
   status: "online" | "offline" | "error";
+  // Anomaly detection
+  anomalies: Anomaly[];
+  healthScore: number; // 0-100, lower = worse
 }
 
 interface BatteryKPIs {
   TOTAL_BMS: number;
-  ONLINE_BMS: number;
-  OFFLINE_BMS: number;
-  ERROR_BMS: number;
+  CRITICAL_BMS: number;
+  WARNING_BMS: number;
   HEALTHY_BMS: number;
-  DEGRADED_BMS: number;
-  AVG_SOH: number;
+  AVG_HEALTH_SCORE: number;
+  TOTAL_ANOMALIES: number;
   TOTAL_DISTANCE: number;
   AVG_CYCLES: number;
+  AVG_DISTANCE_PER_CYCLE: number;
 }
 
 interface FilterState {
   searchTerm: string;
-  selectedStatuses: string[];
-  sohRange: string;
+  selectedSeverities: string[];
+  scoreRange: string;
   sortBy: string;
 }
+
+// ============================================================================
+// ANOMALY DETECTION ENGINE
+// ============================================================================
+
+const detectAnomalies = (battery: Omit<BatteryTelemetry, 'anomalies' | 'healthScore'>): Anomaly[] => {
+  const anomalies: Anomaly[] = [];
+
+  // 1. CRITICAL: BMS Communication Error
+  if (battery.batteryError) {
+    anomalies.push({
+      type: 'critical',
+      category: 'error',
+      message: `BMS Communication Error: ${battery.batteryError}`,
+      impact: 40,
+      recommendation: 'Immediate technical inspection required. Check BMS wiring and module functionality.'
+    });
+  }
+
+  // 2. CRITICAL: Extended Offline (>48 hours)
+  if (battery.offlineDuration > 48) {
+    anomalies.push({
+      type: 'critical',
+      category: 'signal',
+      message: `BMS offline for ${Math.floor(battery.offlineDuration / 24)} days`,
+      impact: 35,
+      recommendation: 'Critical connectivity issue. Verify power supply, antenna connection, and SIM card status.'
+    });
+  }
+
+  // 3. CRITICAL: Very Low SOH (<65%)
+  if (battery.batSOH < 65) {
+    anomalies.push({
+      type: 'critical',
+      category: 'health',
+      message: `Critical battery degradation: ${battery.batSOH}% SOH`,
+      impact: 30,
+      recommendation: 'Battery replacement required immediately. Performance and safety compromised.'
+    });
+  }
+
+  // 4. WARNING: Offline (24-48 hours)
+  if (battery.offlineDuration >= 24 && battery.offlineDuration <= 48) {
+    anomalies.push({
+      type: 'warning',
+      category: 'signal',
+      message: `No signal for ${battery.offlineDuration} hours`,
+      impact: 20,
+      recommendation: 'Check vehicle location and network coverage. Schedule maintenance if pattern continues.'
+    });
+  }
+
+  // 5. WARNING: Low SOH (65-75%)
+  if (battery.batSOH >= 65 && battery.batSOH < 75) {
+    anomalies.push({
+      type: 'warning',
+      category: 'health',
+      message: `Battery degradation detected: ${battery.batSOH}% SOH`,
+      impact: 20,
+      recommendation: 'Plan replacement within 1-2 months. Monitor closely for performance issues.'
+    });
+  }
+
+  // 6. WARNING: Moderate SOH (75-85%)
+  if (battery.batSOH >= 75 && battery.batSOH < 85) {
+    anomalies.push({
+      type: 'warning',
+      category: 'health',
+      message: `Moderate battery wear: ${battery.batSOH}% SOH`,
+      impact: 10,
+      recommendation: 'Continue monitoring. Consider replacement planning in 3-6 months.'
+    });
+  }
+
+  // 7. WARNING: High Cycle Count (>400)
+  if (battery.batCycleCount > 400) {
+    anomalies.push({
+      type: 'warning',
+      category: 'usage',
+      message: `High usage: ${battery.batCycleCount} charge cycles`,
+      impact: 15,
+      recommendation: 'Battery approaching end of life. Plan proactive replacement.'
+    });
+  }
+
+  // 8. WARNING: Excessive Distance per Cycle (>50km average)
+  if (battery.avgDistancePerCycle > 50) {
+    anomalies.push({
+      type: 'warning',
+      category: 'usage',
+      message: `Heavy usage pattern: ${battery.avgDistancePerCycle.toFixed(1)} km/cycle average`,
+      impact: 10,
+      recommendation: 'Monitor for accelerated degradation. Verify charging practices.'
+    });
+  }
+
+  // 9. INFO: Recent Signal Loss (12-24 hours)
+  if (battery.hoursSinceLastPulse >= 12 && battery.hoursSinceLastPulse < 24) {
+    anomalies.push({
+      type: 'info',
+      category: 'signal',
+      message: `Signal delayed: ${battery.hoursSinceLastPulse} hours since last pulse`,
+      impact: 5,
+      recommendation: 'Monitor signal stability. May be temporary connectivity issue.'
+    });
+  }
+
+  // 10. INFO: Low Distance Usage
+  if (battery.avgDistancePerCycle < 15 && battery.batCycleCount > 50) {
+    anomalies.push({
+      type: 'info',
+      category: 'usage',
+      message: `Low usage pattern: ${battery.avgDistancePerCycle.toFixed(1)} km/cycle average`,
+      impact: 3,
+      recommendation: 'Vehicle may be underutilized or used for short trips only.'
+    });
+  }
+
+  return anomalies;
+};
+
+const calculateHealthScore = (anomalies: Anomaly[]): number => {
+  const totalImpact = anomalies.reduce((sum, a) => sum + a.impact, 0);
+  const score = Math.max(0, 100 - totalImpact);
+  return Math.round(score);
+};
 
 // ============================================================================
 // MOCK DATA GENERATOR
@@ -89,7 +227,6 @@ const generateBatteryData = (): BatteryTelemetry[] => {
     (_, i) => `86520906951${9300 + i}`
   );
 
-  // Current time - data ingestion happens at 1 AM daily
   const now = new Date();
   const lastIngestion = new Date(now);
   lastIngestion.setHours(1, 0, 0, 0);
@@ -98,8 +235,7 @@ const generateBatteryData = (): BatteryTelemetry[] => {
   }
 
   return tboxIds.map((tboxId, i) => {
-    // Simulate various scenarios
-    const hoursSincePulse = Math.random() * 72; // 0-72 hours
+    const hoursSincePulse = Math.random() * 72;
     const isOnline = hoursSincePulse < 24;
     const hasError = Math.random() > 0.92;
 
@@ -114,7 +250,7 @@ const generateBatteryData = (): BatteryTelemetry[] => {
 
     const batSOH = Math.floor(65 + Math.random() * 35);
 
-    return {
+    const batteryBase = {
       bmsId: `BMS-${String(i + 1).padStart(4, "0")}`,
       tboxId,
       vehicleId:
@@ -134,7 +270,16 @@ const generateBatteryData = (): BatteryTelemetry[] => {
       totalDistanceTraveled: Math.floor(totalDistance),
       avgDistancePerCycle: Math.floor(avgDistancePerCycle),
       dataIngestionTime: lastIngestion,
-      status: hasError ? "error" : isOnline ? "online" : "offline",
+      status: (hasError ? "error" : isOnline ? "online" : "offline") as any,
+    };
+
+    const anomalies = detectAnomalies(batteryBase);
+    const healthScore = calculateHealthScore(anomalies);
+
+    return {
+      ...batteryBase,
+      anomalies,
+      healthScore,
     };
   });
 };
@@ -143,31 +288,59 @@ const generateBatteryData = (): BatteryTelemetry[] => {
 // UTILITY FUNCTIONS
 // ============================================================================
 
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case "online":
-      return "text-green-400 bg-green-500/10 border-green-500/20";
-    case "offline":
-      return "text-orange-400 bg-orange-500/10 border-orange-500/20";
-    case "error":
+const getScoreColor = (score: number) => {
+  if (score >= 80) return "text-green-400";
+  if (score >= 60) return "text-yellow-400";
+  if (score >= 40) return "text-orange-400";
+  return "text-red-400";
+};
+
+const getScoreBgColor = (score: number) => {
+  if (score >= 80) return "bg-green-500";
+  if (score >= 60) return "bg-yellow-500";
+  if (score >= 40) return "bg-orange-500";
+  return "bg-red-500";
+};
+
+const getAnomalyColor = (type: string) => {
+  switch (type) {
+    case "critical":
       return "text-red-400 bg-red-500/10 border-red-500/20";
+    case "warning":
+      return "text-orange-400 bg-orange-500/10 border-orange-500/20";
+    case "info":
+      return "text-blue-400 bg-blue-500/10 border-blue-500/20";
     default:
       return "text-slate-400 bg-slate-500/10 border-slate-500/20";
   }
 };
 
-const getSOHColor = (soh: number) => {
-  if (soh >= 85) return "text-green-400";
-  if (soh >= 75) return "text-yellow-400";
-  if (soh >= 65) return "text-orange-400";
-  return "text-red-400";
+const getAnomalyIcon = (type: string) => {
+  switch (type) {
+    case "critical":
+      return XCircle;
+    case "warning":
+      return AlertTriangle;
+    case "info":
+      return AlertCircle;
+    default:
+      return AlertCircle;
+  }
 };
 
-const getSOHBgColor = (soh: number) => {
-  if (soh >= 85) return "bg-green-500";
-  if (soh >= 75) return "bg-yellow-500";
-  if (soh >= 65) return "bg-orange-500";
-  return "bg-red-500";
+const getCategoryIcon = (category: string) => {
+  switch (category) {
+    case "signal":
+      return Radio;
+    case "health":
+      return Battery;
+    case "usage":
+      return TrendingUp;
+    case "error":
+      return Zap;
+    default:
+      return AlertCircle;
+  }
 };
 
 const formatDuration = (hours: number) => {
@@ -180,17 +353,6 @@ const formatDuration = (hours: number) => {
 
 const formatNumber = (num: number) =>
   new Intl.NumberFormat("en-US").format(Math.floor(num));
-
-const getStatusIcon = (status: string) => {
-  switch (status) {
-    case "online":
-      return CheckCircle;
-    case "error":
-      return XCircle;
-    default:
-      return Clock;
-  }
-};
 
 // ============================================================================
 // KPI CARD COMPONENT
@@ -226,19 +388,22 @@ const KPICard = ({
 // BATTERY CARD COMPONENT
 // ============================================================================
 
-const BatteryCard = ({ battery }: { battery: BatteryTelemetry }) => {
-  const StatusIcon = getStatusIcon(battery.status);
-  const isCharging = battery.batCurrent > 0;
-  const isDischarging = battery.batCurrent < 0;
+const BatteryCard = ({ battery, onClick }: { battery: BatteryTelemetry; onClick: () => void }) => {
+  const criticalAnomalies = battery.anomalies.filter(a => a.type === 'critical');
+  const warningAnomalies = battery.anomalies.filter(a => a.type === 'warning');
+  const infoAnomalies = battery.anomalies.filter(a => a.type === 'info');
 
   return (
-    <Card className="border-slate-800 hover:border-slate-700 transition-all duration-200 group">
+    <Card 
+      className="border-slate-800 hover:border-slate-600 transition-all duration-200 group cursor-pointer"
+      onClick={onClick}
+    >
       <CardContent className="p-6">
-        {/* Header */}
+        {/* Header with Health Score */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="p-2 bg-slate-800 rounded-lg flex-shrink-0">
-              <Battery className="h-4 w-4 text-slate-400" />
+              <Shield className={`h-5 w-5 ${getScoreColor(battery.healthScore)}`} />
             </div>
             <div className="min-w-0 flex-1">
               <h3 className="text-slate-200 font-semibold text-lg break-all">
@@ -247,93 +412,58 @@ const BatteryCard = ({ battery }: { battery: BatteryTelemetry }) => {
               <p className="text-slate-400 text-sm font-mono break-all">
                 {battery.tboxId}
               </p>
-              {battery.vehicleId && (
-                <p className="text-slate-500 text-xs">{battery.vehicleId}</p>
-              )}
             </div>
           </div>
           <div className="flex flex-col items-end gap-2 flex-shrink-0 ml-2">
-            <Badge
-              className={`${getStatusColor(
-                battery.status
-              )} flex items-center gap-1.5 px-2.5 py-1`}
-            >
-              <StatusIcon className="h-3 w-3" />
-              {battery.status}
-            </Badge>
-          </div>
-        </div>
-
-        {/* Signal Status */}
-        <div className="bg-slate-800/30 rounded-lg p-3 mb-4 border border-slate-700/30">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-slate-400 text-xs flex items-center gap-1">
-              <Radio className="w-3 h-3" />
-              BMS Signal Status
-            </span>
-            <Badge
-              className={
-                battery.isOnline
-                  ? "bg-green-500/10 text-green-400 border-green-500/20"
-                  : "bg-orange-500/10 text-orange-400 border-orange-500/20"
-              }
-            >
-              {battery.isOnline ? "Transmitting" : "No Signal"}
-            </Badge>
-          </div>
-          <div className="space-y-1 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-500">Last Pulse:</span>
-              <span className="text-slate-300">
-                {battery.lastPulseTime.toLocaleString()}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">Time Since Pulse:</span>
-              <span
-                className={
-                  battery.hoursSinceLastPulse > 24
-                    ? "text-orange-400"
-                    : "text-slate-300"
-                }
-              >
-                {formatDuration(battery.hoursSinceLastPulse)}
-              </span>
-            </div>
-            {!battery.isOnline && (
-              <div className="flex justify-between">
-                <span className="text-slate-500">Offline Duration:</span>
-                <span className="text-red-400">
-                  {formatDuration(battery.offlineDuration)}
-                </span>
+            <div className="text-right">
+              <div className={`text-2xl font-bold ${getScoreColor(battery.healthScore)}`}>
+                {battery.healthScore}
               </div>
-            )}
+              <div className="text-xs text-slate-500">Health Score</div>
+            </div>
           </div>
         </div>
 
-        {/* SOH - Main Health Indicator */}
+        {/* Health Score Bar */}
         <div className="mb-4">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-slate-400 text-xs flex items-center gap-1">
-              <Gauge className="w-3 h-3" />
-              State of Health (SOH)
-            </span>
-            <span
-              className={`font-bold text-sm ${getSOHColor(battery.batSOH)}`}
-            >
-              {battery.batSOH}%
-            </span>
-          </div>
           <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
             <div
-              className={`h-full ${getSOHBgColor(battery.batSOH)}`}
-              style={{ width: `${battery.batSOH}%` }}
+              className={`h-full ${getScoreBgColor(battery.healthScore)}`}
+              style={{ width: `${battery.healthScore}%` }}
             />
           </div>
         </div>
 
-        {/* Distance Metrics */}
-        <div className="bg-slate-800/50 rounded-lg p-3 mb-4 border border-slate-700/30">
+        {/* Anomaly Summary */}
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          {criticalAnomalies.length > 0 && (
+            <Badge className="bg-red-500/10 text-red-400 border-red-500/20">
+              <XCircle className="w-3 h-3 mr-1" />
+              {criticalAnomalies.length} Critical
+            </Badge>
+          )}
+          {warningAnomalies.length > 0 && (
+            <Badge className="bg-orange-500/10 text-orange-400 border-orange-500/20">
+              <AlertTriangle className="w-3 h-3 mr-1" />
+              {warningAnomalies.length} Warning
+            </Badge>
+          )}
+          {infoAnomalies.length > 0 && (
+            <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+              <AlertCircle className="w-3 h-3 mr-1" />
+              {infoAnomalies.length} Info
+            </Badge>
+          )}
+          {battery.anomalies.length === 0 && (
+            <Badge className="bg-green-500/10 text-green-400 border-green-500/20">
+              <CheckCircle className="w-3 h-3 mr-1" />
+              No Issues
+            </Badge>
+          )}
+        </div>
+
+        {/* Usage Metrics */}
+        <div className="bg-slate-800/30 rounded-lg p-3 mb-4 border border-slate-700/30">
           <div className="text-xs text-slate-400 mb-2 flex items-center gap-1">
             <TrendingUp className="w-3 h-3" />
             Usage Metrics
@@ -346,15 +476,15 @@ const BatteryCard = ({ battery }: { battery: BatteryTelemetry }) => {
               </p>
             </div>
             <div>
-              <p className="text-slate-400 text-xs">Avg per Cycle</p>
-              <p className="text-slate-200 text-sm font-medium">
-                {battery.avgDistancePerCycle.toFixed(1)} km
-              </p>
-            </div>
-            <div>
               <p className="text-slate-400 text-xs">Total Cycles</p>
               <p className="text-slate-200 text-sm font-medium">
                 {formatNumber(battery.batCycleCount)}
+              </p>
+            </div>
+            <div>
+              <p className="text-slate-400 text-xs">Avg per Cycle</p>
+              <p className="text-slate-200 text-sm font-medium">
+                {battery.avgDistancePerCycle.toFixed(1)} km
               </p>
             </div>
             <div>
@@ -366,94 +496,235 @@ const BatteryCard = ({ battery }: { battery: BatteryTelemetry }) => {
           </div>
         </div>
 
-        {/* Current Readings */}
-        <div className="space-y-3 mb-4">
-          {/* Voltage */}
-          <div className="flex items-center justify-between py-2 px-3 bg-slate-800/50 rounded-lg">
-            <div className="flex items-center gap-2">
-              <Zap className="h-4 w-4 text-yellow-400" />
-              <span className="text-slate-300 text-sm">Voltage</span>
-            </div>
-            <span className="text-slate-200 font-medium text-sm">
-              {battery.batVolt.toFixed(1)}V
-            </span>
-          </div>
-
-          {/* Current */}
-          <div className="flex items-center justify-between py-2 px-3 bg-slate-800/50 rounded-lg">
-            <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-purple-400" />
-              <span className="text-slate-300 text-sm">Current</span>
-            </div>
-            <span
-              className={`font-medium text-sm ${
-                isCharging
-                  ? "text-green-400"
-                  : isDischarging
-                  ? "text-orange-400"
-                  : "text-slate-200"
-              }`}
-            >
-              {battery.batCurrent.toFixed(1)}A
-              {isCharging && <span className="text-xs ml-1">⚡</span>}
-              {isDischarging && <span className="text-xs ml-1">↓</span>}
-            </span>
-          </div>
-
-          {/* Temperature */}
-          <div className="flex items-center justify-between py-2 px-3 bg-slate-800/50 rounded-lg">
-            <div className="flex items-center gap-2">
-              <ThermometerSun className="h-4 w-4 text-orange-400" />
-              <span className="text-slate-300 text-sm">Temperature</span>
-            </div>
-            <span
-              className={`font-medium text-sm ${
-                battery.batTemp > 40
-                  ? "text-red-400"
-                  : battery.batTemp > 35
-                  ? "text-orange-400"
-                  : "text-slate-200"
-              }`}
-            >
-              {battery.batTemp.toFixed(1)}°C
-            </span>
-          </div>
-        </div>
-
-        {/* Alerts */}
-        {(battery.batSOH < 75 ||
-          battery.batTemp > 40 ||
-          !battery.isOnline ||
-          battery.batteryError) && (
-          <div className="mt-3 p-2 bg-orange-500/10 border border-orange-500/20 rounded text-xs text-orange-400">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-              <div className="space-y-1">
-                {battery.batSOH < 75 && (
-                  <div>• Low SOH: {battery.batSOH}% - Consider replacement</div>
-                )}
-                {battery.batTemp > 40 && (
-                  <div>• High temperature: {battery.batTemp.toFixed(1)}°C</div>
-                )}
-                {!battery.isOnline && (
-                  <div>
-                    • No signal for {formatDuration(battery.offlineDuration)} -
-                    Check BMS connectivity
+        {/* Top Anomalies */}
+        {battery.anomalies.length > 0 && (
+          <div className="space-y-2">
+            {battery.anomalies.slice(0, 2).map((anomaly, idx) => {
+              const AnomalyIcon = getAnomalyIcon(anomaly.type);
+              const CategoryIcon = getCategoryIcon(anomaly.category);
+              
+              return (
+                <div
+                  key={idx}
+                  className={`p-3 rounded-lg border ${getAnomalyColor(anomaly.type)}`}
+                >
+                  <div className="flex items-start gap-2">
+                    <AnomalyIcon className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <CategoryIcon className="w-3 h-3" />
+                        <span className="text-xs font-medium uppercase tracking-wide">
+                          {anomaly.category}
+                        </span>
+                      </div>
+                      <p className="text-sm font-medium">{anomaly.message}</p>
+                    </div>
                   </div>
-                )}
-                {battery.batteryError && <div>• {battery.batteryError}</div>}
-              </div>
-            </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {/* Data Ingestion Info */}
-        <div className="mt-3 pt-3 border-t border-slate-700/50 text-xs text-slate-500">
-          Data ingested: {battery.dataIngestionTime.toLocaleString()} (Daily at
-          1 AM)
+        {/* View Details Button */}
+        <div className="mt-4 pt-4 border-t border-slate-700/50">
+          <button className="w-full flex items-center justify-between text-slate-400 hover:text-cyan-400 transition-colors text-sm group">
+            <span>View Full Details & Recommendations</span>
+            <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+          </button>
+        </div>
+
+        {/* Last Update */}
+        <div className="mt-3 text-xs text-slate-500">
+          Last update: {battery.dataIngestionTime.toLocaleString()}
         </div>
       </CardContent>
     </Card>
+  );
+};
+
+// ============================================================================
+// DETAIL MODAL
+// ============================================================================
+
+const BatteryDetailModal = ({ battery, onClose }: { battery: BatteryTelemetry; onClose: () => void }) => {
+  if (!battery) return null;
+
+  return (
+    <div 
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <Card 
+        className="bg-slate-900 border-slate-700 max-w-4xl w-full max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800 hover:scrollbar-thumb-slate-500"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <CardHeader className="border-b border-slate-700">
+          <div className="flex items-start justify-between">
+            <div>
+              <CardTitle className="text-2xl text-slate-100 mb-2">
+                {battery.bmsId}
+              </CardTitle>
+              <p className="text-slate-400 font-mono">{battery.tboxId}</p>
+              {battery.vehicleId && (
+                <p className="text-slate-500 text-sm">{battery.vehicleId}</p>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-200"
+            >
+              <X className="w-5 h-5" />
+            </Button>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-6 space-y-6">
+          {/* Health Score Section */}
+          <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
+                <Shield className={`w-5 h-5 ${getScoreColor(battery.healthScore)}`} />
+                Overall Health Score
+              </h3>
+              <div className={`text-4xl font-bold ${getScoreColor(battery.healthScore)}`}>
+                {battery.healthScore}
+              </div>
+            </div>
+            <div className="w-full h-3 bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className={`h-full ${getScoreBgColor(battery.healthScore)}`}
+                style={{ width: `${battery.healthScore}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-400 mt-2">
+              Score calculated based on {battery.anomalies.length} detected anomalies
+            </p>
+          </div>
+
+          {/* Technical Metrics */}
+          <div>
+            <h3 className="text-lg font-semibold text-slate-200 mb-3">Technical Metrics</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+                <p className="text-slate-400 text-xs mb-1">Battery Voltage</p>
+                <p className="text-slate-200 text-lg font-semibold">{battery.batVolt.toFixed(1)}V</p>
+              </div>
+              <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+                <p className="text-slate-400 text-xs mb-1">Current</p>
+                <p className="text-slate-200 text-lg font-semibold">{battery.batCurrent.toFixed(1)}A</p>
+              </div>
+              <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+                <p className="text-slate-400 text-xs mb-1">Temperature</p>
+                <p className="text-slate-200 text-lg font-semibold">{battery.batTemp.toFixed(1)}°C</p>
+              </div>
+              <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+                <p className="text-slate-400 text-xs mb-1">State of Health</p>
+                <p className={`text-lg font-semibold ${getScoreColor(battery.batSOH)}`}>
+                  {battery.batSOH}%
+                </p>
+              </div>
+              <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+                <p className="text-slate-400 text-xs mb-1">Charge Cycles</p>
+                <p className="text-slate-200 text-lg font-semibold">{formatNumber(battery.batCycleCount)}</p>
+              </div>
+              <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+                <p className="text-slate-400 text-xs mb-1">Total Distance</p>
+                <p className="text-slate-200 text-lg font-semibold">{formatNumber(battery.totalDistanceTraveled)} km</p>
+              </div>
+              <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+                <p className="text-slate-400 text-xs mb-1">Avg Distance/Cycle</p>
+                <p className="text-slate-200 text-lg font-semibold">{battery.avgDistancePerCycle.toFixed(1)} km</p>
+              </div>
+              <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30">
+                <p className="text-slate-400 text-xs mb-1">Signal Status</p>
+                <p className={`text-lg font-semibold ${battery.isOnline ? 'text-green-400' : 'text-red-400'}`}>
+                  {battery.isOnline ? 'Online' : 'Offline'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Signal Information */}
+          <div>
+            <h3 className="text-lg font-semibold text-slate-200 mb-3">Signal Information</h3>
+            <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700/30 space-y-2">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Last Pulse Received:</span>
+                <span className="text-slate-200">{battery.lastPulseTime.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Time Since Last Pulse:</span>
+                <span className={battery.hoursSinceLastPulse > 24 ? 'text-orange-400' : 'text-slate-200'}>
+                  {formatDuration(battery.hoursSinceLastPulse)}
+                </span>
+              </div>
+              {!battery.isOnline && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Offline Duration:</span>
+                  <span className="text-red-400">{formatDuration(battery.offlineDuration)}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Anomalies & Recommendations */}
+          <div>
+            <h3 className="text-lg font-semibold text-slate-200 mb-3">
+              Detected Anomalies & Recommendations
+            </h3>
+            {battery.anomalies.length === 0 ? (
+              <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 text-center">
+                <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-2" />
+                <p className="text-green-400 font-medium">No anomalies detected</p>
+                <p className="text-slate-400 text-sm mt-1">Battery operating within normal parameters</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {battery.anomalies.map((anomaly, idx) => {
+                  const AnomalyIcon = getAnomalyIcon(anomaly.type);
+                  const CategoryIcon = getCategoryIcon(anomaly.category);
+                  
+                  return (
+                    <div
+                      key={idx}
+                      className={`rounded-lg border p-4 ${getAnomalyColor(anomaly.type)}`}
+                    >
+                      <div className="flex items-start gap-3 mb-3">
+                        <AnomalyIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <CategoryIcon className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wide">
+                              {anomaly.category}
+                            </span>
+                            <Badge className={getAnomalyColor(anomaly.type)}>
+                              {anomaly.type}
+                            </Badge>
+                            <span className="text-xs ml-auto">
+                              Impact: -{anomaly.impact} points
+                            </span>
+                          </div>
+                          <p className="font-medium mb-2">{anomaly.message}</p>
+                          <div className="bg-slate-900/50 rounded p-3 mt-2">
+                            <p className="text-xs font-semibold mb-1 opacity-80">
+                              💡 Recommendation:
+                            </p>
+                            <p className="text-sm">{anomaly.recommendation}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 
@@ -472,17 +743,17 @@ const BatteryFilter = ({ onFiltersChange, loading, filters }: any) => {
   const clearAllFilters = useCallback(() => {
     onFiltersChange({
       searchTerm: "",
-      selectedStatuses: [],
-      sohRange: "all",
-      sortBy: "soh-asc",
+      selectedSeverities: [],
+      scoreRange: "all",
+      sortBy: "score-asc",
     });
   }, [onFiltersChange]);
 
   const getActiveFiltersCount = () => {
     let count = 0;
     if (filters.searchTerm) count++;
-    if (filters.selectedStatuses.length > 0) count++;
-    if (filters.sohRange !== "all") count++;
+    if (filters.selectedSeverities.length > 0) count++;
+    if (filters.scoreRange !== "all") count++;
     return count;
   };
 
@@ -538,42 +809,42 @@ const BatteryFilter = ({ onFiltersChange, loading, filters }: any) => {
 
         {/* Main Filters */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Status */}
+          {/* Severity */}
           <div className="space-y-2">
-            <Label className="text-slate-300">Status</Label>
+            <Label className="text-slate-300">Anomaly Severity</Label>
             <Select
               onValueChange={(value) =>
-                handleArrayFilterChange("selectedStatuses", value, true)
+                handleArrayFilterChange("selectedSeverities", value, true)
               }
               disabled={loading}
             >
               <SelectTrigger className="bg-slate-800 border-slate-600 text-slate-200">
                 <SelectValue
                   placeholder={
-                    filters.selectedStatuses.length > 0
-                      ? `${filters.selectedStatuses.length} selected`
-                      : "All statuses"
+                    filters.selectedSeverities.length > 0
+                      ? `${filters.selectedSeverities.length} selected`
+                      : "All severities"
                   }
                 />
               </SelectTrigger>
               <SelectContent>
-                {["online", "offline", "error"]
-                  .filter((s) => !filters.selectedStatuses.includes(s))
-                  .map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {status}
+                {["critical", "warning", "info"]
+                  .filter((s) => !filters.selectedSeverities.includes(s))
+                  .map((severity) => (
+                    <SelectItem key={severity} value={severity}>
+                      {severity}
                     </SelectItem>
                   ))}
               </SelectContent>
             </Select>
             <div className="flex flex-wrap gap-1">
-              {filters.selectedStatuses.map((status: string) => (
-                <Badge key={status} variant="secondary" className="text-xs">
-                  {status}
+              {filters.selectedSeverities.map((severity: string) => (
+                <Badge key={severity} variant="secondary" className="text-xs">
+                  {severity}
                   <X
                     className="h-3 w-3 ml-1 cursor-pointer"
                     onClick={() =>
-                      handleArrayFilterChange("selectedStatuses", status, false)
+                      handleArrayFilterChange("selectedSeverities", severity, false)
                     }
                   />
                 </Badge>
@@ -581,22 +852,22 @@ const BatteryFilter = ({ onFiltersChange, loading, filters }: any) => {
             </div>
           </div>
 
-          {/* SOH Range */}
+          {/* Health Score Range */}
           <div className="space-y-2">
-            <Label className="text-slate-300">SOH Range</Label>
+            <Label className="text-slate-300">Health Score</Label>
             <Select
-              value={filters.sohRange}
-              onValueChange={(value) => updateFilters({ sohRange: value })}
+              value={filters.scoreRange}
+              onValueChange={(value) => updateFilters({ scoreRange: value })}
             >
               <SelectTrigger className="bg-slate-800 border-slate-600 text-slate-200">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All SOH</SelectItem>
-                <SelectItem value="healthy">Healthy (≥85%)</SelectItem>
-                <SelectItem value="acceptable">Acceptable (75-84%)</SelectItem>
-                <SelectItem value="degraded">Degraded (65-74%)</SelectItem>
-                <SelectItem value="critical">Critical (&lt;65%)</SelectItem>
+                <SelectItem value="all">All Scores</SelectItem>
+                <SelectItem value="critical">Critical (&lt;40)</SelectItem>
+                <SelectItem value="poor">Poor (40-59)</SelectItem>
+                <SelectItem value="fair">Fair (60-79)</SelectItem>
+                <SelectItem value="good">Good (≥80)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -612,12 +883,14 @@ const BatteryFilter = ({ onFiltersChange, loading, filters }: any) => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="soh-asc">SOH (Low to High)</SelectItem>
-                <SelectItem value="soh-desc">SOH (High to Low)</SelectItem>
-                <SelectItem value="offline-desc">Longest Offline</SelectItem>
-                <SelectItem value="pulse-asc">Oldest Pulse</SelectItem>
+                <SelectItem value="score-asc">Health Score (Low to High)</SelectItem>
+                <SelectItem value="score-desc">Health Score (High to Low)</SelectItem>
+                <SelectItem value="anomalies-desc">Most Anomalies</SelectItem>
+                <SelectItem value="critical-desc">Most Critical Issues</SelectItem>
                 <SelectItem value="cycles-desc">Most Cycles</SelectItem>
                 <SelectItem value="distance-desc">Most Distance</SelectItem>
+                <SelectItem value="avg-distance-desc">Highest km/Cycle</SelectItem>
+                <SelectItem value="avg-distance-asc">Lowest km/Cycle</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -634,13 +907,13 @@ const BatteryFilter = ({ onFiltersChange, loading, filters }: any) => {
 const BatteryTelemetryDashboard = () => {
   const [batteries, setBatteries] = useState<BatteryTelemetry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState(new Date());
+  const [selectedBattery, setSelectedBattery] = useState<BatteryTelemetry | null>(null);
 
   const [filters, setFilters] = useState<FilterState>({
     searchTerm: "",
-    selectedStatuses: [],
-    sohRange: "all",
-    sortBy: "soh-asc",
+    selectedSeverities: [],
+    scoreRange: "all",
+    sortBy: "score-asc",
   });
 
   // Load data
@@ -652,41 +925,37 @@ const BatteryTelemetryDashboard = () => {
     setLoading(true);
     setTimeout(() => {
       setBatteries(generateBatteryData());
-      setLastRefresh(new Date());
       setLoading(false);
     }, 500);
   };
 
   // Calculate KPIs
   const kpis: BatteryKPIs = useMemo(() => {
+    const criticalBatteries = batteries.filter(b => b.healthScore < 40);
+    const warningBatteries = batteries.filter(b => b.healthScore >= 40 && b.healthScore < 80);
+    const healthyBatteries = batteries.filter(b => b.healthScore >= 80);
+    const totalAnomalies = batteries.reduce((sum, b) => sum + b.anomalies.length, 0);
+    const avgScore = batteries.length > 0
+      ? batteries.reduce((sum, b) => sum + b.healthScore, 0) / batteries.length
+      : 0;
+    const totalDistance = batteries.reduce((sum, b) => sum + b.totalDistanceTraveled, 0);
+    const avgCycles = batteries.length > 0
+      ? batteries.reduce((sum, b) => sum + b.batCycleCount, 0) / batteries.length
+      : 0;
+    const avgDistPerCycle = batteries.length > 0
+      ? batteries.reduce((sum, b) => sum + b.avgDistancePerCycle, 0) / batteries.length
+      : 0;
+
     return {
       TOTAL_BMS: batteries.length,
-      ONLINE_BMS: batteries.filter((b) => b.isOnline).length,
-      OFFLINE_BMS: batteries.filter((b) => !b.isOnline && !b.batteryError)
-        .length,
-      ERROR_BMS: batteries.filter((b) => b.batteryError).length,
-      HEALTHY_BMS: batteries.filter((b) => b.batSOH >= 85 && b.isOnline).length,
-      DEGRADED_BMS: batteries.filter((b) => b.batSOH < 75).length,
-      AVG_SOH:
-        batteries.length > 0
-          ? Number(
-              (
-                batteries.reduce((sum, b) => sum + b.batSOH, 0) /
-                batteries.length
-              ).toFixed(1)
-            )
-          : 0,
-      TOTAL_DISTANCE: batteries.reduce(
-        (sum, b) => sum + b.totalDistanceTraveled,
-        0
-      ),
-      AVG_CYCLES:
-        batteries.length > 0
-          ? Math.floor(
-              batteries.reduce((sum, b) => sum + b.batCycleCount, 0) /
-                batteries.length
-            )
-          : 0,
+      CRITICAL_BMS: criticalBatteries.length,
+      WARNING_BMS: warningBatteries.length,
+      HEALTHY_BMS: healthyBatteries.length,
+      AVG_HEALTH_SCORE: Math.round(avgScore),
+      TOTAL_ANOMALIES: totalAnomalies,
+      TOTAL_DISTANCE: totalDistance,
+      AVG_CYCLES: Math.round(avgCycles),
+      AVG_DISTANCE_PER_CYCLE: avgDistPerCycle,
     };
   }, [batteries]);
 
@@ -705,45 +974,50 @@ const BatteryTelemetryDashboard = () => {
             .toLowerCase()
             .includes(filters.searchTerm.toLowerCase()));
 
-      const matchesStatus =
-        filters.selectedStatuses.length === 0 ||
-        filters.selectedStatuses.includes(battery.status);
+      const matchesSeverity =
+        filters.selectedSeverities.length === 0 ||
+        battery.anomalies.some(a => filters.selectedSeverities.includes(a.type));
 
-      const matchesSOH = (() => {
-        if (filters.sohRange === "all") return true;
-        const soh = battery.batSOH;
-        switch (filters.sohRange) {
-          case "healthy":
-            return soh >= 85;
-          case "acceptable":
-            return soh >= 75 && soh < 85;
-          case "degraded":
-            return soh >= 65 && soh < 75;
+      const matchesScore = (() => {
+        if (filters.scoreRange === "all") return true;
+        const score = battery.healthScore;
+        switch (filters.scoreRange) {
           case "critical":
-            return soh < 65;
+            return score < 40;
+          case "poor":
+            return score >= 40 && score < 60;
+          case "fair":
+            return score >= 60 && score < 80;
+          case "good":
+            return score >= 80;
           default:
             return true;
         }
       })();
 
-      return matchesSearch && matchesStatus && matchesSOH;
+      return matchesSearch && matchesSeverity && matchesScore;
     });
 
     // Sort
     filtered.sort((a, b) => {
       switch (filters.sortBy) {
-        case "soh-asc":
-          return a.batSOH - b.batSOH;
-        case "soh-desc":
-          return b.batSOH - a.batSOH;
-        case "offline-desc":
-          return b.offlineDuration - a.offlineDuration;
-        case "pulse-asc":
-          return b.hoursSinceLastPulse - a.hoursSinceLastPulse;
+        case "score-asc":
+          return a.healthScore - b.healthScore;
+        case "score-desc":
+          return b.healthScore - a.healthScore;
+        case "anomalies-desc":
+          return b.anomalies.length - a.anomalies.length;
+        case "critical-desc":
+          return b.anomalies.filter(an => an.type === 'critical').length - 
+                 a.anomalies.filter(an => an.type === 'critical').length;
         case "cycles-desc":
           return b.batCycleCount - a.batCycleCount;
         case "distance-desc":
           return b.totalDistanceTraveled - a.totalDistanceTraveled;
+        case "avg-distance-desc":
+          return b.avgDistancePerCycle - a.avgDistancePerCycle;
+        case "avg-distance-asc":
+          return a.avgDistancePerCycle - b.avgDistancePerCycle;
         default:
           return a.bmsId.localeCompare(b.bmsId);
       }
@@ -758,40 +1032,38 @@ const BatteryTelemetryDashboard = () => {
       "BMS ID",
       "T-Box ID",
       "Vehicle ID",
-      "Status",
-      "Is Online",
-      "Last Pulse Time",
-      "Hours Since Pulse",
-      "Offline Duration (hours)",
+      "Health Score",
+      "Total Anomalies",
+      "Critical Anomalies",
+      "Warning Anomalies",
+      "Info Anomalies",
       "SOH %",
-      "Voltage",
-      "Current",
-      "Temperature",
+      "Signal Status",
+      "Hours Since Pulse",
+      "Offline Duration",
       "Cycles",
       "Total Distance (km)",
-      "Avg Distance/Cycle",
-      "Data Ingestion Time",
-      "Error",
+      "Top Anomaly",
+      "Top Recommendation",
     ];
 
     const rows = filteredBatteries.map((b) => [
       b.bmsId,
       b.tboxId,
       b.vehicleId || "",
-      b.status,
-      b.isOnline ? "Yes" : "No",
-      b.lastPulseTime.toISOString(),
+      b.healthScore,
+      b.anomalies.length,
+      b.anomalies.filter(a => a.type === 'critical').length,
+      b.anomalies.filter(a => a.type === 'warning').length,
+      b.anomalies.filter(a => a.type === 'info').length,
+      b.batSOH,
+      b.isOnline ? "Online" : "Offline",
       b.hoursSinceLastPulse,
       b.offlineDuration,
-      b.batSOH,
-      b.batVolt.toFixed(1),
-      b.batCurrent.toFixed(1),
-      b.batTemp.toFixed(1),
       b.batCycleCount,
       b.totalDistanceTraveled,
-      b.avgDistancePerCycle.toFixed(1),
-      b.dataIngestionTime.toISOString(),
-      b.batteryError,
+      b.anomalies[0]?.message || "No anomalies",
+      b.anomalies[0]?.recommendation || "N/A",
     ]);
 
     const csvContent = [headers, ...rows]
@@ -804,8 +1076,10 @@ const BatteryTelemetryDashboard = () => {
     link.href = url;
     link.setAttribute(
       "download",
-      `bms_monitoring_${new Date().toISOString().split("T")[0]}.csv`
+      `bms_anomaly_report_${new Date().toISOString().split("T")[0]}.csv`
     );
+    document.body.appendChild(link);
+    link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
@@ -815,7 +1089,7 @@ const BatteryTelemetryDashboard = () => {
       <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-6 flex items-center justify-center">
         <div className="flex items-center gap-3 text-cyan-400">
           <RefreshCw className="w-6 h-6 animate-spin" />
-          <span className="text-lg">Loading BMS monitoring data...</span>
+          <span className="text-lg">Loading BMS anomaly data...</span>
         </div>
       </div>
     );
@@ -823,25 +1097,39 @@ const BatteryTelemetryDashboard = () => {
 
   return (
     <div className="min-h-screen">
+      <style>{`
+        .scrollbar-thin::-webkit-scrollbar {
+          width: 8px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-track {
+          background: rgb(30 41 59);
+          border-radius: 4px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+          background: rgb(71 85 105);
+          border-radius: 4px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+          background: rgb(100 116 139);
+        }
+      `}</style>
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="text-center space-y-4">
-          <div className="inline-flex items-center px-4 py-2 bg-cyan-500/10 border border-cyan-500/20 rounded-full">
-            <Radio className="h-4 w-4 text-cyan-400 mr-2" />
+          <div className="inline-flex items-center gap-2 px-4 py-2 border border-cyan-500/20 rounded-full">
+            <Shield className="h-4 w-4 text-cyan-400" />
             <span className="text-cyan-400 text-sm font-medium">
-              BMS Signal Monitoring System
+              Anomaly Detection System
             </span>
           </div>
           <h1 className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">
-            Battery Management System Dashboard
+            BMS Health Monitoring Dashboard
           </h1>
           <p className="text-xl text-slate-400 max-w-2xl mx-auto">
-            Monitor BMS signal health, battery performance, and identify units
-            requiring attention
+            AI-powered anomaly detection and health scoring for proactive battery management
           </p>
           <p className="text-sm text-slate-500">
-            Last data ingestion: Today at 1:00 AM • Next update: Tomorrow at
-            1:00 AM
+            Data as of today at 1:00 AM • Batteries ranked by health score
           </p>
         </div>
 
@@ -851,63 +1139,55 @@ const BatteryTelemetryDashboard = () => {
             icon={Battery}
             label="Total BMS Units"
             value={formatNumber(kpis.TOTAL_BMS)}
-            description="All tracked batteries"
+            description="All monitored"
             color="text-blue-400"
             loading={loading}
           />
           <KPICard
-            icon={CheckCircle}
-            label="Online"
-            value={formatNumber(kpis.ONLINE_BMS)}
-            description="Transmitting signals"
-            color="text-green-400"
-            loading={loading}
-          />
-          <KPICard
-            icon={Clock}
-            label="Offline"
-            value={formatNumber(kpis.OFFLINE_BMS)}
-            description="No signal >24h"
-            color="text-orange-400"
-            loading={loading}
-          />
-          <KPICard
             icon={XCircle}
-            label="Errors"
-            value={formatNumber(kpis.ERROR_BMS)}
-            description="Communication errors"
+            label="Critical"
+            value={formatNumber(kpis.CRITICAL_BMS)}
+            description="Score < 40"
             color="text-red-400"
             loading={loading}
           />
           <KPICard
-            icon={Activity}
-            label="Healthy"
-            value={formatNumber(kpis.HEALTHY_BMS)}
-            description="SOH ≥85%, online"
-            color="text-emerald-400"
+            icon={AlertTriangle}
+            label="Warning"
+            value={formatNumber(kpis.WARNING_BMS)}
+            description="Score 40-79"
+            color="text-orange-400"
             loading={loading}
           />
           <KPICard
-            icon={AlertTriangle}
-            label="Degraded"
-            value={formatNumber(kpis.DEGRADED_BMS)}
-            description="SOH <75%"
-            color="text-yellow-400"
+            icon={CheckCircle}
+            label="Healthy"
+            value={formatNumber(kpis.HEALTHY_BMS)}
+            description="Score ≥ 80"
+            color="text-green-400"
             loading={loading}
           />
           <KPICard
             icon={Gauge}
-            label="Avg SOH"
-            value={`${kpis.AVG_SOH}%`}
-            description="Fleet health average"
+            label="Avg Health Score"
+            value={kpis.AVG_HEALTH_SCORE}
+            description="Fleet average"
             color="text-cyan-400"
             loading={loading}
           />
           <KPICard
+            icon={Activity}
+            label="Total Anomalies"
+            value={formatNumber(kpis.TOTAL_ANOMALIES)}
+            description="Detected issues"
+            color="text-purple-400"
+            loading={loading}
+          />
+          <KPICard
             icon={TrendingUp}
-            label="Total Distance"
+            label="Fleet Distance"
             value={`${formatNumber(kpis.TOTAL_DISTANCE)} km`}
-            description="Cumulative fleet"
+            description="Total traveled"
             color="text-indigo-400"
             loading={loading}
           />
@@ -915,48 +1195,39 @@ const BatteryTelemetryDashboard = () => {
             icon={RefreshCw}
             label="Avg Cycles"
             value={formatNumber(kpis.AVG_CYCLES)}
-            description="Fleet average"
+            description="Per battery"
             color="text-pink-400"
+            loading={loading}
+          />
+          <KPICard
+            icon={Gauge}
+            label="Avg Distance/Cycle"
+            value={`${kpis.AVG_DISTANCE_PER_CYCLE.toFixed(1)} km`}
+            description="Usage intensity"
+            color="text-emerald-400"
             loading={loading}
           />
         </div>
 
-        {/* Business Insights */}
-        <Card className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border-blue-500/20">
+        {/* Priority Actions */}
+        <Card className="bg-gradient-to-r from-red-500/10 to-orange-500/10 border-red-500/20">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
-              <AlertTriangle className="h-5 w-5 text-blue-400 flex-shrink-0 mt-0.5" />
+              <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
               <div className="space-y-2">
-                <h3 className="text-slate-200 font-semibold">
-                  Business Action Items
-                </h3>
+                <h3 className="text-slate-200 font-semibold">Priority Actions Required</h3>
                 <div className="text-sm text-slate-300 space-y-1">
                   <p>
-                    •{" "}
-                    <strong className="text-orange-400">
-                      {kpis.OFFLINE_BMS}
-                    </strong>{" "}
-                    BMS units offline - Check connectivity and schedule
-                    maintenance
+                    • <strong className="text-red-400">{kpis.CRITICAL_BMS}</strong> batteries require immediate attention (Health Score &lt; 40)
                   </p>
                   <p>
-                    • <strong className="text-red-400">{kpis.ERROR_BMS}</strong>{" "}
-                    BMS units reporting errors - Immediate investigation
-                    required
+                    • <strong className="text-orange-400">{kpis.WARNING_BMS}</strong> batteries showing warning signs - plan maintenance
                   </p>
                   <p>
-                    •{" "}
-                    <strong className="text-yellow-400">
-                      {kpis.DEGRADED_BMS}
-                    </strong>{" "}
-                    batteries with SOH &lt;75% - Plan for replacement
+                    • <strong className="text-cyan-400">{kpis.TOTAL_ANOMALIES}</strong> total anomalies detected across fleet
                   </p>
-                  <p>
-                    •{" "}
-                    <strong className="text-green-400">
-                      {kpis.HEALTHY_BMS}
-                    </strong>{" "}
-                    healthy units ready for deployment
+                  <p className="text-slate-400 text-xs mt-2">
+                    💡 Batteries are sorted by health score (lowest first) to help you prioritize interventions
                   </p>
                 </div>
               </div>
@@ -972,7 +1243,7 @@ const BatteryTelemetryDashboard = () => {
         />
 
         {/* Results and Actions */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <p className="text-slate-400">
             Showing{" "}
             <span className="text-cyan-400 font-medium">
@@ -992,7 +1263,7 @@ const BatteryTelemetryDashboard = () => {
               disabled={filteredBatteries.length === 0}
             >
               <Download className="w-4 h-4 mr-2" />
-              Export CSV
+              Export Report
             </Button>
             <Button
               variant="outline"
@@ -1007,9 +1278,13 @@ const BatteryTelemetryDashboard = () => {
 
         {/* Battery Cards Grid */}
         {filteredBatteries.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredBatteries.map((battery) => (
-              <BatteryCard key={battery.bmsId} battery={battery} />
+              <BatteryCard 
+                key={battery.bmsId} 
+                battery={battery}
+                onClick={() => setSelectedBattery(battery)}
+              />
             ))}
           </div>
         ) : (
@@ -1026,6 +1301,14 @@ const BatteryTelemetryDashboard = () => {
           </Card>
         )}
       </div>
+
+      {/* Detail Modal */}
+      {selectedBattery && (
+        <BatteryDetailModal
+          battery={selectedBattery}
+          onClose={() => setSelectedBattery(null)}
+        />
+      )}
     </div>
   );
 };
