@@ -75,7 +75,7 @@ export function Header() {
     setIsClient(true);
   }, []);
 
-  // Update time every second
+  // Update time every hour
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentTime(new Date());
@@ -88,8 +88,8 @@ export function Header() {
   useEffect(() => {
     if (isClient) {
       fetchNotifications();
-      // Poll for new notifications every 30 seconds
-      const interval = setInterval(fetchNotifications, 30000);
+      // Poll for new notifications every hour
+      const interval = setInterval(fetchNotifications, 3600000);
       return () => clearInterval(interval);
     }
   }, [isClient]);
@@ -112,7 +112,7 @@ export function Header() {
           IS_READ
         FROM SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
         WHERE PROCESSED_AT >= DATEADD(day, -7, CURRENT_TIMESTAMP())
-        ORDER BY PROCESSED_AT DESC
+        ORDER BY START_TIME DESC
         LIMIT 50
       `;
 
