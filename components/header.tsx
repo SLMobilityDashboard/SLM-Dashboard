@@ -111,7 +111,7 @@ export function Header() {
           MESSAGE,
           IS_READ
         FROM SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
-        WHERE PROCESSED_AT >= DATEADD(day, -20, CURRENT_TIMESTAMP())
+        WHERE PROCESSED_AT >= DATEADD(day, -7, CURRENT_TIMESTAMP())
         ORDER BY PROCESSED_AT DESC
         LIMIT 50
       `;
@@ -176,7 +176,7 @@ export function Header() {
         UPDATE SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
         SET IS_READ = TRUE
         WHERE IS_READ != TRUE
-        AND PROCESSED_AT >= DATEADD(day, -20, CURRENT_TIMESTAMP())
+        AND PROCESSED_AT >= DATEADD(day, -7, CURRENT_TIMESTAMP())
       `;
 
       const response = await fetch("/api/snowflake/notifications", {
@@ -232,7 +232,7 @@ export function Header() {
     try {
       const sql = `
         DELETE FROM SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
-        WHERE PROCESSED_AT >= DATEADD(day, -20, CURRENT_TIMESTAMP())
+        WHERE PROCESSED_AT >= DATEADD(day, -7, CURRENT_TIMESTAMP())
       `;
 
       const response = await fetch("/api/snowflake/notifications", {
