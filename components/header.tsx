@@ -75,7 +75,7 @@ export function Header() {
     setIsClient(true);
   }, []);
 
-  // Update time every hour
+  // Update time every second
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentTime(new Date());
@@ -111,7 +111,7 @@ export function Header() {
           MESSAGE,
           IS_READ
         FROM SOURCE_DATA.LOGS.TASK_EXECUTION_LOG
-        WHERE PROCESSED_AT >= DATEADD(day, -7, CURRENT_TIMESTAMP())
+        WHERE PROCESSED_AT >= DATEADD(day, -7345, CURRENT_TIMESTAMP())
         ORDER BY START_TIME DESC
         LIMIT 50
       `;
@@ -340,6 +340,22 @@ export function Header() {
   const formatTime = (date: Date | string | null | undefined) => {
     if (!date) return "N/A";
     try {
+      if (typeof date === "string") {
+        // Parse the string as UTC and add 5:30
+        const cleanDate = date.split(".")[0];
+        const dateObj = new Date(cleanDate + "Z"); // Treat as UTC
+
+        // Add 5 hours and 30 minutes
+        dateObj.setUTCHours(dateObj.getUTCHours() + 8);
+        dateObj.setUTCMinutes(dateObj.getUTCMinutes());
+
+        const hours = String(dateObj.getUTCHours()).padStart(2, "0");
+        const minutes = String(dateObj.getUTCMinutes()).padStart(2, "0");
+        const seconds = String(dateObj.getUTCSeconds()).padStart(2, "0");
+
+        return `${hours}:${minutes}:${seconds}`;
+      }
+
       const d = typeof date === "string" ? new Date(date) : date;
       if (isNaN(d.getTime())) return "Invalid Date";
       return d.toLocaleTimeString("en-US", {
@@ -348,7 +364,8 @@ export function Header() {
         minute: "2-digit",
         second: "2-digit",
       });
-    } catch {
+    } catch (e) {
+      console.error("Error formatting time:", e, date);
       return "Invalid Date";
     }
   };
@@ -356,6 +373,37 @@ export function Header() {
   const formatDate = (date: Date | string | null | undefined) => {
     if (!date) return "N/A";
     try {
+      if (typeof date === "string") {
+        // Parse as UTC and add 5:30
+        const cleanDate = date.split(".")[0];
+        const dateObj = new Date(cleanDate + "Z"); // Treat as UTC
+
+        // Add 5 hours and 30 minutes
+        dateObj.setUTCHours(dateObj.getUTCHours() + 8);
+        dateObj.setUTCMinutes(dateObj.getUTCMinutes());
+
+        const year = dateObj.getUTCFullYear();
+        const month = dateObj.getUTCMonth();
+        const day = dateObj.getUTCDate();
+
+        const monthNames = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
+
+        return `${monthNames[month]} ${day}, ${year}`;
+      }
+
       const d = typeof date === "string" ? new Date(date) : date;
       if (isNaN(d.getTime())) return "Invalid Date";
       return d.toLocaleDateString("en-US", {
@@ -363,7 +411,8 @@ export function Header() {
         month: "short",
         day: "numeric",
       });
-    } catch {
+    } catch (e) {
+      console.error("Error formatting date:", e, date);
       return "Invalid Date";
     }
   };
@@ -606,7 +655,7 @@ export function Header() {
                             </h2>
                             <p className="text-blue-300 text-sm font-bold tracking-wide">
                               [ {unreadCount} UNREAD ALERTS •{" "}
-                              {notifications.length} TOTAL • LAST 14 DAYS ]
+                              {notifications.length} TOTAL • LAST 7 DAYS ]
                             </p>
                           </div>
                         </div>
@@ -773,18 +822,16 @@ export function Header() {
                                             </div>
                                             <div className="flex flex-col gap-1 p-2 bg-slate-800/30 rounded border border-slate-700/30">
                                               <span className="text-slate-500 font-bold uppercase tracking-wide">
-                                                Started
+                                                Processed
                                               </span>
                                               <span className="text-blue-400 font-mono">
                                                 {formatTime(
-                                                  notification.START_TIME ||
-                                                    notification.PROCESSED_AT
+                                                  notification.PROCESSED_AT
                                                 )}
                                               </span>
                                               <span className="text-slate-400">
                                                 {formatDate(
-                                                  notification.START_TIME ||
-                                                    notification.PROCESSED_AT
+                                                  notification.PROCESSED_AT
                                                 )}
                                               </span>
                                             </div>
@@ -882,7 +929,7 @@ export function Header() {
                             No Task Logs Found
                           </p>
                           <p className="text-sm text-slate-600 mt-2 font-medium">
-                            No notifications in the last 14 days
+                            No notifications in the last 7 days
                           </p>
                         </div>
                       )}

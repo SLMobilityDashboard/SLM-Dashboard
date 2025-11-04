@@ -83,9 +83,7 @@ const useGeographicHierarchy = (filters?: RevenueFilters) => {
   const isFetchingRef = useRef(false);
 
   useEffect(() => {
-    if (!filters) return;
-
-    const currentFiltersString = JSON.stringify(filters);
+    const currentFiltersString = JSON.stringify(filters || {});
 
     // Skip if filters haven't changed
     if (prevFiltersRef.current === currentFiltersString) {
@@ -805,7 +803,7 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
                 <SelectItem value="last_month">Last Month</SelectItem>
                 <SelectItem value="last_3_months">Last 3 Months</SelectItem>
                 <SelectItem value="last_year">Last Year</SelectItem>
-
+                <SelectItem value="this_month">This Month</SelectItem>
                 <SelectItem value="custom">Custom</SelectItem>
               </SelectContent>
             </Select>
