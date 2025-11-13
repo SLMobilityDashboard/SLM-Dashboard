@@ -266,53 +266,106 @@ export default function CoverageAreaDashboard() {
   };
 
   const mapCenter = useMemo(() => {
-    return coverageData
-      ? coverageData.current_location.location
-      : [6.9271, 79.8612];
+    if (
+      coverageData?.current_location?.location &&
+      Array.isArray(coverageData.current_location.location) &&
+      coverageData.current_location.location.length === 2
+    ) {
+      return coverageData.current_location.location;
+    }
+    return [6.9271, 79.8612];
   }, [coverageData]);
 
   const mapMarkers = useMemo(() => {
     if (!coverageData) return [];
 
-    const markers = [
-      {
+    const markers = [];
+
+    // Current location marker
+    if (
+      coverageData?.current_location?.location &&
+      Array.isArray(coverageData.current_location.location) &&
+      coverageData.current_location.location.length === 2
+    ) {
+      const batteryPercent =
+        coverageData.current_location?.battery_percent ?? 0;
+      const coverageLevel =
+        coverageData.coverage_status?.coverage_level ?? "Unknown";
+      const headingDirection =
+        coverageData.travel_metrics?.heading_direction ?? null;
+      const headingDegrees =
+        coverageData.travel_metrics?.heading_degrees ?? null;
+      const immediateAction =
+        coverageData.dashboard_summary?.immediate_action_required ?? false;
+
+      markers.push({
         position: coverageData.current_location.location,
-        popup: `<strong>Your Location</strong><br>Battery: ${
-          coverageData.current_location.battery_percent
-        }%<br>Status: ${coverageData.coverage_status.coverage_level}${
-          coverageData.travel_metrics?.heading_direction
-            ? `<br>Heading: ${coverageData.travel_metrics.heading_direction} (${coverageData.travel_metrics.heading_degrees}°)`
+        popup: `<strong>Your Location</strong><br>Battery: ${batteryPercent}%<br>Status: ${coverageLevel}${
+          headingDirection && headingDegrees !== null
+            ? `<br>Heading: ${headingDirection} (${headingDegrees}°)`
             : ""
         }`,
-        color: coverageData.dashboard_summary.immediate_action_required
-          ? "#ef4444"
-          : "#10b981",
+        color: immediateAction ? "#ef4444" : "#10b981",
         icon: "location",
-        heading: coverageData.travel_metrics?.heading_degrees ?? null,
-      },
-      ...coverageData.reachable_stations.stations.map((station) => ({
-        position: station.location,
-        popup: `<strong>${
-          station.name
-        }</strong><br>Distance: ${station.direct_distance_km.toFixed(
-          1
-        )} km<br>Battery: ${station.final_battery_percent.toFixed(1)}%<br>${
-          station.battery_efficient ? "✓ Efficient" : "⚠ Intensive"
-        }`,
-        color: station.battery_efficient ? "#10b981" : "#f59e0b",
-        icon: "charging",
-      })),
-      ...(coverageData.unreachable_stations?.stations?.map((station) => ({
-        position: station.location,
-        popup: `<strong>🚫 ${
-          station.name
-        }</strong><br>Distance: ${station.direct_distance_km.toFixed(
-          1
-        )} km<br><em>Beyond reach</em>`,
-        color: "#ef4444",
-        icon: "charging",
-      })) || []),
-    ];
+        heading: headingDegrees,
+      });
+    }
+
+    // Reachable stations
+    if (
+      coverageData?.reachable_stations?.stations &&
+      Array.isArray(coverageData.reachable_stations.stations)
+    ) {
+      coverageData.reachable_stations.stations.forEach((station) => {
+        if (
+          station &&
+          station.location &&
+          Array.isArray(station.location) &&
+          station.location.length === 2
+        ) {
+          markers.push({
+            position: station.location,
+            popup: `<strong>${
+              station.name ?? "Unknown Station"
+            }</strong><br>Distance: ${(station.direct_distance_km ?? 0).toFixed(
+              1
+            )} km<br>Battery: ${(station.final_battery_percent ?? 0).toFixed(
+              1
+            )}%<br>${
+              station.battery_efficient ? "✓ Efficient" : "⚠ Intensive"
+            }`,
+            color: station.battery_efficient ? "#10b981" : "#f59e0b",
+            icon: "charging",
+          });
+        }
+      });
+    }
+
+    // Unreachable stations
+    if (
+      coverageData?.unreachable_stations?.stations &&
+      Array.isArray(coverageData.unreachable_stations.stations)
+    ) {
+      coverageData.unreachable_stations.stations.forEach((station) => {
+        if (
+          station &&
+          station.location &&
+          Array.isArray(station.location) &&
+          station.location.length === 2
+        ) {
+          markers.push({
+            position: station.location,
+            popup: `<strong>🚫 ${
+              station.name ?? "Unknown Station"
+            }</strong><br>Distance: ${(station.direct_distance_km ?? 0).toFixed(
+              1
+            )} km<br><em>Beyond reach</em>`,
+            color: "#ef4444",
+            icon: "charging",
+          });
+        }
+      });
+    }
 
     return markers;
   }, [coverageData]);
@@ -320,15 +373,31 @@ export default function CoverageAreaDashboard() {
   const mapRoutes = useMemo(() => {
     if (!coverageData) return [];
 
-    return coverageData.reachable_stations.stations
-      .filter((s) => s.path_coordinates && s.path_coordinates.length > 1)
-      .map((station) => ({
-        path: station.path_coordinates!,
-        color: station.battery_efficient ? "#10b981" : "#f59e0b",
-        weight: 2,
-        opacity: 0.6,
-        dashArray: station.hops_required > 0 ? "3,3" : "",
-      }));
+    const routes = [];
+
+    if (
+      coverageData?.reachable_stations?.stations &&
+      Array.isArray(coverageData.reachable_stations.stations)
+    ) {
+      coverageData.reachable_stations.stations.forEach((station) => {
+        if (
+          station &&
+          station.path_coordinates &&
+          Array.isArray(station.path_coordinates) &&
+          station.path_coordinates.length > 1
+        ) {
+          routes.push({
+            path: station.path_coordinates,
+            color: station.battery_efficient ? "#10b981" : "#f59e0b",
+            weight: 2,
+            opacity: 0.6,
+            dashArray: station.hops_required > 0 ? "3,3" : "",
+          });
+        }
+      });
+    }
+
+    return routes;
   }, [coverageData]);
 
   const mapCoveragePolygons = useMemo(() => {
@@ -336,7 +405,12 @@ export default function CoverageAreaDashboard() {
 
     const polygons = [];
 
-    if (coverageData.coverage_areas?.direct_coverage) {
+    // Direct coverage
+    if (
+      coverageData.coverage_areas?.direct_coverage &&
+      Array.isArray(coverageData.coverage_areas.direct_coverage) &&
+      coverageData.coverage_areas.direct_coverage.length > 0
+    ) {
       polygons.push({
         coordinates: coverageData.coverage_areas.direct_coverage,
         color: "#10b981",
@@ -349,17 +423,29 @@ export default function CoverageAreaDashboard() {
       });
     }
 
-    if (coverageData.coverage_areas?.overall_network_coverage?.networks) {
+    // Network coverage
+    if (
+      coverageData.coverage_areas?.overall_network_coverage?.networks &&
+      Array.isArray(
+        coverageData.coverage_areas.overall_network_coverage.networks
+      )
+    ) {
+      const colors = [
+        { color: "#f59e0b", fillColor: "#f59e0b" },
+        { color: "#f97316", fillColor: "#f97316" },
+        { color: "#eab308", fillColor: "#eab308" },
+        { color: "#d97706", fillColor: "#d97706" },
+        { color: "#fbbf24", fillColor: "#fbbf24" },
+      ];
+
       coverageData.coverage_areas.overall_network_coverage.networks.forEach(
         (network, index) => {
-          if (network.coverage_polygon && network.coverage_polygon.length > 0) {
-            const colors = [
-              { color: "#f59e0b", fillColor: "#f59e0b" },
-              { color: "#f97316", fillColor: "#f97316" },
-              { color: "#eab308", fillColor: "#eab308" },
-              { color: "#d97706", fillColor: "#d97706" },
-              { color: "#fbbf24", fillColor: "#fbbf24" },
-            ];
+          if (
+            network &&
+            network.coverage_polygon &&
+            Array.isArray(network.coverage_polygon) &&
+            network.coverage_polygon.length > 0
+          ) {
             const colorSet = colors[index % colors.length];
 
             polygons.push({
@@ -373,9 +459,11 @@ export default function CoverageAreaDashboard() {
               weight: 2,
               opacity: 0.7,
               dashArray: "8,4",
-              popup: `<strong>Network ${network.network_id}</strong><br/>
-                      Stations: ${network.station_count}<br/>
-                      Coverage: ${network.coverage_area_km2} km²<br/>
+              popup: `<strong>Network ${
+                network.network_id ?? "N/A"
+              }</strong><br/>
+                      Stations: ${network.station_count ?? 0}<br/>
+                      Coverage: ${network.coverage_area_km2 ?? 0} km²<br/>
                       ${
                         network.is_connected_to_other_networks
                           ? "✓ Connected Network"
@@ -387,7 +475,12 @@ export default function CoverageAreaDashboard() {
       );
     }
 
-    if (coverageData.coverage_areas?.combined_coverage_polygon) {
+    // Combined coverage
+    if (
+      coverageData.coverage_areas?.combined_coverage_polygon &&
+      Array.isArray(coverageData.coverage_areas.combined_coverage_polygon) &&
+      coverageData.coverage_areas.combined_coverage_polygon.length > 0
+    ) {
       polygons.push({
         coordinates: [
           ...coverageData.coverage_areas.combined_coverage_polygon,
@@ -638,182 +731,152 @@ export default function CoverageAreaDashboard() {
                 )}
               </CardContent>
             </Card>
-
-            {/* {coverageData?.travel_metrics?.heading_degrees !== null &&
-              coverageData?.travel_metrics?.heading_degrees !== undefined && (
-                <div className="p-4 rounded-lg bg-gradient-to-r from-cyan-900/20 to-blue-900/20 border border-cyan-500/30">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                      <Navigation className="h-5 w-5 text-cyan-400 mr-2" />
-                      <div>
-                        <span className="text-sm font-medium text-cyan-400">
-                          Current Direction
-                        </span>
-                        <div className="text-xs text-slate-400 mt-0.5">
-                          Vehicle heading
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="relative w-16 h-16">
-                        <div className="absolute inset-0 rounded-full border-2 border-cyan-500/30 bg-slate-800/50">
-                          <div
-                            className="absolute top-1/2 left-1/2 w-0.5 h-6 bg-cyan-400 origin-bottom shadow-lg shadow-cyan-400/50"
-                            style={{
-                              transform: `translate(-50%, -100%) rotate(${
-                                coverageData.travel_metrics.heading_degrees ?? 0
-                              }deg)`,
-                              transformOrigin: "bottom center",
-                            }}
-                          >
-                            <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-b-[6px] border-b-cyan-400"></div>
-                          </div>
-                          <div className="absolute top-1 left-1/2 -translate-x-1/2 text-[8px] text-cyan-400 font-bold">
-                            N
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-2xl font-bold text-cyan-300">
-                          {coverageData.travel_metrics.heading_direction ||
-                            "N/A"}
-                        </div>
-                        <div className="text-sm text-slate-400">
-                          {coverageData.travel_metrics.heading_degrees ?? 0}°
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )} */}
           </div>
         </div>
 
-        {coverageData && coverageData.alerts.total_alerts > 0 && (
-          <Card className="bg-slate-900/50 border-slate-700/50 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="text-slate-100 flex items-center justify-between">
-                <div className="flex items-center">
-                  <Bell className="h-5 w-5 mr-2 text-cyan-400" />
-                  Active Alerts ({coverageData.alerts.total_alerts})
-                </div>
-                <Badge
-                  className={getAlertColor(
-                    coverageData.alerts.highest_severity
-                  )}
-                >
-                  {coverageData.alerts.highest_severity.toUpperCase()}
-                </Badge>
-              </CardTitle>
-              <CardDescription className="text-slate-400">
-                {coverageData.dashboard_summary.immediate_action_required
-                  ? "⚠️ Immediate action required"
-                  : "Monitor these conditions during your journey"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {coverageData.alerts.alerts_list.map((alert, index) => (
-                <div
-                  key={index}
-                  className={`p-4 rounded-lg border ${getAlertColor(
-                    alert.alert_level
-                  )}`}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center flex-1">
-                      {getAlertIcon(alert.alert_level)}
-                      <div className="ml-3 flex-1">
-                        <div className="font-medium text-base">
-                          {alert.title}
-                        </div>
-                        <div className="text-sm opacity-90 mt-1">
-                          {alert.message}
-                        </div>
-                      </div>
-                    </div>
-                    <Badge
-                      className={`${getAlertColor(
-                        alert.alert_level
-                      )} text-xs ml-3`}
+        {coverageData &&
+          coverageData.alerts &&
+          coverageData.alerts.total_alerts > 0 && (
+            <Card className="bg-slate-900/50 border-slate-700/50 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-slate-100 flex items-center justify-between">
+                  <div className="flex items-center">
+                    <Bell className="h-5 w-5 mr-2 text-cyan-400" />
+                    Active Alerts ({coverageData.alerts.total_alerts})
+                  </div>
+                  <Badge
+                    className={getAlertColor(
+                      coverageData.alerts.highest_severity || "info"
+                    )}
+                  >
+                    {(
+                      coverageData.alerts.highest_severity || "info"
+                    ).toUpperCase()}
+                  </Badge>
+                </CardTitle>
+                <CardDescription className="text-slate-400">
+                  {coverageData.dashboard_summary?.immediate_action_required
+                    ? "⚠️ Immediate action required"
+                    : "Monitor these conditions during your journey"}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {coverageData.alerts.alerts_list &&
+                  Array.isArray(coverageData.alerts.alerts_list) &&
+                  coverageData.alerts.alerts_list.map((alert, index) => (
+                    <div
+                      key={index}
+                      className={`p-4 rounded-lg border ${getAlertColor(
+                        alert.alert_level || "info"
+                      )}`}
                     >
-                      {alert.alert_level.toUpperCase()}
-                    </Badge>
-                  </div>
-
-                  <div className="mt-3 p-3 rounded bg-slate-900/50 border border-slate-700/30">
-                    <div className="flex items-start">
-                      <TrendingUp className="h-4 w-4 text-cyan-400 mr-2 mt-0.5 flex-shrink-0" />
-                      <div className="text-sm flex-1">
-                        <span className="text-slate-400 font-medium">
-                          Recommended Action:
-                        </span>
-                        <span className="text-slate-300 ml-2">
-                          {alert.recommended_action}
-                        </span>
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center flex-1">
+                          {getAlertIcon(alert.alert_level || "info")}
+                          <div className="ml-3 flex-1">
+                            <div className="font-medium text-base">
+                              {alert.title || "Alert"}
+                            </div>
+                            <div className="text-sm opacity-90 mt-1">
+                              {alert.message || "No message"}
+                            </div>
+                          </div>
+                        </div>
+                        <Badge
+                          className={`${getAlertColor(
+                            alert.alert_level || "info"
+                          )} text-xs ml-3`}
+                        >
+                          {(alert.alert_level || "info").toUpperCase()}
+                        </Badge>
                       </div>
-                    </div>
-                  </div>
 
-                  {(alert.distance_to_boundary_km ||
-                    alert.station_info ||
-                    alert.time_to_boundary_minutes ||
-                    alert.battery_at_boundary_percent) && (
-                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                      {alert.distance_to_boundary_km && (
-                        <div className="flex items-center">
-                          <Map className="h-4 w-4 text-slate-400 mr-2" />
-                          <span className="text-slate-400">Distance:</span>
-                          <span className="text-slate-300 ml-2 font-medium">
-                            {alert.distance_to_boundary_km.toFixed(1)} km
-                          </span>
+                      {alert.recommended_action && (
+                        <div className="mt-3 p-3 rounded bg-slate-900/50 border border-slate-700/30">
+                          <div className="flex items-start">
+                            <TrendingUp className="h-4 w-4 text-cyan-400 mr-2 mt-0.5 flex-shrink-0" />
+                            <div className="text-sm flex-1">
+                              <span className="text-slate-400 font-medium">
+                                Recommended Action:
+                              </span>
+                              <span className="text-slate-300 ml-2">
+                                {alert.recommended_action}
+                              </span>
+                            </div>
+                          </div>
                         </div>
                       )}
-                      {alert.time_to_boundary_minutes && (
-                        <div className="flex items-center">
-                          <Clock className="h-4 w-4 text-slate-400 mr-2" />
-                          <span className="text-slate-400">Time:</span>
-                          <span className="text-slate-300 ml-2 font-medium">
-                            {alert.time_to_boundary_minutes.toFixed(0)} min
-                          </span>
+
+                      {(alert.distance_to_boundary_km ||
+                        alert.station_info ||
+                        alert.time_to_boundary_minutes ||
+                        alert.battery_at_boundary_percent) && (
+                        <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                          {alert.distance_to_boundary_km !== undefined &&
+                            alert.distance_to_boundary_km !== null && (
+                              <div className="flex items-center">
+                                <Map className="h-4 w-4 text-slate-400 mr-2" />
+                                <span className="text-slate-400">
+                                  Distance:
+                                </span>
+                                <span className="text-slate-300 ml-2 font-medium">
+                                  {alert.distance_to_boundary_km.toFixed(1)} km
+                                </span>
+                              </div>
+                            )}
+                          {alert.time_to_boundary_minutes !== undefined &&
+                            alert.time_to_boundary_minutes !== null && (
+                              <div className="flex items-center">
+                                <Clock className="h-4 w-4 text-slate-400 mr-2" />
+                                <span className="text-slate-400">Time:</span>
+                                <span className="text-slate-300 ml-2 font-medium">
+                                  {alert.time_to_boundary_minutes.toFixed(0)}{" "}
+                                  min
+                                </span>
+                              </div>
+                            )}
+                          {alert.battery_at_boundary_percent !== undefined &&
+                            alert.battery_at_boundary_percent !== null && (
+                              <div className="flex items-center">
+                                <Battery className="h-4 w-4 text-slate-400 mr-2" />
+                                <span className="text-slate-400">
+                                  Battery at boundary:
+                                </span>
+                                <span className="text-slate-300 ml-2 font-medium">
+                                  {alert.battery_at_boundary_percent.toFixed(1)}
+                                  %
+                                </span>
+                              </div>
+                            )}
+                          {alert.station_info && (
+                            <div className="col-span-2 flex items-center">
+                              <Zap className="h-4 w-4 text-slate-400 mr-2" />
+                              <span className="text-slate-400">Station:</span>
+                              <span className="text-slate-300 ml-2 font-medium">
+                                {alert.station_info.name || "Unknown"} (
+                                {(
+                                  alert.station_info.distance_km ||
+                                  alert.station_info.direct_distance_km ||
+                                  0
+                                ).toFixed(1)}{" "}
+                                km)
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
-                      {alert.battery_at_boundary_percent && (
-                        <div className="flex items-center">
-                          <Battery className="h-4 w-4 text-slate-400 mr-2" />
-                          <span className="text-slate-400">
-                            Battery at boundary:
-                          </span>
-                          <span className="text-slate-300 ml-2 font-medium">
-                            {alert.battery_at_boundary_percent.toFixed(1)}%
-                          </span>
-                        </div>
-                      )}
-                      {alert.station_info && (
-                        <div className="col-span-2 flex items-center">
-                          <Zap className="h-4 w-4 text-slate-400 mr-2" />
-                          <span className="text-slate-400">Station:</span>
-                          <span className="text-slate-300 ml-2 font-medium">
-                            {alert.station_info.name} (
-                            {(
-                              alert.station_info.distance_km ||
-                              alert.station_info.direct_distance_km
-                            )?.toFixed(1)}{" "}
-                            km)
-                          </span>
+
+                      {alert.timestamp && (
+                        <div className="mt-2 flex items-center text-xs text-slate-500">
+                          <Clock className="h-3 w-3 mr-1" />
+                          {new Date(alert.timestamp).toLocaleTimeString()}
                         </div>
                       )}
                     </div>
-                  )}
-
-                  <div className="mt-2 flex items-center text-xs text-slate-500">
-                    <Clock className="h-3 w-3 mr-1" />
-                    {new Date(alert.timestamp).toLocaleTimeString()}
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
+                  ))}
+              </CardContent>
+            </Card>
+          )}
 
         {coverageData && (
           <Card className="bg-slate-900/50 border-slate-700/50 backdrop-blur-sm">
@@ -833,9 +896,9 @@ export default function CoverageAreaDashboard() {
                     </Badge>
                   </div>
                   <div className="text-2xl font-bold text-green-400 mb-1">
-                    {coverageData.current_location.usable_battery_percent.toFixed(
-                      1
-                    )}
+                    {(
+                      coverageData.current_location?.usable_battery_percent ?? 0
+                    ).toFixed(1)}
                     %
                   </div>
                   <div className="text-xs text-slate-400">Usable Battery</div>
@@ -849,9 +912,9 @@ export default function CoverageAreaDashboard() {
                     </Badge>
                   </div>
                   <div className="text-2xl font-bold text-blue-400 mb-1">
-                    {coverageData.current_location.max_direct_range_km.toFixed(
-                      1
-                    )}{" "}
+                    {(
+                      coverageData.current_location?.max_direct_range_km ?? 0
+                    ).toFixed(1)}{" "}
                     km
                   </div>
                   <div className="text-xs text-slate-400">Direct Range</div>
@@ -865,7 +928,7 @@ export default function CoverageAreaDashboard() {
                     </Badge>
                   </div>
                   <div className="text-2xl font-bold text-cyan-400 mb-1">
-                    {coverageData.reachable_stations.count}
+                    {coverageData.reachable_stations?.count ?? 0}
                   </div>
                   <div className="text-xs text-slate-400">Stations</div>
                 </div>
@@ -878,9 +941,10 @@ export default function CoverageAreaDashboard() {
                     </Badge>
                   </div>
                   <div className="text-2xl font-bold text-purple-400 mb-1">
-                    {coverageData.reachability_stats.reachability_percentage.toFixed(
-                      1
-                    )}
+                    {(
+                      coverageData.reachability_stats
+                        ?.reachability_percentage ?? 0
+                    ).toFixed(1)}
                     %
                   </div>
                   <div className="text-xs text-slate-400">Coverage</div>
@@ -888,9 +952,11 @@ export default function CoverageAreaDashboard() {
 
                 <div
                   className={`p-4 rounded-lg border ${
-                    coverageData.coverage_status.coverage_level.includes("SAFE")
+                    coverageData.coverage_status?.coverage_level?.includes(
+                      "SAFE"
+                    )
                       ? "bg-green-900/20 border-green-500/30"
-                      : coverageData.coverage_status.coverage_level.includes(
+                      : coverageData.coverage_status?.coverage_level?.includes(
                           "EXTENDED"
                         )
                       ? "bg-amber-900/20 border-amber-500/30"
@@ -900,16 +966,16 @@ export default function CoverageAreaDashboard() {
                   <div className="flex items-center justify-between mb-2">
                     <Shield
                       className={`h-5 w-5 ${getCoverageStatusColor(
-                        coverageData.coverage_status.coverage_level
+                        coverageData.coverage_status?.coverage_level || ""
                       )}`}
                     />
                     <Badge
                       className={`text-xs ${
-                        coverageData.coverage_status.coverage_level.includes(
+                        coverageData.coverage_status?.coverage_level?.includes(
                           "SAFE"
                         )
                           ? "bg-green-900/30 text-green-400 border-green-500/50"
-                          : coverageData.coverage_status.coverage_level.includes(
+                          : coverageData.coverage_status?.coverage_level?.includes(
                               "EXTENDED"
                             )
                           ? "bg-amber-900/30 text-amber-400 border-amber-500/50"
@@ -921,151 +987,174 @@ export default function CoverageAreaDashboard() {
                   </div>
                   <div
                     className={`text-lg font-bold mb-1 ${getCoverageStatusColor(
-                      coverageData.coverage_status.coverage_level
+                      coverageData.coverage_status?.coverage_level || ""
                     )}`}
                   >
-                    {
-                      coverageData.coverage_status.coverage_level.split(
-                        " - "
-                      )[0]
-                    }
+                    {coverageData.coverage_status?.coverage_level
+                      ? coverageData.coverage_status.coverage_level.split(
+                          " - "
+                        )[0]
+                      : "Unknown"}
                   </div>
                   <div className="text-xs text-slate-400">Current State</div>
                 </div>
               </div>
 
-              {coverageData.travel_metrics.speed_kmh !== null && (
-                <div className="mt-6 p-4 rounded-lg bg-slate-800/30 border border-slate-700/30">
-                  <div className="flex items-center mb-3">
-                    <Gauge className="h-5 w-5 text-cyan-400 mr-2" />
-                    <span className="text-sm font-medium text-cyan-400">
-                      Travel Metrics
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Battery Drain:</span>
-                      <span className="text-slate-300 font-medium">
-                        {coverageData.travel_metrics.battery_drain_rate_per_km?.toFixed(
-                          2
-                        ) || "N/A"}{" "}
-                        %/km
+              {coverageData.travel_metrics?.speed_kmh !== null &&
+                coverageData.travel_metrics?.speed_kmh !== undefined && (
+                  <div className="mt-6 p-4 rounded-lg bg-slate-800/30 border border-slate-700/30">
+                    <div className="flex items-center mb-3">
+                      <Gauge className="h-5 w-5 text-cyan-400 mr-2" />
+                      <span className="text-sm font-medium text-cyan-400">
+                        Travel Metrics
                       </span>
                     </div>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {coverageData && coverageData.reachable_stations.count > 0 && (
-          <Card className="bg-slate-900/50 border-slate-700/50 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="text-slate-100 flex items-center">
-                <CheckCircle2 className="h-5 w-5 mr-2 text-green-400" />
-                Reachable Charging Stations
-              </CardTitle>
-              <CardDescription className="text-slate-400">
-                Stations within your range with battery efficiency analysis
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {coverageData.reachable_stations.stations.map(
-                  (station, index) => (
-                    <div
-                      key={index}
-                      className={`p-4 rounded-lg border ${
-                        station.battery_efficient
-                          ? "bg-green-900/10 border-green-500/30"
-                          : "bg-amber-900/10 border-amber-500/30"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center">
-                          <Zap
-                            className={`h-5 w-5 mr-3 ${
-                              station.battery_efficient
-                                ? "text-green-400"
-                                : "text-amber-400"
-                            }`}
-                          />
-                          <div>
-                            <div
-                              className={`text-lg font-medium ${
-                                station.battery_efficient
-                                  ? "text-green-400"
-                                  : "text-amber-400"
-                              }`}
-                            >
-                              {station.name}
-                            </div>
-                            <div className="text-sm text-slate-400">
-                              {station.location[0].toFixed(4)},{" "}
-                              {station.location[1].toFixed(4)}
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-lg font-bold text-slate-300">
-                            {station.direct_distance_km.toFixed(1)} km
-                          </div>
-                          <div className="text-xs text-slate-400">
-                            {station.hops_required > 0
-                              ? `${station.hops_required} hops`
-                              : "Direct"}
-                            {station.path_distance_km &&
-                              station.path_distance_km !==
-                                station.direct_distance_km &&
-                              ` • Path: ${station.path_distance_km.toFixed(
-                                1
-                              )} km`}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between mt-3">
-                        <Badge
-                          className={`${
-                            station.battery_efficient
-                              ? "bg-green-900/30 text-green-400 border-green-500/50"
-                              : "bg-amber-900/30 text-amber-400 border-amber-500/50"
-                          }`}
-                        >
-                          {station.battery_efficient
-                            ? "✓ Efficient Route"
-                            : "⚠ Battery Intensive"}
-                        </Badge>
-                        <div className="flex items-center space-x-4 text-sm">
-                          <div className="flex items-center">
-                            <Battery className="h-4 w-4 text-slate-400 mr-1" />
-                            <span className="text-slate-300">
-                              {station.final_battery_percent.toFixed(1)}%
-                              remaining
-                            </span>
-                          </div>
-                          <div className="text-slate-400">
-                            {station.reachability_method}
-                          </div>
-                        </div>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Battery Drain:</span>
+                        <span className="text-slate-300 font-medium">
+                          {coverageData.travel_metrics
+                            .battery_drain_rate_per_km !== null &&
+                          coverageData.travel_metrics
+                            .battery_drain_rate_per_km !== undefined
+                            ? coverageData.travel_metrics.battery_drain_rate_per_km.toFixed(
+                                2
+                              )
+                            : "N/A"}{" "}
+                          %/km
+                        </span>
                       </div>
                     </div>
-                  )
+                  </div>
                 )}
-              </div>
-
-              {coverageData.reachable_stations.count > 10 && (
-                <div className="mt-4 text-center">
-                  <Badge className="bg-slate-800/50 text-slate-400 border-slate-600">
-                    Showing 10 of {coverageData.reachable_stations.count}{" "}
-                    reachable stations
-                  </Badge>
-                </div>
-              )}
             </CardContent>
           </Card>
         )}
+
+        {coverageData &&
+          coverageData.reachable_stations &&
+          coverageData.reachable_stations.count > 0 && (
+            <Card className="bg-slate-900/50 border-slate-700/50 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-slate-100 flex items-center">
+                  <CheckCircle2 className="h-5 w-5 mr-2 text-green-400" />
+                  Reachable Charging Stations
+                </CardTitle>
+                <CardDescription className="text-slate-400">
+                  Stations within your range with battery efficiency analysis
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {coverageData.reachable_stations.stations &&
+                    Array.isArray(coverageData.reachable_stations.stations) &&
+                    coverageData.reachable_stations.stations.map(
+                      (station, index) => (
+                        <div
+                          key={index}
+                          className={`p-4 rounded-lg border ${
+                            station.battery_efficient
+                              ? "bg-green-900/10 border-green-500/30"
+                              : "bg-amber-900/10 border-amber-500/30"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center">
+                              <Zap
+                                className={`h-5 w-5 mr-3 ${
+                                  station.battery_efficient
+                                    ? "text-green-400"
+                                    : "text-amber-400"
+                                }`}
+                              />
+                              <div>
+                                <div
+                                  className={`text-lg font-medium ${
+                                    station.battery_efficient
+                                      ? "text-green-400"
+                                      : "text-amber-400"
+                                  }`}
+                                >
+                                  {station.name || "Unknown Station"}
+                                </div>
+                                <div className="text-sm text-slate-400">
+                                  {station.location &&
+                                  Array.isArray(station.location) &&
+                                  station.location.length === 2
+                                    ? `${station.location[0].toFixed(
+                                        4
+                                      )}, ${station.location[1].toFixed(4)}`
+                                    : "Location unavailable"}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-lg font-bold text-slate-300">
+                                {(station.direct_distance_km ?? 0).toFixed(1)}{" "}
+                                km
+                              </div>
+                              <div className="text-xs text-slate-400">
+                                {(station.hops_required ?? 0) > 0
+                                  ? `${station.hops_required} hops`
+                                  : "Direct"}
+                                {station.path_distance_km &&
+                                  station.path_distance_km !==
+                                    station.direct_distance_km &&
+                                  ` • Path: ${station.path_distance_km.toFixed(
+                                    1
+                                  )} km`}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between mt-3">
+                            <Badge
+                              className={`${
+                                station.battery_efficient
+                                  ? "bg-green-900/30 text-green-400 border-green-500/50"
+                                  : "bg-amber-900/30 text-amber-400 border-amber-500/50"
+                              }`}
+                            >
+                              {station.battery_efficient
+                                ? "✓ Efficient Route"
+                                : "⚠ Battery Intensive"}
+                            </Badge>
+                            <div className="flex items-center space-x-4 text-sm">
+                              <div className="flex items-center">
+                                <Battery className="h-4 w-4 text-slate-400 mr-1" />
+                                <span className="text-slate-300">
+                                  {(station.final_battery_percent ?? 0).toFixed(
+                                    1
+                                  )}
+                                  % remaining
+                                </span>
+                              </div>
+                              <div className="text-slate-400">
+                                {station.reachability_method || "Unknown"}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    )}
+                </div>
+
+                {coverageData.reachable_stations.count > 10 && (
+                  <div className="mt-4 text-center">
+                    <Badge className="bg-slate-800/50 text-slate-400 border-slate-600">
+                      Showing{" "}
+                      {Math.min(
+                        10,
+                        coverageData.reachable_stations.stations?.length ?? 0
+                      )}{" "}
+                      of {coverageData.reachable_stations.count} reachable
+                      stations
+                    </Badge>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
         {coverageData && (
           <Card className="bg-slate-900/50 border-slate-700/50 backdrop-blur-sm">
@@ -1082,7 +1171,7 @@ export default function CoverageAreaDashboard() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="p-4 rounded-lg bg-slate-800/30 border border-slate-700/30 text-center">
                   <div className="text-2xl font-bold text-green-400 mb-1">
-                    {coverageData.reachability_stats.direct_reachable}
+                    {coverageData.reachability_stats?.direct_reachable ?? 0}
                   </div>
                   <div className="text-sm text-slate-400 mb-2">
                     Direct Access
@@ -1092,9 +1181,12 @@ export default function CoverageAreaDashboard() {
                       className="bg-green-400 h-2 rounded-full"
                       style={{
                         width: `${
-                          (coverageData.reachability_stats.direct_reachable /
-                            coverageData.reachable_stations.count) *
-                          100
+                          coverageData.reachable_stations?.count > 0
+                            ? ((coverageData.reachability_stats
+                                ?.direct_reachable ?? 0) /
+                                coverageData.reachable_stations.count) *
+                              100
+                            : 0
                         }%`,
                       }}
                     ></div>
@@ -1103,7 +1195,7 @@ export default function CoverageAreaDashboard() {
 
                 <div className="p-4 rounded-lg bg-slate-800/30 border border-slate-700/30 text-center">
                   <div className="text-2xl font-bold text-blue-400 mb-1">
-                    {coverageData.reachability_stats.multi_hop_reachable}
+                    {coverageData.reachability_stats?.multi_hop_reachable ?? 0}
                   </div>
                   <div className="text-sm text-slate-400 mb-2">Multi-Hop</div>
                   <div className="w-full bg-slate-700 rounded-full h-2">
@@ -1111,9 +1203,12 @@ export default function CoverageAreaDashboard() {
                       className="bg-blue-400 h-2 rounded-full"
                       style={{
                         width: `${
-                          (coverageData.reachability_stats.multi_hop_reachable /
-                            coverageData.reachable_stations.count) *
-                          100
+                          coverageData.reachable_stations?.count > 0
+                            ? ((coverageData.reachability_stats
+                                ?.multi_hop_reachable ?? 0) /
+                                coverageData.reachable_stations.count) *
+                              100
+                            : 0
                         }%`,
                       }}
                     ></div>
@@ -1122,7 +1217,9 @@ export default function CoverageAreaDashboard() {
 
                 <div className="p-4 rounded-lg bg-slate-800/30 border border-slate-700/30 text-center">
                   <div className="text-2xl font-bold text-purple-400 mb-1">
-                    {coverageData.reachability_stats.average_hops
+                    {coverageData.reachability_stats?.average_hops !==
+                      undefined &&
+                    coverageData.reachability_stats?.average_hops !== null
                       ? coverageData.reachability_stats.average_hops.toFixed(2)
                       : "N/A"}
                   </div>
@@ -1131,7 +1228,10 @@ export default function CoverageAreaDashboard() {
                   </div>
                   <div className="text-xs text-slate-500 mt-2">
                     Avg battery:{" "}
-                    {coverageData.reachability_stats.average_final_battery
+                    {coverageData.reachability_stats?.average_final_battery !==
+                      undefined &&
+                    coverageData.reachability_stats?.average_final_battery !==
+                      null
                       ? coverageData.reachability_stats.average_final_battery.toFixed(
                           1
                         )
@@ -1144,80 +1244,92 @@ export default function CoverageAreaDashboard() {
           </Card>
         )}
 
-        {coverageData && coverageData.unreachable_stations.count > 0 && (
-          <Card className="bg-slate-900/50 border-slate-700/50 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="text-slate-100 flex items-center">
-                <XCircle className="h-5 w-5 mr-2 text-red-400" />
-                Unreachable Stations
-              </CardTitle>
-              <CardDescription className="text-slate-400">
-                {coverageData.unreachable_stations.count} stations beyond your
-                current range
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3 mb-6">
-                {coverageData.unreachable_stations.stations.map(
-                  (station, index) => (
-                    <div
-                      key={index}
-                      className="p-4 rounded-lg bg-red-900/10 border border-red-500/30"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center">
-                          <AlertTriangle className="h-5 w-5 text-red-400 mr-3" />
-                          <div>
-                            <div className="text-lg font-medium text-red-400">
-                              {station.name}
+        {coverageData &&
+          coverageData.unreachable_stations &&
+          coverageData.unreachable_stations.count > 0 && (
+            <Card className="bg-slate-900/50 border-slate-700/50 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-slate-100 flex items-center">
+                  <XCircle className="h-5 w-5 mr-2 text-red-400" />
+                  Unreachable Stations
+                </CardTitle>
+                <CardDescription className="text-slate-400">
+                  {coverageData.unreachable_stations.count} stations beyond your
+                  current range
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3 mb-6">
+                  {coverageData.unreachable_stations.stations &&
+                    Array.isArray(coverageData.unreachable_stations.stations) &&
+                    coverageData.unreachable_stations.stations.map(
+                      (station, index) => (
+                        <div
+                          key={index}
+                          className="p-4 rounded-lg bg-red-900/10 border border-red-500/30"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center">
+                              <AlertTriangle className="h-5 w-5 text-red-400 mr-3" />
+                              <div>
+                                <div className="text-lg font-medium text-red-400">
+                                  {station.name || "Unknown Station"}
+                                </div>
+                                <div className="text-sm text-slate-400">
+                                  {station.location &&
+                                  Array.isArray(station.location) &&
+                                  station.location.length === 2
+                                    ? `${station.location[0].toFixed(
+                                        4
+                                      )}, ${station.location[1].toFixed(4)}`
+                                    : "Location unavailable"}
+                                </div>
+                              </div>
                             </div>
-                            <div className="text-sm text-slate-400">
-                              {station.location[0].toFixed(4)},{" "}
-                              {station.location[1].toFixed(4)}
+                            <div className="text-right">
+                              <div className="text-lg font-bold text-slate-300">
+                                {(station.direct_distance_km ?? 0).toFixed(1)}{" "}
+                                km
+                              </div>
+                              <div className="text-sm text-red-400">
+                                Beyond {maxHops}-hop reach
+                              </div>
                             </div>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="text-lg font-bold text-slate-300">
-                            {station.direct_distance_km.toFixed(1)} km
-                          </div>
-                          <div className="text-sm text-red-400">
-                            Beyond {maxHops}-hop reach
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <h4 className="text-sm font-medium text-slate-300 flex items-center">
-                  <TrendingUp className="h-4 w-4 mr-2 text-cyan-400" />
-                  Recommendations
-                </h4>
-                <div className="space-y-2">
-                  {[
-                    "Consider charging at nearby stations to extend your range",
-                    `Increase max hops beyond ${maxHops} for longer route planning`,
-                    "Plan intermediate charging stops for distant destinations",
-                    "Monitor battery efficiency settings for optimal range calculation",
-                  ].map((rec, index) => (
-                    <div
-                      key={index}
-                      className="flex items-start p-3 rounded-md bg-slate-800/30 border border-slate-700/30"
-                    >
-                      <div className="h-5 w-5 rounded-full bg-cyan-900/30 text-cyan-400 border border-cyan-500/50 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
-                        <span className="text-xs font-medium">{index + 1}</span>
-                      </div>
-                      <div className="text-sm text-slate-300">{rec}</div>
-                    </div>
-                  ))}
+                      )
+                    )}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+
+                <div className="space-y-3">
+                  <h4 className="text-sm font-medium text-slate-300 flex items-center">
+                    <TrendingUp className="h-4 w-4 mr-2 text-cyan-400" />
+                    Recommendations
+                  </h4>
+                  <div className="space-y-2">
+                    {[
+                      "Consider charging at nearby stations to extend your range",
+                      `Increase max hops beyond ${maxHops} for longer route planning`,
+                      "Plan intermediate charging stops for distant destinations",
+                      "Monitor battery efficiency settings for optimal range calculation",
+                    ].map((rec, index) => (
+                      <div
+                        key={index}
+                        className="flex items-start p-3 rounded-md bg-slate-800/30 border border-slate-700/30"
+                      >
+                        <div className="h-5 w-5 rounded-full bg-cyan-900/30 text-cyan-400 border border-cyan-500/50 flex items-center justify-center mr-3 mt-0.5 flex-shrink-0">
+                          <span className="text-xs font-medium">
+                            {index + 1}
+                          </span>
+                        </div>
+                        <div className="text-sm text-slate-300">{rec}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
         {coverageData && (
           <Card className="bg-slate-900/50 border-slate-700/50 backdrop-blur-sm">
@@ -1232,14 +1344,14 @@ export default function CoverageAreaDashboard() {
                 <div className="flex justify-between items-center p-3 rounded-md bg-slate-800/50 border border-slate-700/30">
                   <span className="text-slate-400">Analysis Time:</span>
                   <span className="text-slate-300 font-medium">
-                    {coverageData.analysis_time_seconds.toFixed(3)}s
+                    {(coverageData.analysis_time_seconds ?? 0).toFixed(3)}s
                   </span>
                 </div>
                 <div className="flex justify-between items-center p-3 rounded-md bg-slate-800/50 border border-slate-700/30">
                   <span className="text-slate-400">Stations Analyzed:</span>
                   <span className="text-slate-300 font-medium">
-                    {coverageData.reachable_stations.count +
-                      coverageData.unreachable_stations.count}
+                    {(coverageData.reachable_stations?.count ?? 0) +
+                      (coverageData.unreachable_stations?.count ?? 0)}
                   </span>
                 </div>
                 <div className="flex justify-between items-center p-3 rounded-md bg-green-800/30 border border-green-600/30">

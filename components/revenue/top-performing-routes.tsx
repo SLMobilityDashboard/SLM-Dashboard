@@ -211,11 +211,15 @@ export function TopPerformingStations({ filters }: TopPerformingStationsProps) {
         console.log("Top Stations Data:", result);
 
         setData(result || []);
+
+        // Update prevFiltersRef AFTER successful fetch
+        prevFiltersRef.current = currentFiltersString;
       } catch (err: any) {
         console.error("Error fetching top stations data:", err);
         setError(err);
       } finally {
         setLoading(false);
+        isFetchingRef.current = false; // Reset the fetching flag
       }
     };
 
@@ -414,7 +418,7 @@ export function TopPerformingStations({ filters }: TopPerformingStationsProps) {
 
             return (
               <Card
-                key={`${station.STATIONNAME}-${station.PERIOD ?? index}`}
+                key={`${station.STATIONNAME}-${station.LOCATIONNAME}-${index}`}
                 className="p-4 hover:shadow-md transition-shadow duration-200"
               >
                 <CardContent className="p-0 space-y-2">

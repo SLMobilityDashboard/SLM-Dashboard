@@ -360,8 +360,8 @@ export function MainSidebar() {
           icon: <TrendingUp className="h-4 w-4" />,
         },
         {
-          path: "/revenue/behavior",
-          label: "Customer Behavior",
+          path: "/revenue/patterns",
+          label: "Patterns",
           icon: <Users className="h-4 w-4" />,
         },
         {

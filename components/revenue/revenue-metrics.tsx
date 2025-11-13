@@ -423,7 +423,11 @@ export function RevenueMetrics({ filters }: RevenueMetricsProps) {
   const formatPercent = (value: number) =>
     `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 
-  const formatCurrency = (value: number) => {
+  const formatCurrency = (value: number | null | undefined) => {
+    if (value == null || isNaN(value)) {
+      return "No data available";
+    }
+
     return `Rs. ${value.toLocaleString()}`;
   };
 

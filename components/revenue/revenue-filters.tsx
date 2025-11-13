@@ -29,8 +29,6 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { format } from "date-fns";
 import type { DateRange } from "react-day-picker";
-import { fi } from "date-fns/locale";
-import { filterProps } from "framer-motion";
 
 interface RevenueFiltersProps {
   onFiltersChange?: (filters: RevenueFilters) => void;
@@ -49,15 +47,6 @@ export interface RevenueFilters {
   };
   paymentMethods: string[];
   aggregation: "daily" | "monthly" | "quarterly" | "annually";
-}
-
-interface GeographicData {
-  AREA_ID: string;
-  AREA_NAME: string;
-  DISTRICT_ID: string;
-  DISTRICT_NAME: string;
-  PROVICE_ID: string;
-  PROVICE_NAME: string;
 }
 
 interface StationData {
@@ -79,19 +68,17 @@ const useGeographicHierarchy = (filters?: RevenueFilters) => {
   const [stationData, setStationData] = useState<StationData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const prevFiltersRef = useRef<string>(""); // stores previous filters
+  const prevFiltersRef = useRef<string>("");
   const isFetchingRef = useRef(false);
 
   useEffect(() => {
     const currentFiltersString = JSON.stringify(filters || {});
 
-    // Skip if filters haven't changed
     if (prevFiltersRef.current === currentFiltersString) {
       console.log("Filters unchanged, skipping fetch");
       return;
     }
 
-    // Prevent concurrent fetches
     if (isFetchingRef.current) {
       console.log("Already fetching, skipping");
       return;
@@ -103,7 +90,6 @@ const useGeographicHierarchy = (filters?: RevenueFilters) => {
 
     const fetchData = async () => {
       try {
-        // Fetch hierarchy
         const hierarchyRes = await fetch("/api/query", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -120,7 +106,6 @@ const useGeographicHierarchy = (filters?: RevenueFilters) => {
           }),
         });
 
-        // Fetch stations
         const stationsRes = await fetch("/api/query", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -148,21 +133,20 @@ const useGeographicHierarchy = (filters?: RevenueFilters) => {
       } finally {
         setLoading(false);
         isFetchingRef.current = false;
-        prevFiltersRef.current = currentFiltersString; // update ref after fetch
+        prevFiltersRef.current = currentFiltersString;
       }
     };
 
     fetchData();
-  }, [filters]); // re-run effect whenever filters change
+  }, [filters]);
 
   return { completeHierarchy, stationData, loading, error };
 };
 
 export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
-  // With this:
   const today = new Date();
-  const defaultFrom = new Date(today.getFullYear() - 1, 9, 1); // October 1, 2024 (month is 0-indexed: 9 = October)
-  const defaultTo = new Date(today.getFullYear(), 8, 30); // September 30, 2025 (month 8 = September)
+  const defaultFrom = new Date(today.getFullYear() - 1, 9, 1);
+  const defaultTo = new Date(today.getFullYear(), 8, 30);
   const defaultRange: DateRange = { from: defaultFrom, to: defaultTo };
 
   const [isExpanded, setIsExpanded] = useState(false);
@@ -189,7 +173,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
     aggregation: "monthly",
   });
 
-  // Separate state for applied filters that trigger data fetching
   const [appliedFilters, setAppliedFilters] = useState<RevenueFilters>({
     dateRange: defaultRange,
     selectedProvinces: [],
@@ -204,7 +187,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
 
   const { completeHierarchy, stationData, loading } = useGeographicHierarchy();
 
-  // Track if there are pending changes
   const hasPendingChanges = useMemo(() => {
     return JSON.stringify(filters) !== JSON.stringify(appliedFilters);
   }, [filters, appliedFilters]);
@@ -225,7 +207,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
     "Corporate Account",
   ];
 
-  // Memoized computed values for cascading filters - based on complete hierarchy data
   const availableProvinces = useMemo(() => {
     const provinces = new Set<string>();
     completeHierarchy.forEach((item) => provinces.add(item.PROVINCE));
@@ -234,10 +215,8 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
 
   const availableDistricts = useMemo(() => {
     const districts = new Set<string>();
-
     let filteredData = completeHierarchy;
 
-    // Filter by pending selected provinces if any
     if (filters.selectedProvinces.length > 0) {
       filteredData = filteredData.filter((item) =>
         filters.selectedProvinces.includes(item.PROVINCE)
@@ -250,17 +229,14 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
 
   const availableAreas = useMemo(() => {
     const areas = new Set<string>();
-
     let filteredData = completeHierarchy;
 
-    // Filter by pending selected provinces if any
     if (filters.selectedProvinces.length > 0) {
       filteredData = filteredData.filter((item) =>
         filters.selectedProvinces.includes(item.PROVINCE)
       );
     }
 
-    // Filter by pending selected districts if any
     if (filters.selectedDistricts.length > 0) {
       filteredData = filteredData.filter((item) =>
         filters.selectedDistricts.includes(item.DISTRICT)
@@ -272,7 +248,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
   }, [completeHierarchy, filters.selectedProvinces, filters.selectedDistricts]);
 
   const availableStations = useMemo(() => {
-    // Only show stations if multiple areas are selected
     if (filters.selectedAreas.length > 1) {
       return stationData
         .filter((station) => filters.selectedAreas.includes(station.AREA))
@@ -283,7 +258,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
   }, [stationData, filters.selectedAreas]);
 
   useEffect(() => {
-    // Only send applied filters to parent, not pending changes
     onFiltersChange?.(appliedFilters);
   }, [appliedFilters, onFiltersChange]);
 
@@ -320,13 +294,11 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
     setQuickTime("last_year");
   };
 
-  // Cascading handlers - work with pending filters and complete hierarchy data
   const handleProvinceChange = (province: string, checked: boolean) => {
     const newProvinces = checked
       ? [...filters.selectedProvinces, province]
       : filters.selectedProvinces.filter((p) => p !== province);
 
-    // Clear downstream selections when deselecting
     let newDistricts = filters.selectedDistricts;
     let newAreas = filters.selectedAreas;
     let newStations = filters.selectedStations;
@@ -335,7 +307,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
       if (newProvinces.length === 0) {
         // Keep current selections
       } else {
-        // Remove districts that don't belong to remaining provinces
         const validDistricts = new Set<string>();
         completeHierarchy
           .filter((item) => newProvinces.includes(item.PROVINCE))
@@ -343,7 +314,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
 
         newDistricts = newDistricts.filter((d) => validDistricts.has(d));
 
-        // Remove areas that don't belong to remaining provinces/districts
         const validAreas = new Set<string>();
         completeHierarchy
           .filter(
@@ -356,7 +326,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
 
         newAreas = newAreas.filter((a) => validAreas.has(a));
 
-        // Remove stations that don't belong to remaining areas
         newStations = newStations.filter((s) => {
           const stationArea = stationData.find(
             (station) => station.STATION === s
@@ -379,7 +348,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
       ? [...filters.selectedDistricts, district]
       : filters.selectedDistricts.filter((d) => d !== district);
 
-    // Auto-select parent province when district is selected
     let newProvinces = filters.selectedProvinces;
     if (checked) {
       const districtProvince = completeHierarchy.find(
@@ -433,7 +401,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
       ? [...filters.selectedAreas, area]
       : filters.selectedAreas.filter((a) => a !== area);
 
-    // Auto-select parent district and province when area is selected
     let newDistricts = filters.selectedDistricts;
     let newProvinces = filters.selectedProvinces;
 
@@ -449,7 +416,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
       }
     }
 
-    // Handle stations
     let newStations = filters.selectedStations;
     if (!checked) {
       const areaStations = stationData
@@ -471,7 +437,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
       ? [...filters.selectedStations, station]
       : filters.selectedStations.filter((s) => s !== station);
 
-    // Auto-select parent hierarchy when station is selected
     let newAreas = filters.selectedAreas;
     let newDistricts = filters.selectedDistricts;
     let newProvinces = filters.selectedProvinces;
@@ -520,7 +485,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
     updateFilters({ paymentMethods: newMethods });
   };
 
-  // Custom month/year navigation components
   const MonthYearSelector = ({
     date,
     onMonthChange,
@@ -641,10 +605,14 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
         newFrom = new Date(today.getFullYear(), today.getMonth() - 1, 1);
         newTo = new Date(today.getFullYear(), today.getMonth(), 0);
         break;
-      case "this_month":
-        newFrom = new Date(today.getFullYear(), today.getMonth(), 1);
-        newTo = today;
+      case "this_month": {
+        const year = today.getFullYear();
+        const month = today.getMonth();
+        newFrom = new Date(year, month, 1);
+        newTo = new Date(today);
+        newTo.setDate(newTo.getDate() + 1);
         break;
+      }
       case "last_3_months":
         newFrom = new Date(today.getFullYear(), today.getMonth() - 3, 1);
         newTo = new Date(today.getFullYear(), today.getMonth(), 0);
@@ -721,11 +689,35 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
   const handleCalendarMonthChange = (month: number) => {
     const newDate = new Date(currentMonth.getFullYear(), month);
     setCurrentMonth(newDate);
+
+    if (datePickerMode === "from") {
+      const firstDayOfMonth = new Date(
+        newDate.getFullYear(),
+        newDate.getMonth(),
+        1
+      );
+      setTempRange((prev) => ({ ...prev, from: firstDayOfMonth }));
+    } else {
+      const lastDayOfMonth = new Date(
+        newDate.getFullYear(),
+        newDate.getMonth() + 1,
+        0
+      );
+      setTempRange((prev) => ({ ...prev, to: lastDayOfMonth }));
+    }
   };
 
   const handleCalendarYearChange = (year: number) => {
     const newDate = new Date(year, currentMonth.getMonth());
     setCurrentMonth(newDate);
+
+    if (datePickerMode === "from") {
+      const firstDayOfMonth = new Date(year, newDate.getMonth(), 1);
+      setTempRange((prev) => ({ ...prev, from: firstDayOfMonth }));
+    } else {
+      const lastDayOfMonth = new Date(year, newDate.getMonth() + 1, 0);
+      setTempRange((prev) => ({ ...prev, to: lastDayOfMonth }));
+    }
   };
 
   const isDateRangeDisabled = quickTime !== "custom";
@@ -782,7 +774,8 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
             )}
             <Button
               variant="ghost"
-              size="sm"
+              disabled={true} // React way
+              className=""
               onClick={() => setIsExpanded(!isExpanded)}
             >
               {isExpanded ? "Less" : "More"} Filters
@@ -850,7 +843,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
                 >
                   <div className="bg-background border border-border rounded-lg shadow-lg overflow-hidden">
                     <div className="p-4 space-y-4">
-                      {/* Date Picker Mode Toggle */}
                       <div className="flex justify-center">
                         <div className="flex rounded-md bg-muted p-1">
                           <Button
@@ -876,7 +868,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
                         </div>
                       </div>
 
-                      {/* Single Calendar */}
                       <div className="space-y-2">
                         <MonthYearSelector
                           date={currentMonth}
@@ -937,7 +928,6 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
                         />
                       </div>
 
-                      {/* Footer with selected range info and apply button */}
                       <div className="border-t pt-3 space-y-3">
                         {tempRange?.from && tempRange?.to && (
                           <div className="flex items-center justify-between text-xs">
@@ -986,16 +976,10 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
           <div className="space-y-2">
             <Label>Aggregation</Label>
             <Select
-              value={appliedFilters.aggregation}
+              value={filters.aggregation}
               onValueChange={(value) => {
                 const newAggregation = value as RevenueFilters["aggregation"];
-                const newFilters = { ...filters, aggregation: newAggregation };
-                const newAppliedFilters = {
-                  ...appliedFilters,
-                  aggregation: newAggregation,
-                };
-                setFilters(newFilters);
-                setAppliedFilters(newAppliedFilters);
+                updateFilters({ aggregation: newAggregation });
               }}
             >
               <SelectTrigger>
@@ -1016,7 +1000,12 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
           <div className="space-y-2">
             <Label>Province</Label>
             <Select
-              onValueChange={(value) => handleProvinceChange(value, true)}
+              value=""
+              onValueChange={(value) => {
+                if (!filters.selectedProvinces.includes(value)) {
+                  handleProvinceChange(value, true);
+                }
+              }}
             >
               <SelectTrigger>
                 <span>
@@ -1026,11 +1015,15 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
                 </span>
               </SelectTrigger>
               <SelectContent>
-                {availableProvinces.map((province) => (
-                  <SelectItem key={province} value={province}>
-                    {province}
-                  </SelectItem>
-                ))}
+                {availableProvinces
+                  .filter(
+                    (province) => !filters.selectedProvinces.includes(province)
+                  )
+                  .map((province) => (
+                    <SelectItem key={province} value={province}>
+                      {province}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
             <div className="flex flex-wrap gap-1">
@@ -1050,7 +1043,12 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
           <div className="space-y-2">
             <Label>District</Label>
             <Select
-              onValueChange={(value) => handleDistrictChange(value, true)}
+              value=""
+              onValueChange={(value) => {
+                if (!filters.selectedDistricts.includes(value)) {
+                  handleDistrictChange(value, true);
+                }
+              }}
             >
               <SelectTrigger>
                 <span>
@@ -1060,11 +1058,15 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
                 </span>
               </SelectTrigger>
               <SelectContent>
-                {availableDistricts.map((district) => (
-                  <SelectItem key={district} value={district}>
-                    {district}
-                  </SelectItem>
-                ))}
+                {availableDistricts
+                  .filter(
+                    (district) => !filters.selectedDistricts.includes(district)
+                  )
+                  .map((district) => (
+                    <SelectItem key={district} value={district}>
+                      {district}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
             <div className="flex flex-wrap gap-1">
@@ -1083,7 +1085,14 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
           {/* Area */}
           <div className="space-y-2">
             <Label>Area</Label>
-            <Select onValueChange={(value) => handleAreaChange(value, true)}>
+            <Select
+              value=""
+              onValueChange={(value) => {
+                if (!filters.selectedAreas.includes(value)) {
+                  handleAreaChange(value, true);
+                }
+              }}
+            >
               <SelectTrigger>
                 <span>
                   {filters.selectedAreas.length > 0
@@ -1092,11 +1101,13 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
                 </span>
               </SelectTrigger>
               <SelectContent>
-                {availableAreas.map((area) => (
-                  <SelectItem key={area} value={area}>
-                    {area}
-                  </SelectItem>
-                ))}
+                {availableAreas
+                  .filter((area) => !filters.selectedAreas.includes(area))
+                  .map((area) => (
+                    <SelectItem key={area} value={area}>
+                      {area}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
             <div className="flex flex-wrap gap-1">
@@ -1112,12 +1123,17 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
             </div>
           </div>
 
-          {/* BSS Stations - Only show if multiple areas selected */}
+          {/* BSS Stations */}
           {filters.selectedAreas.length > 1 && (
             <div className="space-y-2">
               <Label>BSS Stations</Label>
               <Select
-                onValueChange={(value) => handleStationChange(value, true)}
+                value=""
+                onValueChange={(value) => {
+                  if (!filters.selectedStations.includes(value)) {
+                    handleStationChange(value, true);
+                  }
+                }}
               >
                 <SelectTrigger>
                   <SelectValue
@@ -1129,11 +1145,15 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableStations.map((station) => (
-                    <SelectItem key={station} value={station}>
-                      {station}
-                    </SelectItem>
-                  ))}
+                  {availableStations
+                    .filter(
+                      (station) => !filters.selectedStations.includes(station)
+                    )
+                    .map((station) => (
+                      <SelectItem key={station} value={station}>
+                        {station}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
               <div className="flex flex-wrap gap-1">

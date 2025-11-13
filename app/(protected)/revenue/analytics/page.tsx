@@ -135,9 +135,15 @@ export default function RevenueAnalyticsPage() {
           <TabsList className="grid w-full max-w-4xl grid-cols-4">
             <TabsTrigger value="trends">Swaps</TabsTrigger>
             {/* <TabsTrigger value="home_charging">Home Charging</TabsTrigger> */}
-            <TabsTrigger value="expenses">Expenses</TabsTrigger>
-            <TabsTrigger value="profitability">Profit</TabsTrigger>
-            <TabsTrigger value="geographic">Geographic</TabsTrigger>
+            <TabsTrigger disabled value="expenses">
+              Expenses
+            </TabsTrigger>
+            <TabsTrigger disabled value="profitability">
+              Profit
+            </TabsTrigger>
+            <TabsTrigger disabled value="geographic">
+              Geographic
+            </TabsTrigger>
           </TabsList>
         </div>
 
