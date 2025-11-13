@@ -2,7 +2,8 @@
 
 import CustomizableMap from "@/components/gps/canvas-map";
 import { useTBoxGPSData } from "@/hooks/Snowflake/gps/useTBoxGPSData";
-import { useState, useMemo, useEffect } from "react";
+import DateRangePicker from "@/components/gps/DateRangePicker";
+import { useState, useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -27,19 +28,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 import {
   MapPin,
   Layers,
   Map,
-  Activity,
   Database,
   Loader2,
   RefreshCw,
   AlertTriangle,
   TrendingUp,
   Clock,
-  Calendar as CalendarIcon,
   ChevronDown,
   X,
   CheckCircle,
@@ -48,8 +46,6 @@ import {
   Building2,
   Navigation,
 } from "lucide-react";
-import { format } from "date-fns";
-import { DateRange } from "react-day-picker";
 
 interface TBoxGPSFilters {
   quickTime: string;
@@ -61,7 +57,6 @@ interface TBoxGPSFilters {
   shouldFetchData?: boolean;
 }
 
-// Mock data and functions for demo
 const getDefaultDateRange = () => {
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -92,15 +87,8 @@ export default function TBoxUsagePatternPage() {
     shouldFetchData: false,
   });
 
-  const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: filters.dateRange?.from,
-    to: filters.dateRange?.to,
-  });
-
-  // Color configuration state - moved from map to parent
   const [colorField, setColorField] = useState<string>("none");
 
-  // Fetch TBox GPS data and available TBoxes
   const {
     data: tboxData,
     loading,
@@ -112,15 +100,13 @@ export default function TBoxUsagePatternPage() {
     loadingGeographical,
   } = useTBoxGPSData(filters);
 
-  // Use real data from hook
   const currentData = tboxData;
   const currentAvailableTboxes =
     availableTboxes.length > 0 ? availableTboxes : [];
 
-  // Get available districts based on selected provinces (only show districts from selected provinces)
   const getAvailableDistricts = () => {
     if (filters.selectedProvinces.length === 0) {
-      return []; // Don't show any districts if no provinces are selected
+      return [];
     }
     return filters.selectedProvinces.reduce((acc, province) => {
       const districts = geographicalData.districts[province] || [];
@@ -128,10 +114,9 @@ export default function TBoxUsagePatternPage() {
     }, [] as string[]);
   };
 
-  // Get available areas based on selected districts (only show areas from selected districts)
   const getAvailableAreas = () => {
     if (filters.selectedDistricts.length === 0) {
-      return []; // Don't show any areas if no districts are selected
+      return [];
     }
     return filters.selectedDistricts.reduce((acc, district) => {
       const areas = geographicalData.areas[district] || [];
@@ -139,7 +124,6 @@ export default function TBoxUsagePatternPage() {
     }, [] as string[]);
   };
 
-  // Get available color field options from data
   const getColorFieldOptions = () => {
     if (!currentData || currentData.tboxes.length === 0) {
       return [{ value: "none", label: "None (Default)" }];
@@ -183,20 +167,26 @@ export default function TBoxUsagePatternPage() {
 
     if (value !== "custom") {
       newFilters.dateRange = undefined;
-      setDateRange(undefined);
     }
 
     setFilters(newFilters);
   };
 
-  const handleDateRangeChange = (range: DateRange | undefined) => {
-    setDateRange(range);
-
-    if (range?.from && range?.to) {
+  const handleDateRangeChange = (
+    range: { from: Date; to: Date } | undefined
+  ) => {
+    if (range) {
       setFilters({
         ...filters,
         quickTime: "custom",
-        dateRange: { from: range.from, to: range.to },
+        dateRange: range,
+        selectedTboxes: [],
+        shouldFetchData: false,
+      });
+    } else {
+      setFilters({
+        ...filters,
+        dateRange: undefined,
         selectedTboxes: [],
         shouldFetchData: false,
       });
@@ -240,18 +230,15 @@ export default function TBoxUsagePatternPage() {
     }
   };
 
-  // Geographical filter handlers
   const handleProvinceSelect = (province: string) => {
     const newSelection = filters.selectedProvinces.includes(province)
       ? filters.selectedProvinces.filter((p) => p !== province)
       : [...filters.selectedProvinces, province];
 
-    // When provinces change, clear districts and areas that are no longer valid
     let filteredDistricts: string[] = [];
     let filteredAreas: string[] = [];
 
     if (newSelection.length > 0) {
-      // Only keep districts that belong to the selected provinces
       const availableDistricts = newSelection.reduce((acc, prov) => {
         return [...acc, ...(geographicalData.districts[prov] || [])];
       }, [] as string[]);
@@ -260,7 +247,6 @@ export default function TBoxUsagePatternPage() {
         availableDistricts.includes(d)
       );
 
-      // Only keep areas that belong to the remaining valid districts
       if (filteredDistricts.length > 0) {
         const availableAreas = filteredDistricts.reduce((acc, district) => {
           return [...acc, ...(geographicalData.areas[district] || [])];
@@ -287,11 +273,9 @@ export default function TBoxUsagePatternPage() {
       ? filters.selectedDistricts.filter((d) => d !== district)
       : [...filters.selectedDistricts, district];
 
-    // When districts change, clear areas that are no longer valid
     let filteredAreas: string[] = [];
 
     if (newSelection.length > 0) {
-      // Only keep areas that belong to the selected districts
       const availableAreas = newSelection.reduce((acc, dist) => {
         return [...acc, ...(geographicalData.areas[dist] || [])];
       }, [] as string[]);
@@ -352,7 +336,6 @@ export default function TBoxUsagePatternPage() {
   };
 
   const handleApplyFilters = () => {
-    // Remove the requirement for selected TBoxes - allow fetching with no TBoxes selected
     setFilters({
       ...filters,
       shouldFetchData: true,
@@ -445,7 +428,6 @@ export default function TBoxUsagePatternPage() {
                 </CardHeader>
 
                 <CardContent className="flex-1 flex flex-col min-h-0 relative">
-                  {/* Scrollable content area */}
                   <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600 pr-2 space-y-6 pb-6">
                     {/* Time Range Section */}
                     <div className="space-y-4">
@@ -473,38 +455,11 @@ export default function TBoxUsagePatternPage() {
                       </Select>
 
                       {filters.quickTime === "custom" && (
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              className="w-full justify-start text-left font-normal bg-slate-800/50 border-slate-600/50 text-slate-300 hover:bg-slate-800"
-                            >
-                              <CalendarIcon className="mr-2 h-4 w-4" />
-                              {dateRange?.from ? (
-                                dateRange.to ? (
-                                  <>
-                                    {format(dateRange.from, "LLL dd, y")} -{" "}
-                                    {format(dateRange.to, "LLL dd, y")}
-                                  </>
-                                ) : (
-                                  format(dateRange.from, "LLL dd, y")
-                                )
-                              ) : (
-                                <span>Pick a date range</span>
-                              )}
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-auto p-0" align="start">
-                            <Calendar
-                              initialFocus
-                              mode="range"
-                              defaultMonth={dateRange?.from}
-                              selected={dateRange}
-                              onSelect={handleDateRangeChange}
-                              numberOfMonths={2}
-                            />
-                          </PopoverContent>
-                        </Popover>
+                        <DateRangePicker
+                          value={filters.dateRange}
+                          onChange={handleDateRangeChange}
+                          disabled={loading}
+                        />
                       )}
                     </div>
 
@@ -912,7 +867,7 @@ export default function TBoxUsagePatternPage() {
                     </div>
                   </div>
 
-                  {/* Fixed bottom section - only visible when scrolled to bottom */}
+                  {/* Fixed bottom section */}
                   <div className="pt-4 space-y-4 border-t border-slate-700/30 bg-slate-900/95 backdrop-blur-sm">
                     {/* Status Badges */}
                     <div className="flex flex-wrap gap-2">
@@ -949,7 +904,7 @@ export default function TBoxUsagePatternPage() {
                           className="bg-green-500/10 border-green-500/30 text-green-400"
                         >
                           <Database className="h-3 w-3 mr-1" />
-                          {`${currentData.totalTBoxes.toLocaleString()} of GPS points`}
+                          {`${currentData.totalTBoxes.toLocaleString()} GPS points`}
                         </Badge>
                       )}
                       {currentAvailableTboxes.length > 0 && !loadingTboxes && (
@@ -972,7 +927,7 @@ export default function TBoxUsagePatternPage() {
                       )}
                     </div>
 
-                    {/* Apply Button - always show when date range is set */}
+                    {/* Apply Button */}
                     <Button
                       onClick={handleApplyFilters}
                       disabled={loading}
@@ -1080,10 +1035,9 @@ export default function TBoxUsagePatternPage() {
                       </div>
                     )}
 
-                  {/* Map and Stats Layout */}
+                  {/* Map Display */}
                   {!loading && currentData && currentData.tboxes.length > 0 && (
                     <div className="flex-1 flex flex-col min-h-0">
-                      {/* Map Container - Takes most space */}
                       <div className="flex-1 rounded-lg overflow-hidden border border-slate-700/50 min-h-0">
                         <CustomizableMap
                           data={currentData.tboxes}

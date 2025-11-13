@@ -1,11 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import Papa from "papaparse";
-import { Upload, Battery } from "lucide-react";
 
 // ============================================================================
-// COMPONENT 1: DATA MANAGEMENT & ANALYSIS ENGINE
+// DATA ANALYSIS HOOK - SNOWFLAKE SUPPORT
 // ============================================================================
 export const useDataAnalysis = () => {
   const [data, setData] = useState([]);
@@ -14,28 +12,23 @@ export const useDataAnalysis = () => {
   const [scatterData, setScatterData] = useState([]);
   const [eda, setEda] = useState(null);
 
-  const processCSV = (file) => {
-    Papa.parse(file, {
-      header: true,
-      dynamicTyping: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const processedData = results.data.map((row) => ({
-          customerId: row.CUSTOMER_ID,
-          fullname: row.FULLNAME,
-          imei: row.TBOX_IMEI_NO,
-          avgSwaps: parseFloat(row.AVG_SWAPS_PER_WEEK) || 0,
-          avgSwapRevenue: parseFloat(row.AVG_SWAP_REVENUE_PER_WEEK) || 0,
-          avgHomeCharges: parseFloat(row.AVG_HOME_CHARGES_PER_WEEK) || 0,
-          avgHomeChargeRevenue:
-            parseFloat(row.AVG_HOME_CHARGE_REVENUE_PER_WEEK) || 0,
-          avgTotalRevenue: parseFloat(row.AVG_TOTAL_REVENUE_PER_WEEK) || 0,
-          avgDistance: parseFloat(row.AVG_DISTANCE_PER_WEEK) || 0,
-        }));
-        setData(processedData);
-        performAnalysis(processedData);
-      },
-    });
+  // Process data from Snowflake API response
+  const processSnowflakeData = (rawData) => {
+    const processedData = rawData.map((row) => ({
+      customerId: row.CUSTOMER_ID,
+      fullname: row.FULLNAME,
+      imei: row.TBOX_IMEI_NO,
+      avgSwaps: parseFloat(row.AVG_SWAPS_PER_WEEK) || 0,
+      avgSwapRevenue: parseFloat(row.AVG_SWAP_REVENUE_PER_WEEK) || 0,
+      avgHomeCharges: parseFloat(row.AVG_HOME_CHARGES_PER_WEEK) || 0,
+      avgHomeChargeRevenue: parseFloat(row.AVG_HOME_CHARGE_REVENUE_PER_WEEK) || 0,
+      avgTotalRevenue: parseFloat(row.AVG_TOTAL_REVENUE_PER_WEEK) || 0,
+      avgDistance: parseFloat(row.AVG_DISTANCE_PER_WEEK) || 0,
+    }));
+    
+    console.log("Processed data:", processedData.length, "customers");
+    setData(processedData);
+    performAnalysis(processedData);
   };
 
   const getCustomerSegment = (customer) => {
@@ -267,7 +260,7 @@ export const useDataAnalysis = () => {
     predictions,
     scatterData,
     eda,
-    processCSV,
+    processSnowflakeData,
     getCustomerSegment,
   };
 };

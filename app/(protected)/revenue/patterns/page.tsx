@@ -1,8 +1,13 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import Papa from "papaparse";
-import { Battery, BarChart3, TrendingUp, Target } from "lucide-react";
+import {
+  Battery,
+  BarChart3,
+  TrendingUp,
+  Target,
+  AlertCircle,
+} from "lucide-react";
 import { useDataAnalysis } from "./hooks/useDataAnalysis";
 import { OverviewDashboard } from "./components/OverviewDashboard";
 import { PatternAnalysis } from "./components/PatternAnalysis";
@@ -14,58 +19,78 @@ import { CustomerInsights } from "./components/CustomerInsights";
 const BatterySwapAnalytics = () => {
   const [activeTab, setActiveTab] = useState("eda");
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   const {
     data,
     customerSegments,
     predictions,
     scatterData,
     eda,
-    processCSV,
+    processSnowflakeData,
     getCustomerSegment,
   } = useDataAnalysis();
 
-  // Auto-load CSV on component mount
+  // Auto-load data from Snowflake on component mount
   useEffect(() => {
-    const loadCSV = async () => {
+    const loadDataFromSnowflake = async () => {
       try {
-        const response = await fetch("/UsagePtrn.csv");
-        if (!response.ok) {
-          throw new Error(`Failed to load CSV: ${response.status}`);
-        }
-        const csvText = await response.text();
+        setIsLoading(true);
+        setError(null);
 
-        // Parse CSV with proper configuration
-        Papa.parse(csvText, {
-          header: true,
-          dynamicTyping: true,
-          skipEmptyLines: true,
-          transformHeader: (header) => header.trim(),
-          complete: (results) => {
-            console.log("CSV Parsed:", results.data.length, "rows");
-            console.log("Sample row:", results.data[0]);
-
-            // Create a file object from the parsed data
-            const blob = new Blob([csvText], { type: "text/csv" });
-            const file = new File([blob], "UsagePtrn.csv", {
-              type: "text/csv",
-            });
-            processCSV(file);
-            setIsLoading(false);
+        // Query Snowflake via your API endpoint
+        const response = await fetch("/api/snowflake/query", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
           },
-          error: (error) => {
-            console.error("CSV Parse Error:", error);
-            setIsLoading(false);
-          },
+          body: JSON.stringify({
+            sql: `
+              SELECT 
+                CUSTOMER_ID,
+                FULLNAME,
+                TBOX_IMEI_NO,
+                AVG_SWAPS_PER_WEEK,
+                AVG_SWAP_REVENUE_PER_WEEK,
+                AVG_HOME_CHARGES_PER_WEEK,
+                AVG_HOME_CHARGE_REVENUE_PER_WEEK,
+                AVG_TOTAL_REVENUE_PER_WEEK,
+                AVG_DISTANCE_PER_WEEK
+              FROM YOUR_DATABASE.YOUR_SCHEMA.USAGE_PATTERN_TABLE
+              WHERE AVG_SWAPS_PER_WEEK IS NOT NULL
+              ORDER BY AVG_TOTAL_REVENUE_PER_WEEK DESC
+            `,
+            userId: "analytics-dashboard",
+          }),
         });
+
+        if (!response.ok) {
+          throw new Error(
+            `Failed to load data: ${response.status} ${response.statusText}`
+          );
+        }
+
+        const jsonData = await response.json();
+
+        if (!jsonData || jsonData.length === 0) {
+          throw new Error("No data returned from Snowflake");
+        }
+
+        console.log("Snowflake Data Loaded:", jsonData.length, "rows");
+        console.log("Sample row:", jsonData[0]);
+        console.log("Cache Status:", response.headers.get("X-Cache-Status"));
+        console.log("Cache Type:", response.headers.get("X-Cache-Type"));
+        console.log("Persistent:", response.headers.get("X-Persistent"));
+
+        processSnowflakeData(jsonData);
+        setIsLoading(false);
       } catch (error) {
-        console.error("Error loading CSV:", error);
-        alert(
-          "Failed to load UsagePtrn.csv. Please ensure the file is in the public folder."
-        );
+        console.error("Error loading data from Snowflake:", error);
+        setError(error.message);
         setIsLoading(false);
       }
     };
-    loadCSV();
+
+    loadDataFromSnowflake();
   }, []);
 
   const Badge = ({ children, variant = "default", className = "" }) => {
@@ -93,8 +118,26 @@ const BatterySwapAnalytics = () => {
           <Battery className="w-16 h-16 text-muted-foreground mb-4 mx-auto animate-pulse" />
           <h3 className="text-xl font-semibold mb-2">Loading Analytics...</h3>
           <p className="text-sm text-muted-foreground">
-            Processing UsagePtrn.csv
+            Fetching data from Snowflake
           </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8 min-h-screen">
+        <div className="text-center max-w-md">
+          <AlertCircle className="w-16 h-16 text-destructive mb-4 mx-auto" />
+          <h3 className="text-xl font-semibold mb-2">Failed to Load Data</h3>
+          <p className="text-sm text-muted-foreground mb-4">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+          >
+            Retry
+          </button>
         </div>
       </div>
     );
@@ -109,11 +152,11 @@ const BatterySwapAnalytics = () => {
               Battery Swap Analytics
             </h1>
             <p className="text-muted-foreground">
-              Customer behavior analysis and insights
+              Customer behavior analysis and insights from Snowflake
             </p>
           </div>
           <Badge variant="secondary" className="hidden sm:flex">
-            <Battery className="w-3 h-3 mr-1" /> Analytics
+            <Battery className="w-3 h-3 mr-1" /> Live Data
           </Badge>
         </div>
       </div>
