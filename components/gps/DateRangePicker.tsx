@@ -59,10 +59,10 @@ const DateRangePicker = ({
     return date >= tempRange.from && date <= tempRange.to;
   };
 
-  const handleDayClick = (day: number) => {
+  const handleDayClick = (day: number, monthOffset: number = 0) => {
     const clickedDate = new Date(
       currentMonth.getFullYear(),
-      currentMonth.getMonth(),
+      currentMonth.getMonth() + monthOffset,
       day
     );
 
@@ -241,9 +241,9 @@ const DateRangePicker = ({
             </div>
 
             {/* Two Month View */}
-            <div className="grid grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 gap-6">
               {renderCalendar(0)}
-              {renderCalendar(1)}
+              {/* {renderCalendar(1)} */}
             </div>
 
             {/* Selection Info & Actions */}

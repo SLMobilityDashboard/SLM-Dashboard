@@ -62,7 +62,7 @@ import {
 } from "lucide-react";
 import { useTBoxGPSData } from "@/hooks/Snowflake/gps/useTBoxGPSData";
 import GeoChoroplethMap from "@/components/gps/GeoHexHeatmap";
-import DatePickerWithRange from "@/components/ui/date-range-picker";
+import DatePickerWithRange from "@/components/gps/DateRangePicker";
 import { useGPSData, GPSFilters } from "@/hooks/Snowflake/gps/useGPSData";
 import { config } from "process";
 
@@ -544,6 +544,7 @@ export default function UsagePatternPage() {
                             date={filters.dateRange}
                             onDateChange={handleDateRangeChange}
                             className="bg-slate-800/50 border-slate-600/50"
+                            onChange={handleDateRangeChange}
                           />
                         </div>
                       )}

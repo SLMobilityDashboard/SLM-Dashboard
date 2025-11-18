@@ -1,31 +1,53 @@
+
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import {
+  Battery,
+  BarChart3,
+  TrendingUp,
+  Target,
+  AlertCircle,
+  MapPin,
+  Users,
+  DollarSign,
+  Activity,
+  Home,
+  Zap,
+  Search,
+  Filter,
+  X,
+  Download,
+  ArrowUp,
+  ArrowDown,
+} from "lucide-react";
 
 // ============================================================================
-// DATA ANALYSIS HOOK - SNOWFLAKE SUPPORT
+// DATA ANALYSIS HOOK
 // ============================================================================
 export const useDataAnalysis = () => {
   const [data, setData] = useState([]);
   const [customerSegments, setCustomerSegments] = useState([]);
   const [predictions, setPredictions] = useState([]);
   const [scatterData, setScatterData] = useState([]);
+  const [stationAnalysis, setStationAnalysis] = useState([]);
   const [eda, setEda] = useState(null);
 
-  // Process data from Snowflake API response
   const processSnowflakeData = (rawData) => {
     const processedData = rawData.map((row) => ({
+      tboxId: row.TBOXID,
       customerId: row.CUSTOMER_ID,
-      fullname: row.FULLNAME,
-      imei: row.TBOX_IMEI_NO,
-      avgSwaps: parseFloat(row.AVG_SWAPS_PER_WEEK) || 0,
-      avgSwapRevenue: parseFloat(row.AVG_SWAP_REVENUE_PER_WEEK) || 0,
-      avgHomeCharges: parseFloat(row.AVG_HOME_CHARGES_PER_WEEK) || 0,
-      avgHomeChargeRevenue: parseFloat(row.AVG_HOME_CHARGE_REVENUE_PER_WEEK) || 0,
-      avgTotalRevenue: parseFloat(row.AVG_TOTAL_REVENUE_PER_WEEK) || 0,
+      fullname: row.FULL_NAME,
+      sixMonthStart: row.SIX_MONTH_START,
+      avgSwaps: parseFloat(row.AVG_OF_SWAPS_PER_WEEK) || 0,
+      avgHomeCharges: parseFloat(row.AVG_OF_HOMECHARGINGS_PER_WEEK) || 0,
+      frequentStations: row.FREQUENT_SWIPING_STATIONS || "",
       avgDistance: parseFloat(row.AVG_DISTANCE_PER_WEEK) || 0,
+      avgSwapRevenue: parseFloat(row.AVG_SWAPS_REVENUE_PER_WEEK) || 0,
+      avgHomeChargeRevenue: parseFloat(row.AVG_HOMECHARGING_REVENUE_PER_WEEK) || 0,
+      avgTotalRevenue: parseFloat(row.AVG_TOTAL_REVENUE_PER_WEEK) || 0,
     }));
-    
+
     console.log("Processed data:", processedData.length, "customers");
     setData(processedData);
     performAnalysis(processedData);
@@ -84,22 +106,69 @@ export const useDataAnalysis = () => {
       avgRevenue:
         seg.customers.reduce((sum, c) => sum + c.avgTotalRevenue, 0) /
         (seg.customers.length || 1),
-      totalRevenue: seg.customers.reduce(
-        (sum, c) => sum + c.avgTotalRevenue,
-        0
-      ),
+      totalRevenue: seg.customers.reduce((sum, c) => sum + c.avgTotalRevenue, 0),
       avgSwaps:
         seg.customers.reduce((sum, c) => sum + c.avgSwaps, 0) /
         (seg.customers.length || 1),
     }));
   };
 
+  const analyzeStations = (customerData) => {
+    const stationMap = new Map();
+    
+    customerData.forEach((customer) => {
+      if (customer.frequentStations) {
+        const stations = customer.frequentStations
+          .split(',')
+          .map(s => s.trim())
+          .filter(s => s && s.toUpperCase() !== 'HOME_CHARGING'); // Filter out HOME_CHARGING
+        
+        stations.forEach(station => {
+          if (!stationMap.has(station)) {
+            stationMap.set(station, {
+              stationName: station,
+              customers: [],
+              totalSwaps: 0,
+              totalRevenue: 0,
+            });
+          }
+          
+          const stationData = stationMap.get(station);
+          // Check if customer is already added to avoid duplicates
+          const existingCustomer = stationData.customers.find(
+            c => c.customerId === customer.customerId
+          );
+          
+          if (!existingCustomer) {
+            stationData.customers.push({
+              name: customer.fullname,
+              customerId: customer.customerId,
+              swaps: customer.avgSwaps,
+              revenue: customer.avgSwapRevenue,
+              segment: getCustomerSegment(customer),
+            });
+            stationData.totalSwaps += customer.avgSwaps;
+            stationData.totalRevenue += customer.avgSwapRevenue;
+          }
+        });
+      }
+    });
+
+    const stationAnalysisData = Array.from(stationMap.values())
+      .map(station => ({
+        ...station,
+        customerCount: station.customers.length,
+        avgSwapsPerCustomer: station.totalSwaps / station.customers.length,
+        avgRevenuePerCustomer: station.totalRevenue / station.customers.length,
+      }))
+      .sort((a, b) => b.customerCount - a.customerCount);
+
+    setStationAnalysis(stationAnalysisData);
+  };
+
   const performEDA = (customerData) => {
     const totalCustomers = customerData.length;
-    const totalRevenue = customerData.reduce(
-      (sum, c) => sum + c.avgTotalRevenue,
-      0
-    );
+    const totalRevenue = customerData.reduce((sum, c) => sum + c.avgTotalRevenue, 0);
     const totalSwaps = customerData.reduce((sum, c) => sum + c.avgSwaps, 0);
 
     const swapUsers = customerData.filter((c) => c.avgSwaps > 0);
@@ -111,65 +180,25 @@ export const useDataAnalysis = () => {
     const avgRevenuePerSwap = totalSwaps > 0 ? totalRevenue / totalSwaps : 0;
 
     const revenueDistribution = [
-      {
-        range: "0-500",
-        count: customerData.filter((c) => c.avgTotalRevenue < 500).length,
-      },
-      {
-        range: "500-1000",
-        count: customerData.filter(
-          (c) => c.avgTotalRevenue >= 500 && c.avgTotalRevenue < 1000
-        ).length,
-      },
-      {
-        range: "1000-2000",
-        count: customerData.filter(
-          (c) => c.avgTotalRevenue >= 1000 && c.avgTotalRevenue < 2000
-        ).length,
-      },
-      {
-        range: "2000+",
-        count: customerData.filter((c) => c.avgTotalRevenue >= 2000).length,
-      },
+      { range: "0-500", count: customerData.filter((c) => c.avgTotalRevenue < 500).length },
+      { range: "500-1000", count: customerData.filter((c) => c.avgTotalRevenue >= 500 && c.avgTotalRevenue < 1000).length },
+      { range: "1000-2000", count: customerData.filter((c) => c.avgTotalRevenue >= 1000 && c.avgTotalRevenue < 2000).length },
+      { range: "2000+", count: customerData.filter((c) => c.avgTotalRevenue >= 2000).length },
     ];
 
     const swapDistribution = [
-      {
-        range: "0",
-        count: customerData.filter((c) => c.avgSwaps === 0).length,
-      },
-      {
-        range: "0-2",
-        count: customerData.filter((c) => c.avgSwaps > 0 && c.avgSwaps < 2)
-          .length,
-      },
-      {
-        range: "2-5",
-        count: customerData.filter((c) => c.avgSwaps >= 2 && c.avgSwaps < 5)
-          .length,
-      },
-      {
-        range: "5-10",
-        count: customerData.filter((c) => c.avgSwaps >= 5 && c.avgSwaps < 10)
-          .length,
-      },
-      {
-        range: "10+",
-        count: customerData.filter((c) => c.avgSwaps >= 10).length,
-      },
+      { range: "0", count: customerData.filter((c) => c.avgSwaps === 0).length },
+      { range: "0-2", count: customerData.filter((c) => c.avgSwaps > 0 && c.avgSwaps < 2).length },
+      { range: "2-5", count: customerData.filter((c) => c.avgSwaps >= 2 && c.avgSwaps < 5).length },
+      { range: "5-10", count: customerData.filter((c) => c.avgSwaps >= 5 && c.avgSwaps < 10).length },
+      { range: "10+", count: customerData.filter((c) => c.avgSwaps >= 10).length },
     ];
 
     const opportunityAnalysis = {
-      lowEngagement: customerData.filter(
-        (c) => c.avgSwaps < 2 && c.avgTotalRevenue < 500
-      ).length,
-      highPotential: customerData.filter(
-        (c) => c.avgSwaps >= 3 && c.avgSwaps < 7
-      ).length,
+      lowEngagement: customerData.filter((c) => c.avgSwaps < 2 && c.avgTotalRevenue < 500).length,
+      highPotential: customerData.filter((c) => c.avgSwaps >= 3 && c.avgSwaps < 7).length,
       premiumCandidates: customerData.filter((c) => c.avgSwaps >= 7).length,
-      homeChargeDominant: customerData.filter(
-        (c) => c.avgHomeCharges > c.avgSwaps * 2
-      ).length,
+      homeChargeDominant: customerData.filter((c) => c.avgHomeCharges > c.avgSwaps * 2).length,
     };
 
     setEda({
@@ -194,7 +223,7 @@ export const useDataAnalysis = () => {
       avgDistance: c.avgDistance,
       revenuePerSwap: c.avgSwaps > 0 ? c.avgTotalRevenue / c.avgSwaps : 0,
       name: c.fullname,
-      imei: c.imei,
+      tboxId: c.tboxId,
       segment: getCustomerSegment(c),
     }));
     setScatterData(scatter);
@@ -236,10 +265,10 @@ export const useDataAnalysis = () => {
         currentRevenue: customer.avgTotalRevenue,
         potentialRevenue: customer.avgTotalRevenue + revenueUpside,
         recommendedPackage: recommendPackage(customer),
-        priority:
-          churnScore > 0.6 ? "High" : churnScore > 0.3 ? "Medium" : "Low",
+        priority: churnScore > 0.6 ? "High" : churnScore > 0.3 ? "Medium" : "Low",
         currentSwaps: customer.avgSwaps,
         segment: getCustomerSegment(customer),
+        frequentStations: customer.frequentStations,
       };
     });
 
@@ -252,6 +281,7 @@ export const useDataAnalysis = () => {
     performMLPredictions(customerData);
     createScatterPlots(customerData);
     performEDA(customerData);
+    analyzeStations(customerData);
   };
 
   return {
@@ -259,6 +289,7 @@ export const useDataAnalysis = () => {
     customerSegments,
     predictions,
     scatterData,
+    stationAnalysis,
     eda,
     processSnowflakeData,
     getCustomerSegment,

@@ -223,7 +223,7 @@ export default function RevenueAnalyticsPage() {
       </Tabs>
 
       {/* Quick Insights Section */}
-      <Card className="bg-gray-50 dark:rounded-lg border bg-background p-2 shadow-sm">
+      {/* <Card className="bg-gray-50 dark:rounded-lg border bg-background p-2 shadow-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <PieChart className="w-5 h-5" />
@@ -274,7 +274,7 @@ export default function RevenueAnalyticsPage() {
             </div>
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
     </div>
   );
 }

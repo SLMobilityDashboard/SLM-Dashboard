@@ -23,6 +23,26 @@ export const PatternAnalysis = ({
     Legend,
   } = require("recharts");
 
+  // Add safety check for customerSegments
+  if (!customerSegments || customerSegments.length === 0) {
+    return (
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-6">
+        <p className="text-muted-foreground">Loading pattern analysis...</p>
+      </div>
+    );
+  }
+
+  // Add safety check for scatterData
+  if (!scatterData || scatterData.length === 0) {
+    return (
+      <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-6">
+        <p className="text-muted-foreground">
+          No data available for pattern analysis.
+        </p>
+      </div>
+    );
+  }
+
   const getSegmentColor = (segment) => {
     const colors = {
       "Power Riders": "hsl(var(--chart-1))",
@@ -39,10 +59,10 @@ export const PatternAnalysis = ({
       return (
         <div className="rounded-lg border bg-background p-3 shadow-md">
           <p className="font-bold mb-2">{data.name}</p>
-          {data.imei && (
+          {data.tboxId && (
             <div className="flex justify-between gap-4">
-              <span className="text-muted-foreground">IMEI No:</span>
-              <span className="font-medium">{data.imei}</span>
+              <span className="text-muted-foreground">TBOX ID:</span>
+              <span className="font-medium">{data.tboxId}</span>
             </div>
           )}
           <div className="space-y-1 text-sm">
@@ -96,8 +116,6 @@ export const PatternAnalysis = ({
     avgSwaps: seg.avgSwaps.toFixed(1),
     color: seg.color,
   }));
-
-  if (scatterData.length === 0) return null;
 
   return (
     <div className="space-y-6">
@@ -311,7 +329,7 @@ export const PatternAnalysis = ({
                   className="w-4 h-4 rounded-full"
                   style={{ backgroundColor: "hsl(var(--chart-1))" }}
                 ></div>
-                <span className="text-sm">Heavy Riders (5+ swaps)</span>
+                <span className="text-sm">Power Riders (5+ swaps)</span>
               </div>
               <div className="flex items-center gap-2">
                 <div

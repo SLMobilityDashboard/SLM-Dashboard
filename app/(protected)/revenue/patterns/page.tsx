@@ -6,18 +6,20 @@ import {
   BarChart3,
   TrendingUp,
   Target,
+  MapPin,
   AlertCircle,
 } from "lucide-react";
 import { useDataAnalysis } from "./hooks/useDataAnalysis";
 import { OverviewDashboard } from "./components/OverviewDashboard";
 import { PatternAnalysis } from "./components/PatternAnalysis";
+import { StationAnalysis } from "./components/StationAnalysis";
 import { CustomerInsights } from "./components/CustomerInsights";
 
 // ============================================================================
 // MAIN APP COMPONENT
 // ============================================================================
 const BatterySwapAnalytics = () => {
-  const [activeTab, setActiveTab] = useState("eda");
+  const [activeTab, setActiveTab] = useState("overview");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const {
@@ -25,19 +27,18 @@ const BatterySwapAnalytics = () => {
     customerSegments,
     predictions,
     scatterData,
+    stationAnalysis,
     eda,
     processSnowflakeData,
     getCustomerSegment,
   } = useDataAnalysis();
 
-  // Auto-load data from Snowflake on component mount
   useEffect(() => {
     const loadDataFromSnowflake = async () => {
       try {
         setIsLoading(true);
         setError(null);
 
-        // Query Snowflake via your API endpoint
         const response = await fetch("/api/snowflake/query", {
           method: "POST",
           headers: {
@@ -46,20 +47,21 @@ const BatterySwapAnalytics = () => {
           body: JSON.stringify({
             sql: `
               SELECT 
+                TBOXID,
                 CUSTOMER_ID,
-                FULLNAME,
-                TBOX_IMEI_NO,
-                AVG_SWAPS_PER_WEEK,
-                AVG_SWAP_REVENUE_PER_WEEK,
-                AVG_HOME_CHARGES_PER_WEEK,
-                AVG_HOME_CHARGE_REVENUE_PER_WEEK,
-                AVG_TOTAL_REVENUE_PER_WEEK,
-                AVG_DISTANCE_PER_WEEK
-              FROM YOUR_DATABASE.YOUR_SCHEMA.USAGE_PATTERN_TABLE
-              WHERE AVG_SWAPS_PER_WEEK IS NOT NULL
+                FULL_NAME,
+                SIX_MONTH_START,
+                AVG_OF_SWAPS_PER_WEEK,
+                AVG_OF_HOMECHARGINGS_PER_WEEK,
+                FREQUENT_SWIPING_STATIONS,
+                AVG_DISTANCE_PER_WEEK,
+                AVG_SWAPS_REVENUE_PER_WEEK,
+                AVG_HOMECHARGING_REVENUE_PER_WEEK,
+                AVG_TOTAL_REVENUE_PER_WEEK
+              FROM REPORT_DB.GPS_DASHBOARD.VEHICLE_6MONTH_AVERAGE_WEEKLY
+              WHERE AVG_OF_SWAPS_PER_WEEK IS NOT NULL
               ORDER BY AVG_TOTAL_REVENUE_PER_WEEK DESC
             `,
-            userId: "analytics-dashboard",
           }),
         });
 
@@ -77,9 +79,6 @@ const BatterySwapAnalytics = () => {
 
         console.log("Snowflake Data Loaded:", jsonData.length, "rows");
         console.log("Sample row:", jsonData[0]);
-        console.log("Cache Status:", response.headers.get("X-Cache-Status"));
-        console.log("Cache Type:", response.headers.get("X-Cache-Type"));
-        console.log("Persistent:", response.headers.get("X-Persistent"));
 
         processSnowflakeData(jsonData);
         setIsLoading(false);
@@ -93,18 +92,14 @@ const BatterySwapAnalytics = () => {
     loadDataFromSnowflake();
   }, []);
 
-  const Badge = ({ children, variant = "default", className = "" }) => {
+  const Badge = ({ children, variant = "default" }) => {
     const variants = {
-      default: "bg-primary text-primary-foreground hover:bg-primary/80",
-      secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-      destructive:
-        "bg-destructive text-destructive-foreground hover:bg-destructive/80",
-      outline:
-        "text-foreground border border-input bg-background hover:bg-accent",
+      default: "bg-primary text-primary-foreground",
+      secondary: "bg-secondary text-secondary-foreground",
     };
     return (
       <div
-        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors ${variants[variant]} ${className}`}
+        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${variants[variant]}`}
       >
         {children}
       </div>
@@ -144,7 +139,7 @@ const BatterySwapAnalytics = () => {
   }
 
   return (
-    <div className="flex-1 space-y-6 p-4 md:p-6 lg:p-8">
+    <div className="flex-1 space-y-6 p-4 md:p-6 lg:p-8 min-h-screen bg-background">
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="space-y-1">
@@ -155,7 +150,7 @@ const BatterySwapAnalytics = () => {
               Customer behavior analysis and insights from Snowflake
             </p>
           </div>
-          <Badge variant="secondary" className="hidden sm:flex">
+          <Badge variant="secondary">
             <Battery className="w-3 h-3 mr-1" /> Live Data
           </Badge>
         </div>
@@ -164,14 +159,15 @@ const BatterySwapAnalytics = () => {
       <div className="flex items-center justify-between overflow-x-auto">
         <div className="flex-1 inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
           {[
-            { id: "eda", label: "Overview", icon: BarChart3 },
+            { id: "overview", label: "Overview", icon: BarChart3 },
+            { id: "stations", label: "Stations", icon: MapPin },
             { id: "patterns", label: "Patterns", icon: TrendingUp },
-            { id: "predictions", label: "Insights", icon: Target },
+            { id: "insights", label: "Insights", icon: Target },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`w-full inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${
+              className={`w-full inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium transition-all ${
                 activeTab === tab.id
                   ? "bg-background text-foreground shadow-sm"
                   : "hover:bg-background/50"
@@ -184,10 +180,15 @@ const BatterySwapAnalytics = () => {
         </div>
       </div>
 
-      {activeTab === "eda" && (
+      {activeTab === "overview" && (
         <OverviewDashboard eda={eda} customerSegments={customerSegments} />
       )}
-
+      {activeTab === "stations" && (
+        <StationAnalysis
+          stationAnalysis={stationAnalysis}
+          getCustomerSegment={getCustomerSegment}
+        />
+      )}
       {activeTab === "patterns" && (
         <PatternAnalysis
           scatterData={scatterData}
@@ -195,8 +196,7 @@ const BatterySwapAnalytics = () => {
           getCustomerSegment={getCustomerSegment}
         />
       )}
-
-      {activeTab === "predictions" && (
+      {activeTab === "insights" && (
         <CustomerInsights predictions={predictions} />
       )}
     </div>

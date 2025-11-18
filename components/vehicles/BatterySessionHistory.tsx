@@ -1127,7 +1127,7 @@ export default function BatterySwapAnalytics({ IMEI }: { IMEI: string }) {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-slate-100">
             <TrendingUp className="w-5 h-5 text-cyan-400" />
-            Daily Sessions Timeline Last 30 days (Chronologically Stacked)
+            Daily Sessions Timeline Last 90 days (Chronologically Stacked)
           </CardTitle>
           <CardDescription className="text-slate-400">
             Sessions stacked by day in chronological order within each day.
@@ -1191,7 +1191,7 @@ export default function BatterySwapAnalytics({ IMEI }: { IMEI: string }) {
                     })}
 
                     {/* Vertical Grid Lines */}
-                    {dailyStackedData.slice(-30).map((dayData, index) => {
+                    {dailyStackedData.map((dayData, index) => {
                       const x =
                         dynamicXScale(dayData.date) +
                         dynamicXScale.bandwidth() / 2;
@@ -1242,7 +1242,7 @@ export default function BatterySwapAnalytics({ IMEI }: { IMEI: string }) {
                       tickStroke="#475569"
                     />
 
-                    {dailyStackedData.slice(-30).map((dayData) => {
+                    {dailyStackedData.map((dayData) => {
                       let cumulativeHours = 0;
                       const barX = dynamicXScale(dayData.date);
                       const barWidth = dynamicXScale.bandwidth();
