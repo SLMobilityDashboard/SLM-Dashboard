@@ -639,11 +639,46 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
     const diff = Math.abs(to.getTime() - from.getTime());
     const dayDiff = Math.ceil(diff / (1000 * 60 * 60 * 24));
 
+    let newAggregation = filters.aggregation;
     if (dayDiff > 400 && filters.aggregation === "daily") {
-      updateFilters({ aggregation: "monthly" });
+      newAggregation = "monthly";
     } else if (dayDiff < 30 && filters.aggregation !== "daily") {
-      updateFilters({ aggregation: "daily" });
+      newAggregation = "daily";
     }
+
+    // Update the entire filters state properly
+    setFilters((prev) => ({ ...prev, aggregation: newAggregation }));
+  };
+
+  const applyDateRange = () => {
+    if (!tempRange?.from || !tempRange?.to) return;
+
+    const originalFrom = new Date(tempRange.from);
+    const originalTo = new Date(tempRange.to);
+
+    const filterRange = {
+      from: originalFrom,
+      to: originalTo,
+    };
+
+    setDateRange(filterRange);
+
+    // First update filters with new date range
+    setFilters((prev) => ({ ...prev, dateRange: filterRange }));
+
+    // Then adjust aggregation based on the range
+    autoFixAggregation(filterRange);
+
+    // Apply everything immediately
+    setTimeout(() => {
+      setFilters((current) => {
+        setAppliedFilters(current);
+        return current;
+      });
+    }, 0);
+
+    setQuickTime("custom");
+    setIsCalendarOpen(false);
   };
 
   const handleDateSelect = (date: Date | undefined) => {
@@ -668,23 +703,28 @@ export function RevenueFilters({ onFiltersChange }: RevenueFiltersProps) {
     });
   };
 
-  const applyDateRange = () => {
-    if (!tempRange?.from || !tempRange?.to) return;
+  // const applyDateRange = () => {
+  //   if (!tempRange?.from || !tempRange?.to) return;
 
-    const originalFrom = new Date(tempRange.from);
-    const originalTo = new Date(tempRange.to);
+  //   const originalFrom = new Date(tempRange.from);
+  //   const originalTo = new Date(tempRange.to);
 
-    const filterRange = {
-      from: originalFrom,
-      to: originalTo,
-    };
+  //   const filterRange = {
+  //     from: originalFrom,
+  //     to: originalTo,
+  //   };
 
-    setDateRange(filterRange);
-    updateFilters({ dateRange: filterRange });
-    autoFixAggregation(filterRange);
-    setQuickTime("custom");
-    setIsCalendarOpen(false);
-  };
+  //   setDateRange(filterRange);
+
+  //   // Update both filters and appliedFilters
+  //   const updatedFilters = { ...filters, dateRange: filterRange };
+  //   setFilters(updatedFilters);
+  //   setAppliedFilters(updatedFilters); // Add this line
+
+  //   autoFixAggregation(filterRange);
+  //   setQuickTime("custom");
+  //   setIsCalendarOpen(false);
+  // };
 
   const handleCalendarMonthChange = (month: number) => {
     const newDate = new Date(currentMonth.getFullYear(), month);

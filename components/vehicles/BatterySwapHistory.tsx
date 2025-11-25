@@ -74,7 +74,6 @@ interface PaymentTransaction {
   AGREEMENT: string;
   EVENT_CODE: string;
   EVENT_MSG: string;
-  CREATED_EPOCH: number;
   DETAILS_JSON: any;
 }
 
@@ -107,13 +106,6 @@ interface LocationStats {
   topPaymentMethod: string;
 }
 
-interface FilterOptions {
-  dateRange: string;
-  paymentMethod: string;
-  status: string;
-  location: string;
-}
-
 // -------------------- Skeleton Components --------------------
 const ChartSkeleton = () => (
   <div className="h-[300px] w-full bg-slate-800/50 animate-pulse rounded-lg flex items-center justify-center">
@@ -136,7 +128,6 @@ function formatCurrency(amount: number, currency: string = "LKR"): string {
 }
 
 function formatDate(timestamp: number): string {
-  // Handle both 10-digit (seconds) and 13-digit (milliseconds) timestamps
   const date =
     timestamp > 9999999999 ? new Date(timestamp) : new Date(timestamp * 1000);
   return date.toLocaleDateString("en-US", {
@@ -144,9 +135,73 @@ function formatDate(timestamp: number): string {
     day: "numeric",
   });
 }
+const generateCSV = (data: PaymentTransaction[]): string => {
+  if (data.length === 0) return "";
+
+  const headers = Object.keys(data[0]);
+
+  const isEpochTimestamp = (key: string, value: any): boolean => {
+    const timestampFields = [
+      "CREATED_EPOCH",
+      "CREATED_AT",
+      "UPDATED_AT",
+      "TIMESTAMP",
+    ];
+    return (
+      timestampFields.includes(key) && typeof value === "number" && value > 0
+    );
+  };
+
+  const formatEpochToDateTime = (timestamp: number): string => {
+    const date =
+      timestamp > 9999999999 ? new Date(timestamp) : new Date(timestamp * 1000);
+
+    return date.toLocaleString("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  };
+
+  const csvRows = [
+    headers.join(","),
+    ...data.map((row) =>
+      headers
+        .map((header) => {
+          const value = row[header as keyof PaymentTransaction];
+
+          if (value === null || value === undefined) return "";
+
+          // Convert epoch timestamps → ALWAYS wrap in quotes
+          if (isEpochTimestamp(header, value)) {
+            const formatted = formatEpochToDateTime(value as number);
+            return `"${formatted.replace(/"/g, '""')}"`;
+          }
+
+          const stringValue = String(value);
+
+          if (
+            stringValue.includes(",") ||
+            stringValue.includes('"') ||
+            stringValue.includes("\n")
+          ) {
+            return `"${stringValue.replace(/"/g, '""')}"`;
+          }
+
+          return stringValue;
+        })
+        .join(",")
+    ),
+  ];
+
+  return csvRows.join("\n");
+};
 
 function formatDateTime(timestamp: number): string {
-  // Handle both 10-digit (seconds) and 13-digit (milliseconds) timestamps
   const date =
     timestamp > 9999999999 ? new Date(timestamp) : new Date(timestamp * 1000);
   return date.toLocaleString("en-US", {
@@ -174,12 +229,30 @@ function getPaymentMethodColor(method: string): string {
 // -------------------- Data Processing --------------------
 function processPaymentData(rawData: PaymentTransaction[]) {
   try {
-    // Filter for swap-related payments
     const swapPayments = rawData.filter(
       (payment) => payment.PAYMENT_TYPE === "BATTERY_SWAP"
     );
 
-    // Daily revenue analysis
+    if (swapPayments.length === 0) {
+      return {
+        dailyRevenue: [],
+        paymentMethods: [],
+        locations: [],
+        swapPayments: [],
+        metrics: {
+          totalRevenue: 0,
+          totalSwaps: 0,
+          totalRefunds: 0,
+          successRate: 0,
+          avgTransactionValue: 0,
+          uniqueCustomers: 0,
+          uniqueLocations: 0,
+          uniqueStations: 0,
+        },
+        statusDistribution: {},
+      };
+    }
+
     const dailyData: Record<string, DailyRevenue> = {};
 
     swapPayments.forEach((payment) => {
@@ -211,16 +284,14 @@ function processPaymentData(rawData: PaymentTransaction[]) {
       }
     });
 
-    // Calculate averages
     Object.values(dailyData).forEach((day) => {
       day.avgAmount = day.swapCount > 0 ? day.revenue / day.swapCount : 0;
     });
 
     const dailyRevenue = Object.values(dailyData)
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-      .reverse(); // Most recent first
+      .reverse();
 
-    // Payment method analysis
     const methodStats: Record<string, PaymentMethodStats> = {};
 
     swapPayments.forEach((payment) => {
@@ -242,7 +313,6 @@ function processPaymentData(rawData: PaymentTransaction[]) {
       methodStats[method].totalAmount += payment.AMOUNT || 0;
     });
 
-    // Calculate success rates and averages
     Object.values(methodStats).forEach((stat) => {
       stat.avgAmount = stat.count > 0 ? stat.totalAmount / stat.count : 0;
       const methodPayments = swapPayments.filter(
@@ -259,7 +329,6 @@ function processPaymentData(rawData: PaymentTransaction[]) {
 
     const paymentMethods = Object.values(methodStats);
 
-    // Location analysis
     const locationStats: Record<string, LocationStats> = {};
 
     swapPayments.forEach((payment) => {
@@ -281,7 +350,6 @@ function processPaymentData(rawData: PaymentTransaction[]) {
       locationStats[key].totalRevenue += payment.AMOUNT || 0;
     });
 
-    // Calculate location averages and success rates
     Object.values(locationStats).forEach((stat) => {
       stat.avgAmount =
         stat.swapCount > 0 ? stat.totalRevenue / stat.swapCount : 0;
@@ -299,7 +367,6 @@ function processPaymentData(rawData: PaymentTransaction[]) {
           ? (successfulPayments / locationPayments.length) * 100
           : 0;
 
-      // Find top payment method for this location
       const methodCounts: Record<string, number> = {};
       locationPayments.forEach((p) => {
         const method = p.PAYMENT_METHOD || p.PAYMENT_METHOD_TYPE || "UNKNOWN";
@@ -313,9 +380,8 @@ function processPaymentData(rawData: PaymentTransaction[]) {
 
     const locations = Object.values(locationStats)
       .sort((a, b) => b.totalRevenue - a.totalRevenue)
-      .slice(0, 10); // Top 10 locations
+      .slice(0, 10);
 
-    // Calculate overall metrics
     const totalRevenue = swapPayments.reduce(
       (sum, p) => sum + (p.AMOUNT_PAID || p.AMOUNT || 0),
       0
@@ -340,7 +406,6 @@ function processPaymentData(rawData: PaymentTransaction[]) {
     const uniqueStations = new Set(swapPayments.map((p) => p.STATION_NAME))
       .size;
 
-    // Payment status distribution
     const statusDistribution = swapPayments.reduce((acc, payment) => {
       const status = payment.PAYMENT_STATUS || "UNKNOWN";
       acc[status] = (acc[status] || 0) + 1;
@@ -465,25 +530,25 @@ export default function BatterySwapHistory({
       setRefreshing(true);
       setError(null);
 
-      const cutoffUnix = Date.now() - 100 * 24 * 60 * 60 * 1000; // 100 days ago in ms
-
-      const response = await fetch("/api/query", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          sql: `
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_BASE_URL}/api/query`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            sql: `
             SELECT *
               FROM SOURCE_DATA.DYNAMO_DB.FACT_PAYMENT
               WHERE CUSTOMER_ID = '${CustomerID}'
-                AND CREATED_EPOCH >= ${cutoffUnix}
                 AND PAYMENT_TYPE = 'BATTERY_SWAP'
               ORDER BY CREATED_EPOCH DESC
-              LIMIT 200;
+              LIMIT 50;
             `,
-        }),
-      });
+          }),
+        }
+      );
 
       if (!response.ok) {
         throw new Error(
@@ -492,66 +557,37 @@ export default function BatterySwapHistory({
       }
 
       const data = await response.json();
-      console.log("Fetched payment data:", data);
       if (data.error) {
         throw new Error(data.error);
       }
 
-      // Validate that we received an array
       if (!Array.isArray(data)) {
         throw new Error(
           "Invalid data format: expected an array of payment transactions"
         );
       }
 
-      // Basic validation of data structure
-      if (data.length > 0) {
-        const firstRecord = data[0];
-        const requiredFields = [
-          "PAYMENT_ID",
-          "CUSTOMER_ID",
-          "PAYMENT_STATUS",
-          "CREATED_EPOCH",
-        ];
-        const missingFields = requiredFields.filter(
-          (field) => !(field in firstRecord)
-        );
-
-        if (missingFields.length > 0) {
-          console.warn(
-            `Warning: Missing expected fields in data: ${missingFields.join(
-              ", "
-            )}`
-          );
-        }
-      }
-
       setRawData(data);
-      console.log(`Loaded ${data.length} payment records`);
     } catch (err) {
       const errorMessage =
         err instanceof Error
           ? err.message
           : "An unknown error occurred while fetching data";
       setError(errorMessage);
-      console.error("Error fetching payment data:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [CustomerID]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  // Memoize analytics processing for performance
   const analytics = useMemo(() => {
-    console.log("Processing payment data for analytics...", rawData);
     return processPaymentData(rawData);
   }, [rawData]);
 
-  // Pagination calculations
   const totalPages = Math.ceil(analytics.swapPayments.length / rowsPerPage);
   const startIndex = (currentPage - 1) * rowsPerPage;
   const endIndex = startIndex + rowsPerPage;
@@ -571,7 +607,7 @@ export default function BatterySwapHistory({
 
   if (loading) {
     return (
-      <div className="grid gap-6 p-6 min-h-screen">
+      <div className="grid gap-6 p-6 min-h-screen bg-slate-950">
         <div className="space-y-2">
           <div className="h-8 w-80 bg-slate-800/50 animate-pulse rounded" />
           <div className="h-4 w-96 bg-slate-800/50 animate-pulse rounded" />
@@ -611,13 +647,119 @@ export default function BatterySwapHistory({
     );
   }
 
+  // Check if there are no battery swap records
+  if (!loading && analytics.swapPayments.length === 0) {
+    return (
+      <div className="p-6 bg-slate-950 min-h-screen">
+        <div className="flex items-center justify-between mb-6">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold text-slate-100 flex items-center gap-3">
+              <Battery className="w-8 h-8 text-cyan-400" />
+              Battery Swap Payment Analytics
+            </h1>
+            <p className="text-slate-400">
+              Comprehensive payment insights and financial metrics for battery
+              swap operations
+            </p>
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </button>
+        </div>
+
+        <Card className="bg-gradient-to-br from-slate-900/70 to-slate-800/70 border-slate-700">
+          <CardContent className="p-12 text-center">
+            <div className="max-w-md mx-auto space-y-6">
+              <div className="w-24 h-24 mx-auto bg-slate-800/50 rounded-full flex items-center justify-center">
+                <Battery className="w-12 h-12 text-cyan-400" />
+              </div>
+
+              <div className="space-y-3">
+                <h2 className="text-2xl font-bold text-slate-100">
+                  No Battery Swap Records Yet
+                </h2>
+                <p className="text-slate-400 text-lg leading-relaxed">
+                  We haven't detected any battery swap transactions for your
+                  account yet. Once you start using battery swap stations,
+                  you'll see comprehensive analytics here including:
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 text-left bg-slate-800/30 rounded-lg p-6">
+                <div className="flex items-start gap-3">
+                  <DollarSign className="w-5 h-5 text-green-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-slate-200 font-medium">
+                      Revenue Analytics
+                    </div>
+                    <div className="text-sm text-slate-400">
+                      Track your spending on battery swaps over time
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <MapPin className="w-5 h-5 text-orange-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-slate-200 font-medium">
+                      Location Insights
+                    </div>
+                    <div className="text-sm text-slate-400">
+                      Discover your most-used swap stations and locations
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <CreditCard className="w-5 h-5 text-blue-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-slate-200 font-medium">
+                      Payment Methods
+                    </div>
+                    <div className="text-sm text-slate-400">
+                      Analyze payment preferences and success rates
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <Activity className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-slate-200 font-medium">
+                      Usage Patterns
+                    </div>
+                    <div className="text-sm text-slate-400">
+                      Understand your battery swap frequency and trends
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-700">
+                <p className="text-sm text-slate-500">
+                  Visit any battery swap station to get started and unlock
+                  personalized insights!
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-6 p-6 min-h-screen">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="space-y-2">
           <h1 className="text-3xl font-bold text-slate-100">
-            Battery Swap Payment Analytics - Last 3 months
+            Battery Swap Payment Analytics - Last{" "}
+            {analytics.swapPayments.length} Swaps
           </h1>
           <p className="text-slate-400">
             Comprehensive payment insights and financial metrics for battery
@@ -638,15 +780,18 @@ export default function BatterySwapHistory({
           <button
             className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
             onClick={() => {
-              const csvContent = analytics.swapPayments
-                .map((payment) => Object.values(payment).join(","))
-                .join("\n");
+              const csvContent = generateCSV(analytics.swapPayments);
+              if (!csvContent) return;
+
               const blob = new Blob([csvContent], { type: "text/csv" });
               const url = window.URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = "battery_swap_payments.csv";
+              a.download = `battery_swap_payments_${
+                new Date().toISOString().split("T")[0]
+              }.csv`;
               a.click();
+              window.URL.revokeObjectURL(url);
             }}
           >
             <Download className="w-4 h-4" />
@@ -657,61 +802,61 @@ export default function BatterySwapHistory({
 
       {/* Key Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-slate-900/50 border-slate-800">
+        <Card className="bg-gradient-to-br from-green-900/30 to-green-800/20 border-green-800/50">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
-              <DollarSign className="w-4 h-4 text-green-400" />
-              <span className="text-sm text-slate-400">Total Revenue</span>
+              <DollarSign className="w-5 h-5 text-green-400" />
+              <span className="text-sm text-slate-300">Total Revenue</span>
             </div>
-            <div className="text-2xl font-bold text-slate-100">
+            <div className="text-2xl font-bold text-green-400">
               {formatCurrency(analytics.metrics.totalRevenue)}
             </div>
-            <div className="text-xs text-slate-500 mt-1">
+            <div className="text-xs text-green-300 mt-1">
               From {analytics.metrics.totalSwaps} swaps
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-slate-900/50 border-slate-800">
+        <Card className="bg-gradient-to-br from-cyan-900/30 to-cyan-800/20 border-cyan-800/50">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
-              <Battery className="w-4 h-4 text-cyan-400" />
-              <span className="text-sm text-slate-400">Total Swaps</span>
+              <Battery className="w-5 h-5 text-cyan-400" />
+              <span className="text-sm text-slate-300">Total Swaps</span>
             </div>
-            <div className="text-2xl font-bold text-slate-100">
+            <div className="text-2xl font-bold text-cyan-400">
               {analytics.metrics.totalSwaps.toLocaleString()}
             </div>
-            <div className="text-xs text-green-400 mt-1">
+            <div className="text-xs text-cyan-300 mt-1">
               {analytics.metrics.successRate.toFixed(1)}% success rate
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-slate-900/50 border-slate-800">
+        <Card className="bg-gradient-to-br from-purple-900/30 to-purple-800/20 border-purple-800/50">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
-              <TrendingUp className="w-4 h-4 text-purple-400" />
-              <span className="text-sm text-slate-400">Avg Transaction</span>
+              <TrendingUp className="w-5 h-5 text-purple-400" />
+              <span className="text-sm text-slate-300">Avg Transaction</span>
             </div>
-            <div className="text-2xl font-bold text-slate-100">
+            <div className="text-2xl font-bold text-purple-400">
               {formatCurrency(analytics.metrics.avgTransactionValue)}
             </div>
-            <div className="text-xs text-slate-500 mt-1">
+            <div className="text-xs text-purple-300 mt-1">
               Per swap transaction
             </div>
           </CardContent>
         </Card>
 
-        <Card className="bg-slate-900/50 border-slate-800">
+        <Card className="bg-gradient-to-br from-orange-900/30 to-orange-800/20 border-orange-800/50">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-2">
-              <Users className="w-4 h-4 text-orange-400" />
-              <span className="text-sm text-slate-400">Stations Accessed</span>
+              <MapPin className="w-5 h-5 text-orange-400" />
+              <span className="text-sm text-slate-300">Stations Accessed</span>
             </div>
-            <div className="text-2xl font-bold text-slate-100">
+            <div className="text-2xl font-bold text-orange-400">
               {analytics.metrics.uniqueStations}
             </div>
-            <div className="text-xs text-slate-500 mt-1">
+            <div className="text-xs text-orange-300 mt-1">
               Across {analytics.metrics.uniqueLocations} locations
             </div>
           </CardContent>

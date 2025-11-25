@@ -238,11 +238,13 @@ export function RevenueByArea({ filters, chartTitle }: RevenueByAreaProps) {
         console.log("Area Revenue Data:", result);
 
         setData(result || []);
+        prevFiltersRef.current = currentFiltersString; // Update after successful fetch
       } catch (err: any) {
         console.error("Error fetching area revenue data:", err);
         setError(err);
       } finally {
         setLoading(false);
+        isFetchingRef.current = false; // Reset fetching flag
       }
     };
 

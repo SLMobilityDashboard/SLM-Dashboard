@@ -36,7 +36,6 @@ import {
   Calendar,
   Users,
   Settings,
-  ShoppingCartIcon,
   BatteryCharging,
   Cpu,
   LineChart,
@@ -52,14 +51,16 @@ import {
   Bike,
   Target,
   ShoppingCart,
+  ChevronRight,
+  X,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { act, useState } from "react";
-import path from "path";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 
 export function MainSidebar() {
   const pathname = usePathname();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     dashboard: true,
     gps: pathname?.startsWith("/gps") || false,
@@ -71,11 +72,31 @@ export function MainSidebar() {
     revenue: pathname?.startsWith("/revenue") || false,
   });
 
+  // Prevent body scroll when mobile menu is open
+  useEffect(() => {
+    if (isMobileMenuOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [isMobileMenuOpen]);
+
   const toggleGroup = (group: string) => {
     setOpenGroups((prev) => ({ ...prev, [group]: !prev[group] }));
   };
 
   const isActive = (path: string) => pathname === path;
+
+  const closeMobileMenu = () => {
+    setIsMobileMenuOpen(false);
+  };
+
+  const openMobileMenu = () => {
+    setIsMobileMenuOpen(true);
+  };
 
   // Define category icons with their colors for consistency
   const categoryIcons = {
@@ -146,17 +167,6 @@ export function MainSidebar() {
           label: "Route Planning",
           icon: <Route className="h-4 w-4" />,
         },
-        // {
-        //   path: "/gps/station-allocation",
-        //   label: "Station Allocation",
-        //   icon: <Layers className="h-4 w-4" />,
-        // },
-        // {
-        //   path: "/gps/closest-stations",
-        //   label: "Closest Stations",
-        //   icon: <BarChart3 className="h-4 w-4" />,
-        // },
-
         {
           path: "/gps/usage-patterns",
           label: "Usage Patterns",
@@ -172,11 +182,6 @@ export function MainSidebar() {
           label: "Density Analysis",
           icon: <Hexagon className="h-4 w-4" />,
         },
-        // {
-        //   path: "/gps/batch-analysis",
-        //   label: "GPS Batch Analysis",
-        //   icon: <FileBarChart className="h-4 w-4" />,
-        // },
       ],
     },
     {
@@ -217,45 +222,12 @@ export function MainSidebar() {
           label: "Vehicle Overview",
           icon: <Activity className="h-4 w-4" />,
         },
-        {
-          path: "/batteries",
-          label: "Battery Overview",
-          icon: <Battery className="h-4 w-4" />,
-        },
-        {
-          path: "/stations",
-          label: "BSS Overview",
-          icon: <Zap className="h-4 w-4" />,
-        },
-
-        // {
-        // {
-        //   path: "/vehicles/proximity",
-        //   label: "Proximity",
-        //   icon: <Cpu className="h-4 w-4" />,
-        // },
-        // {
-        //   path: "/vehicles/360",
-        //   label: "Vehicle 360 view",
-        //   icon: <Gauge className="h-4 w-4" />,
-        // },
-        // {
-        //   path: "/vehicles/maintenance",
-        //   label: "Maintenance",
-        //   icon: <Wrench className="h-4 w-4" />,
-        // },
-        // {
-        //   path: "/vehicles/charging",
-        //   label: "Home Charging",
-        //   icon: <Zap className="h-4 w-4" />,
-        // },
       ],
     },
     {
       id: "sales",
       label: "Sales Management",
       icon: categoryIcons.sales,
-      show: true,
       items: [
         {
           path: "/sales",
@@ -277,7 +249,6 @@ export function MainSidebar() {
           label: "Dealer Performance",
           icon: <Building2 className="h-4 w-4" />,
         },
-
         {
           path: "/sales/customers",
           label: "Customer Insights",
@@ -286,37 +257,9 @@ export function MainSidebar() {
       ],
     },
     {
-      id: "fleet",
-      label: "Fleet Management",
-      icon: categoryIcons.fleet,
-      items: [
-        {
-          path: "/fleet",
-          label: "Overview",
-          icon: <Activity className="h-4 w-4" />,
-        },
-        {
-          path: "/fleet/vehicles",
-          label: "Vehicles",
-          icon: <Hexagon className="h-4 w-4" />,
-        },
-        {
-          path: "/fleet/maintenance",
-          label: "Maintenance",
-          icon: <Wrench className="h-4 w-4" />,
-        },
-        {
-          path: "/fleet/schedule",
-          label: "Schedule",
-          icon: <Calendar className="h-4 w-4" />,
-        },
-      ],
-    },
-    {
       id: "charging",
       label: "Swapping Stations",
       icon: categoryIcons.charging,
-      // show: true,
       items: [
         {
           path: "/charging",
@@ -369,12 +312,6 @@ export function MainSidebar() {
           label: "Packages",
           icon: <Package className="h-4 w-4" />,
         },
-
-        // {
-        //   path: "/revenue/forecasting",
-        //   label: "Forecasting",
-        //   icon: <Target className="h-4 w-4" />,
-        // },
       ],
     },
     {
@@ -411,290 +348,402 @@ export function MainSidebar() {
     (category) => category.show === true
   );
 
-  return (
-    <Sidebar className="border-r border-slate-800/80 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 w-64 shadow-2xl">
-      <SidebarHeader className="h-20 border-b flex px-5 justify-between border-slate-800/60 bg-slate-900/50 backdrop-blur-sm">
-        <div className="flex items-center gap-x-3 mt-2">
-          {/* Icon with glow */}
-          <div className="relative flex items-center justify-center h-10 w-10">
-            <Image src="/icon.png" alt="Logo" width={40} height={40} />
-            <div className="absolute inset-0 rounded-full bg-cyan-400/20 blur-md"></div>
-          </div>
+  const SidebarContentComponent = ({
+    showCloseButton = false,
+    isMobile = false,
+  }) => (
+    <div className="flex flex-col h-full">
+      {/* Header Section */}
+      <div
+        className={
+          isMobile
+            ? "h-20 border-b flex px-5 justify-between border-slate-800/60 bg-slate-900/50 backdrop-blur-sm shrink-0"
+            : ""
+        }
+      >
+        {isMobile ? (
+          // Mobile header without SidebarHeader wrapper
+          <>
+            <div className="flex items-center gap-x-3 mt-2">
+              {/* Icon with glow */}
+              <div className="relative flex items-center justify-center h-10 w-10">
+                <Image src="/icon.png" alt="Logo" width={40} height={40} />
+                <div className="absolute inset-0 rounded-full bg-cyan-400/20 blur-md"></div>
+              </div>
 
-          {/* Text block */}
-          <a href="/" className="inline-block">
-            <div className="flex flex-col self-center leading-none cursor-pointer">
-              <span className="text-xl font-bold bg-gradient-to-r from-cyan-300 via-blue-400 to-cyan-500 bg-clip-text text-transparent tracking-wide">
-                SL-MOBILITY
-              </span>
-              <span className="text-xs text-slate-400 font-medium tracking-wider mt-0.5">
-                ANALYTICS PLATFORM
-              </span>
+              {/* Text block */}
+              <a href="/" className="inline-block" onClick={closeMobileMenu}>
+                <div className="flex flex-col self-center leading-none cursor-pointer">
+                  <span className="text-xl font-bold bg-gradient-to-r from-cyan-300 via-blue-400 to-cyan-500 bg-clip-text text-transparent tracking-wide">
+                    SL-MOBILITY
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium tracking-wider mt-0.5">
+                    ANALYTICS PLATFORM
+                  </span>
+                </div>
+              </a>
             </div>
-          </a>
-        </div>
-      </SidebarHeader>
+          </>
+        ) : (
+          // Desktop header with SidebarHeader wrapper
+          <SidebarHeader className="h-20 border-b flex px-5 justify-between border-slate-800/60 bg-slate-900/50 backdrop-blur-sm shrink-0">
+            <div className="flex items-center gap-x-3 mt-2">
+              {/* Icon with glow */}
+              <div className="relative flex items-center justify-center h-10 w-10">
+                <Image src="/icon.png" alt="Logo" width={40} height={40} />
+                <div className="absolute inset-0 rounded-full bg-cyan-400/20 blur-md"></div>
+              </div>
 
-      <SidebarContent className="py-2 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900">
-        {/* Dashboard */}
-
-        {/* Real-Time Analytics Section */}
-        <SidebarGroup className="px-2 py-1">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={isActive("/realtime")}
-                className={`w-full px-3 py-2 rounded-md transition-colors ${
-                  isActive("/realtime")
-                    ? "bg-gradient-to-r from-pink-500/15 to-pink-600/10 border border-pink-500/20"
-                    : "hover:bg-slate-800"
-                }`}
-              >
-                <Link href="/realtime" className="flex items-center space-x-3">
-                  <div
-                    className={`flex items-center justify-center h-6 w-6 rounded-md ${
-                      isActive("/realtime")
-                        ? "bg-pink-500/15 text-pink-400"
-                        : "bg-pink-500/10 text-pink-500"
-                    }`}
-                  >
-                    <LineChart className="h-4 w-4" />
-                  </div>
-                  <span>Real-Time Analytics</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroup>
-
-        {/* Adhoc Section */}
-        <SidebarGroup className="px-2 py-1">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={isActive("/adhoc")}
-                className={`w-full px-3 py-2 rounded-md transition-colors ${
-                  isActive("/adhoc")
-                    ? "bg-gradient-to-r from-emerald-500/15 to-emerald-600/10 border border-emerald-500/20"
-                    : "hover:bg-slate-800"
-                }`}
-              >
-                <Link href="/adhoc" className="flex items-center space-x-3">
-                  <div
-                    className={`flex items-center justify-center h-6 w-6 rounded-md ${
-                      isActive("/adhoc")
-                        ? "bg-emerald-500/15 text-emerald-400"
-                        : "bg-emerald-500/10 text-emerald-500"
-                    }`}
-                  >
-                    <BrainCog className="h-4 w-4" />
-                  </div>
-                  <span>Adhoc Analytics</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroup>
-
-        <SidebarGroup className="px-2 py-1">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={isActive("/predictive")}
-                className={`w-full px-3 py-2 rounded-md transition-colors ${
-                  isActive("/predictive")
-                    ? "bg-gradient-to-r from-blue-500/15 to-blue-600/10 border border-blue-500/20"
-                    : "hover:bg-slate-800"
-                }`}
-              >
-                <Link
-                  href="/predictive"
-                  className="flex items-center space-x-3"
-                >
-                  <div
-                    className={`flex items-center justify-center h-6 w-6 rounded-md transition-colors ${
-                      isActive("/")
-                        ? "bg-blue-500/15 text-blue-400"
-                        : "bg-blue-500/10 text-blue-500"
-                    }`}
-                  >
-                    <Home className="h-4 w-4" />
-                  </div>
-                  <span>Predictive Analytics</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroup>
-
-        {visibleCategories.length > 0 && (
-          <SidebarSeparator className="my-1 bg-slate-800" />
+              {/* Text block */}
+              <a href="/" className="inline-block" onClick={closeMobileMenu}>
+                <div className="flex flex-col self-center leading-none cursor-pointer">
+                  <span className="text-xl font-bold bg-gradient-to-r from-cyan-300 via-blue-400 to-cyan-500 bg-clip-text text-transparent tracking-wide">
+                    SL-MOBILITY
+                  </span>
+                  <span className="text-xs text-slate-400 font-medium tracking-wider mt-0.5">
+                    ANALYTICS PLATFORM
+                  </span>
+                </div>
+              </a>
+            </div>
+          </SidebarHeader>
         )}
+      </div>
 
-        {/* Menu Categories - Only show categories with show: true */}
-        {visibleCategories.map((category) => (
-          <Collapsible
-            key={category.id}
-            open={openGroups[category.id]}
-            onOpenChange={() => toggleGroup(category.id)}
-            className="group relative px-2 py-1"
-          >
-            <SidebarGroup>
-              <SidebarGroupLabel asChild>
-                <CollapsibleTrigger className="flex w-full items-center px-3 py-2 rounded-md transition-colors hover:bg-slate-800 cursor-pointer">
-                  <div className="flex flex-1 items-center">
-                    <div
-                      className={`flex items-center justify-center h-6 w-6 rounded-md ${category.icon.color.replace(
-                        "text-",
-                        "bg-"
-                      )}/10 ${category.icon.color} mr-3`}
-                    >
-                      {category.icon.icon}
-                    </div>
-                    <span className="font-medium">{category.label}</span>
-                  </div>
-                  <ChevronDown
-                    className={`h-4 w-4 ${
-                      category.icon.color
-                    } transition-transform duration-200 ease-in-out ${
-                      openGroups[category.id] ? "rotate-180" : ""
-                    }`}
-                  />
-                </CollapsibleTrigger>
-              </SidebarGroupLabel>
+      {/* Scrollable Content Section */}
+      <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-slate-900">
+        {isMobile ? (
+          // Mobile content without SidebarContent wrapper
+          <div className="py-2">{renderMenuContent()}</div>
+        ) : (
+          // Desktop content with SidebarContent wrapper
+          <SidebarContent className="py-2">
+            {renderMenuContent()}
+          </SidebarContent>
+        )}
+      </div>
 
-              <CollapsibleContent className="overflow-hidden transition-all data-[state=closed]:animate-slideUp data-[state=open]:animate-slideDown">
-                <SidebarGroupContent>
-                  <SidebarMenu className="pl-9 mt-1 space-y-1">
-                    {category.items.map((item) => (
-                      <SidebarMenuItem key={item.path}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={isActive(item.path)}
-                          className={`w-full px-3 py-2 rounded-md transition-colors ${
-                            isActive(item.path)
-                              ? `bg-gradient-to-r ${
-                                  category.icon.color.includes("cyan")
-                                    ? "from-cyan-500/15 to-cyan-600/10 border border-cyan-500/20"
-                                    : category.icon.color.includes("emerald")
-                                    ? "from-emerald-500/15 to-emerald-600/10 border border-emerald-500/20"
-                                    : "from-blue-500/15 to-blue-600/10 border border-blue-500/20"
-                                } ${category.icon.color}`
-                              : "hover:bg-slate-800 text-slate-300"
-                          }`}
-                        >
-                          <Link
-                            href={item.path}
-                            className="flex items-center space-x-3"
-                          >
-                            {item.icon}
-                            <span>{item.label}</span>
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </CollapsibleContent>
-            </SidebarGroup>
-          </Collapsible>
-        ))}
-
-        <SidebarSeparator className="my-2 bg-slate-800" />
-
-        {/* Settings */}
-        <SidebarGroup className="px-2 py-1">
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={isActive("/settings")}
-                className={`w-full px-3 py-2 rounded-md transition-colors ${
+      {/* Sticky Footer Section */}
+      <div className="shrink-0 border-t">
+        {isMobile ? (
+          // Mobile footer without SidebarFooter wrapper
+          <>
+            {/* Settings */}
+            <div className="px-2 py-2">
+              <Link
+                href="/settings"
+                className={`flex items-center space-x-3 w-full px-3 py-1 rounded-md transition-colors ${
                   isActive("/settings")
                     ? "bg-gradient-to-r from-slate-500/15 to-slate-600/10 border border-slate-500/20"
                     : "hover:bg-slate-800"
                 }`}
+                onClick={closeMobileMenu}
               >
-                <Link href="/settings" className="flex items-center space-x-3">
-                  <div className="flex items-center justify-center h-6 w-6 rounded-md bg-slate-500/10 text-slate-500">
-                    <Settings className="h-4 w-4" />
-                  </div>
-                  <span>Settings</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarGroup>
-      </SidebarContent>
+                <div className="flex items-center justify-center h-6 w-6 rounded-md bg-slate-500/10 text-slate-500">
+                  <Settings className="h-4 w-4" />
+                </div>
+                <span>Settings</span>
+              </Link>
+            </div>
 
-      <SidebarFooter className="p-4 border-t border-slate-800">
-        <div className="flex items-center space-x-3">
-          <Avatar className="h-9 w-9 border border-slate-700">
-            <AvatarImage src="/placeholder.svg?height=32&width=32" alt="User" />
-            <AvatarFallback className="bg-slate-800 text-cyan-500">
-              SK
-            </AvatarFallback>
-          </Avatar>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium">Safnas Kaldeen</span>
-            <span className="text-xs text-slate-400">Data Analyst</span>
-          </div>
-        </div>
-      </SidebarFooter>
-    </Sidebar>
+            {/* Avatar */}
+            <div className="p-3 border-t border-slate-800">
+              <div className="flex items-center space-x-3">
+                <Avatar className="h-9 w-9 border border-slate-700">
+                  <AvatarImage
+                    src="/placeholder.svg?height=32&width=32"
+                    alt="User"
+                  />
+                  <AvatarFallback className="bg-slate-800 text-cyan-500">
+                    SK
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">Safnas Kaldeen</span>
+                  <span className="text-xs text-slate-400">Data Analyst</span>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
+          // Desktop footer with SidebarFooter wrapper
+          <>
+            {/* Settings */}
+            <SidebarGroup className="px-2 py-2">
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive("/settings")}
+                    className={`w-full px-3 py-2 rounded-md transition-colors ${
+                      isActive("/settings")
+                        ? "bg-gradient-to-r from-slate-500/15 to-slate-600/10 border border-slate-500/20"
+                        : "hover:bg-slate-800"
+                    }`}
+                  >
+                    <Link
+                      href="/settings"
+                      className="flex items-center space-x-3"
+                      onClick={closeMobileMenu}
+                    >
+                      <div className="flex items-center justify-center h-6 w-6 rounded-md bg-slate-500/10 text-slate-500">
+                        <Settings className="h-4 w-4" />
+                      </div>
+                      <span>Settings</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroup>
+
+            {/* Avatar */}
+            <SidebarFooter className="p-4 border-t border-slate-800">
+              <div className="flex items-center space-x-3">
+                <Avatar className="h-9 w-9 border border-slate-700">
+                  <AvatarImage
+                    src="/placeholder.svg?height=32&width=32"
+                    alt="User"
+                  />
+                  <AvatarFallback className="bg-slate-800 text-cyan-500">
+                    SK
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">Safnas Kaldeen</span>
+                  <span className="text-xs text-slate-400">Data Analyst</span>
+                </div>
+              </div>
+            </SidebarFooter>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderMenuContent = () => (
+    <>
+      {/* Real-Time Analytics Section */}
+      <SidebarGroup className="px-2 py-1">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={isActive("/realtime")}
+              className={`w-full px-3 py-2 rounded-md transition-colors ${
+                isActive("/realtime")
+                  ? "bg-gradient-to-r from-pink-500/15 to-pink-600/10 border border-pink-500/20"
+                  : "hover:bg-slate-800"
+              }`}
+            >
+              <Link
+                href="/realtime"
+                className="flex items-center space-x-3"
+                onClick={closeMobileMenu}
+              >
+                <div
+                  className={`flex items-center justify-center h-6 w-6 rounded-md ${
+                    isActive("/realtime")
+                      ? "bg-pink-500/15 text-pink-400"
+                      : "bg-pink-500/10 text-pink-500"
+                  }`}
+                >
+                  <LineChart className="h-4 w-4" />
+                </div>
+                <span>Real-Time Analytics</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+
+      {/* Adhoc Section */}
+      <SidebarGroup className="px-2 py-1">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={isActive("/adhoc")}
+              className={`w-full px-3 py-2 rounded-md transition-colors ${
+                isActive("/adhoc")
+                  ? "bg-gradient-to-r from-emerald-500/15 to-emerald-600/10 border border-emerald-500/20"
+                  : "hover:bg-slate-800"
+              }`}
+            >
+              <Link
+                href="/adhoc"
+                className="flex items-center space-x-3"
+                onClick={closeMobileMenu}
+              >
+                <div
+                  className={`flex items-center justify-center h-6 w-6 rounded-md ${
+                    isActive("/adhoc")
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "bg-emerald-500/10 text-emerald-500"
+                  }`}
+                >
+                  <BrainCog className="h-4 w-4" />
+                </div>
+                <span>Adhoc Analytics</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+
+      <SidebarGroup className="px-2 py-1">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={isActive("/predictive")}
+              className={`w-full px-3 py-2 rounded-md transition-colors ${
+                isActive("/predictive")
+                  ? "bg-gradient-to-r from-blue-500/15 to-blue-600/10 border border-blue-500/20"
+                  : "hover:bg-slate-800"
+              }`}
+            >
+              <Link
+                href="/predictive"
+                className="flex items-center space-x-3"
+                onClick={closeMobileMenu}
+              >
+                <div
+                  className={`flex items-center justify-center h-6 w-6 rounded-md transition-colors ${
+                    isActive("/")
+                      ? "bg-blue-500/15 text-blue-400"
+                      : "bg-blue-500/10 text-blue-500"
+                  }`}
+                >
+                  <Home className="h-4 w-4" />
+                </div>
+                <span>Predictive Analytics</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarGroup>
+
+      {visibleCategories.length > 0 && (
+        <SidebarSeparator className="my-1 bg-slate-800" />
+      )}
+
+      {/* Menu Categories - Only show categories with show: true */}
+      {visibleCategories.map((category) => (
+        <Collapsible
+          key={category.id}
+          open={openGroups[category.id]}
+          onOpenChange={() => toggleGroup(category.id)}
+          className="group relative px-2 py-1"
+        >
+          <SidebarGroup>
+            <SidebarGroupLabel asChild>
+              <CollapsibleTrigger className="flex w-full items-center px-3 py-2 rounded-md transition-colors hover:bg-slate-800 cursor-pointer">
+                <div className="flex flex-1 items-center">
+                  <div
+                    className={`flex items-center justify-center h-6 w-6 rounded-md ${category.icon.color.replace(
+                      "text-",
+                      "bg-"
+                    )}/10 ${category.icon.color} mr-3`}
+                  >
+                    {category.icon.icon}
+                  </div>
+                  <span className="font-medium">{category.label}</span>
+                </div>
+                <ChevronDown
+                  className={`h-4 w-4 ${
+                    category.icon.color
+                  } transition-transform duration-200 ease-in-out ${
+                    openGroups[category.id] ? "rotate-180" : ""
+                  }`}
+                />
+              </CollapsibleTrigger>
+            </SidebarGroupLabel>
+
+            <CollapsibleContent className="overflow-hidden transition-all data-[state=closed]:animate-slideUp data-[state=open]:animate-slideDown">
+              <SidebarGroupContent>
+                <SidebarMenu className="pl-9 mt-1 space-y-1">
+                  {category.items.map((item) => (
+                    <SidebarMenuItem key={item.path}>
+                      <SidebarMenuButton
+                        asChild
+                        isActive={isActive(item.path)}
+                        className={`w-full px-3 py-2 rounded-md transition-colors ${
+                          isActive(item.path)
+                            ? `bg-gradient-to-r ${
+                                category.icon.color.includes("cyan")
+                                  ? "from-cyan-500/15 to-cyan-600/10 border border-cyan-500/20"
+                                  : category.icon.color.includes("emerald")
+                                  ? "from-emerald-500/15 to-emerald-600/10 border border-emerald-500/20"
+                                  : "from-blue-500/15 to-blue-600/10 border border-blue-500/20"
+                              } ${category.icon.color}`
+                            : "hover:bg-slate-800 text-slate-300"
+                        }`}
+                      >
+                        <Link
+                          href={item.path}
+                          className="flex items-center space-x-3"
+                          onClick={closeMobileMenu}
+                        >
+                          {item.icon}
+                          <span>{item.label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
+      ))}
+    </>
+  );
+
+  return (
+    <>
+      {/* Desktop Sidebar - Takes up space in layout */}
+      <aside className="hidden lg:block w-64 shrink-0">
+        <Sidebar className="border-r border-slate-800/80 bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 w-64 shadow-2xl h-[100dvh]">
+          <SidebarContentComponent showCloseButton={false} isMobile={false} />
+        </Sidebar>
+      </aside>
+
+      {/* Mobile Arrow Button - Only visible when sidebar is closed */}
+      <button
+        onClick={openMobileMenu}
+        className={`lg:hidden fixed left-0 top-1/2 -translate-y-1/2 z-[100] p-3 bg-gradient-to-r from-slate-900 to-slate-800 border-r border-t border-b border-slate-700/50 rounded-r-lg hover:border-cyan-500/50 hover:shadow-lg hover:shadow-cyan-500/20 transition-all duration-300 hover:pr-4 ${
+          isMobileMenuOpen ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
+        aria-label="Open menu"
+      >
+        <ChevronRight className="h-5 w-5 text-cyan-400" />
+      </button>
+
+      {/* Mobile Overlay - Only visible when menu is open */}
+      <div
+        className={`lg:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] transition-opacity duration-300 ${
+          isMobileMenuOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+        }`}
+        onClick={closeMobileMenu}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 60,
+        }}
+      />
+
+      {/* Mobile Sidebar Overlay with slide animation */}
+      <div
+        className="lg:hidden fixed top-0 bottom-0 left-0 w-64 z-[70] transition-transform duration-300 ease-in-out bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950 border-r border-slate-800/80 shadow-2xl h-[100dvh]"
+        style={{
+          transform: isMobileMenuOpen ? "translateX(0)" : "translateX(-100%)",
+        }}
+      >
+        <SidebarContentComponent showCloseButton={true} isMobile={true} />
+      </div>
+    </>
   );
 }
-
-// Add these styles to your globals.css or a component-specific CSS file
-/*
-@keyframes slideDown {
-  from {
-    height: 0;
-    opacity: 0;
-  }
-  to {
-    height: var(--radix-collapsible-content-height);
-    opacity: 1;
-  }
-}
-
-@keyframes slideUp {
-  from {
-    height: var(--radix-collapsible-content-height);
-    opacity: 1;
-  }
-  to {
-    height: 0;
-    opacity: 0;
-  }
-}
-
-.animate-slideDown {
-  animation: slideDown 300ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.animate-slideUp {
-  animation: slideUp 300ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Custom scrollbar styles */
-// .scrollbar-thin {
-//   scrollbar-width: thin;
-// }
-
-// .scrollbar-thumb-slate-700\/50::-webkit-scrollbar-thumb {
-//   background-color: rgba(51, 65, 85, 0.5);
-//   border-radius: 0.375rem;
-// }
-
-// .scrollbar-track-transparent::-webkit-scrollbar-track {
-//   background-color: transparent;
-// }
-
-// .scrollbar-thin::-webkit-scrollbar {
-//   width: 6px;
-// }
-// */

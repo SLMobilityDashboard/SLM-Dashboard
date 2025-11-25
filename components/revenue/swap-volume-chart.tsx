@@ -388,7 +388,11 @@ export default function AreaSwapsChart({
 
             <div className="space-y-2">
               <div className="text-sm font-semibold mb-2">
-                Station Performance ({category.areas.length} stations)
+                Station Performance ({category.areas.length} stations) and{" "}
+                {category.areas
+                  .reduce((s, a) => s + a.swaps, 0)
+                  .toLocaleString()}{" "}
+                swaps
               </div>
               <ScrollArea className="h-[160px]">
                 <div className="space-y-2 pr-4">

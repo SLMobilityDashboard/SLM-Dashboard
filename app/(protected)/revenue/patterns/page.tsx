@@ -139,7 +139,7 @@ const BatterySwapAnalytics = () => {
   }
 
   return (
-    <div className="flex-1 space-y-6 p-4 md:p-6 lg:p-8 min-h-screen bg-background">
+    <div className="flex-1 space-y-6 min-h-screen">
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="space-y-1">

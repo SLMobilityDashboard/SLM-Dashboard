@@ -133,8 +133,164 @@ export const useTBoxGPSData = (filters: TBoxGPSFilters & { shouldFetchData?: boo
     return geoCondition;
   }, []);
 
-  const buildGPSDataQuery = useCallback((filters: TBoxGPSFilters): string => {
-    let sql = `
+const buildGPSDataQuery = useCallback((filters: TBoxGPSFilters): string => {
+    // CRITICAL: Apply ALL filters FIRST, then sample from filtered data
+    // This ensures selected TBoxes, provinces, districts, and areas are respected
+    
+    const sql = `
+      WITH filtered_data AS (
+        -- STEP 1: Apply ALL filters first to get the exact dataset we want to visualize
+        SELECT 
+          TBOXID,
+          MEAN_LAT,
+          MEAN_LONG,
+          MEAN_TIMESTAMP,
+          PROVINCE,
+          DISTRICT,
+          AREA,
+          -- Calculate grid cells for hotspot detection (~500m resolution)
+          FLOOR(MEAN_LAT * 200) as lat_grid,
+          FLOOR(MEAN_LONG * 200) as lng_grid
+        FROM REPORT_DB.GPS_DASHBOARD.TBOX_GPS_ENRICHED
+        WHERE 1=1
+          ${buildDateRangeCondition(filters)}
+          ${buildGeographicalCondition(filters)}
+          ${filters.selectedTboxes.length > 0 ? `AND TBOXID IN (${filters.selectedTboxes.join(',')})` : ''}
+      ),
+      
+      -- STEP 2: Calculate counts from FILTERED data only
+      counts AS (
+        SELECT 
+          COUNT(*) as total_points,
+          COUNT(DISTINCT TBOXID) as total_tboxes
+        FROM filtered_data
+      ),
+      
+      -- STEP 3: Identify hotspots in FILTERED data only
+      hotspots AS (
+        SELECT 
+          lat_grid,
+          lng_grid,
+          COUNT(*) as density
+        FROM filtered_data
+        GROUP BY lat_grid, lng_grid
+        HAVING COUNT(*) >= 10  -- Hotspot = 10+ points in same grid cell
+      ),
+      
+      -- STEP 4: Calculate dynamic sampling rate from FILTERED data
+      sampling_params AS (
+        SELECT 
+          total_tboxes,
+          GREATEST(1, FLOOR(total_points / 950.0)) as skip_factor,  -- Reserve 50 points for hotspots
+          CASE 
+            WHEN total_tboxes <= 5 THEN 180    -- Few scooters: more points each
+            WHEN total_tboxes <= 10 THEN 90    -- Medium: good coverage
+            WHEN total_tboxes <= 20 THEN 45    -- Many: fair coverage
+            ELSE 20                             -- Lots: overview + hotspots
+          END as points_per_tbox
+        FROM counts
+      ),
+      
+      -- STEP 5: Sample hotspots from FILTERED data
+      hotspot_points AS (
+        SELECT 
+          b.*,
+          h.density,
+          ROW_NUMBER() OVER (PARTITION BY b.lat_grid, b.lng_grid ORDER BY RANDOM()) as rn,
+          'hotspot' as point_type
+        FROM filtered_data b
+        INNER JOIN hotspots h ON b.lat_grid = h.lat_grid AND b.lng_grid = h.lng_grid
+      ),
+      
+      -- STEP 6: Temporal sampling from FILTERED data (excluding hotspots to avoid duplication)
+      temporal_points AS (
+        SELECT 
+          b.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY b.TBOXID, DATE_TRUNC('HOUR', b.MEAN_TIMESTAMP)
+            ORDER BY RANDOM()
+          ) as hour_rank,
+          ROW_NUMBER() OVER (
+            PARTITION BY b.TBOXID
+            ORDER BY b.MEAN_TIMESTAMP
+          ) as seq_num,
+          'temporal' as point_type
+        FROM filtered_data b
+        CROSS JOIN sampling_params sp
+        WHERE NOT EXISTS (
+          SELECT 1 FROM hotspots h 
+          WHERE h.lat_grid = b.lat_grid AND h.lng_grid = b.lng_grid
+        )
+      ),
+      
+      -- STEP 7: Route keypoints from FILTERED data (start/end of each journey)
+      route_keypoints AS (
+        SELECT 
+          b.*,
+          ROW_NUMBER() OVER (PARTITION BY b.TBOXID ORDER BY b.MEAN_TIMESTAMP) as point_seq,
+          COUNT(*) OVER (PARTITION BY b.TBOXID) as total_tbox_points,
+          'keypoint' as point_type
+        FROM filtered_data b
+      ),
+      
+      -- STEP 8: Combine all sampling strategies from FILTERED data
+      sampled_points AS (
+        -- Priority 1: Get hotspot samples (max ~50 points)
+        SELECT 
+          TBOXID, MEAN_LAT, MEAN_LONG, MEAN_TIMESTAMP, PROVINCE, DISTRICT, AREA,
+          density as point_count,
+          TRUE as is_hotspot,
+          FALSE as is_keypoint,
+          point_type
+        FROM hotspot_points
+        WHERE rn = 1  -- One representative per hotspot grid cell
+        
+        UNION ALL
+        
+        -- Priority 2: Get temporal samples (evenly distributed through time)
+        SELECT 
+          tp.TBOXID, tp.MEAN_LAT, tp.MEAN_LONG, tp.MEAN_TIMESTAMP, 
+          tp.PROVINCE, tp.DISTRICT, tp.AREA,
+          1 as point_count,
+          FALSE as is_hotspot,
+          FALSE as is_keypoint,
+          tp.point_type
+        FROM temporal_points tp
+        CROSS JOIN sampling_params sp
+        WHERE hour_rank = 1  -- One point per hour per TBox
+          OR MOD(seq_num, sp.skip_factor) = 0  -- Plus systematic samples based on data volume
+        
+        UNION ALL
+        
+        -- Priority 3: Get route keypoints (start/end of each TBox journey)
+        SELECT 
+          TBOXID, MEAN_LAT, MEAN_LONG, MEAN_TIMESTAMP, PROVINCE, DISTRICT, AREA,
+          1 as point_count,
+          FALSE as is_hotspot,
+          TRUE as is_keypoint,
+          point_type
+        FROM route_keypoints
+        WHERE point_seq = 1                    -- First point of journey
+          OR point_seq = total_tbox_points     -- Last point of journey
+      ),
+      
+      -- STEP 9: Prioritize and limit to exactly 1000 points
+      final_sample AS (
+        SELECT 
+          *,
+          ROW_NUMBER() OVER (
+            ORDER BY 
+              CASE 
+                WHEN is_hotspot THEN 1      -- Hotspots first (show where scooters spend time)
+                WHEN is_keypoint THEN 2     -- Then keypoints (show routes)
+                ELSE 3                       -- Then temporal samples (fill gaps)
+              END,
+              RANDOM()                       -- Random within priority group
+          ) as priority_rank
+        FROM sampled_points
+      )
+      
+      -- STEP 10: Return final sampled data (max 1000 points)
       SELECT 
         TBOXID as tbox_id,
         CONCAT('TBox-', TBOXID) as name,
@@ -143,30 +299,14 @@ export const useTBoxGPSData = (filters: TBoxGPSFilters & { shouldFetchData?: boo
         MEAN_TIMESTAMP as timestamp,
         PROVINCE as province,
         DISTRICT as district,
-        AREA as area
-      FROM REPORT_DB.GPS_DASHBOARD.TBOX_GPS_ENRICHED 
-      WHERE 1=1
+        AREA as area,
+        point_count,
+        is_hotspot,
+        is_keypoint
+      FROM final_sample
+      WHERE priority_rank <= 1000
+      ORDER BY tbox_id, timestamp
     `;
-
-    // Add date range condition
-    sql += buildDateRangeCondition(filters);
-
-    // Add geographical conditions
-    sql += buildGeographicalCondition(filters);
-
-    // Add TBox filter ONLY if specific TBoxes are selected
-    if (filters.selectedTboxes.length > 0) {
-      const tboxes = filters.selectedTboxes.join(',');
-      sql += ` AND TBOXID IN (${tboxes})`;
-    }
-
-    sql += ` ORDER BY TBOXID, MEAN_TIMESTAMP`;
-
-    // Apply limit of 1000 GPS points when no specific TBoxes are selected
-    // This is the key change - always apply the limit when no specific TBoxes are selected
-    // if (filters.selectedTboxes.length === 0) {
-      sql += ` LIMIT 1000`;
-    // }
 
     return sql;
   }, [buildDateRangeCondition, buildGeographicalCondition]);
@@ -315,7 +455,7 @@ export const useTBoxGPSData = (filters: TBoxGPSFilters & { shouldFetchData?: boo
 
     try {
       const sql = buildGPSDataQuery(filters);
-      const response = await fetch('/api/query', {
+      const response = await fetch('/api/gps-query', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

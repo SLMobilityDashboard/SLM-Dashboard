@@ -138,7 +138,6 @@ function formatCurrency(amount: number, currency: string = "LKR"): string {
 }
 
 function formatDate(timestamp: number): string {
-  // Handle both 10-digit (seconds) and 13-digit (milliseconds) timestamps
   const date =
     timestamp > 9999999999 ? new Date(timestamp) : new Date(timestamp * 1000);
   return date.toLocaleDateString("en-US", {
@@ -149,7 +148,6 @@ function formatDate(timestamp: number): string {
 }
 
 function formatDateTime(timestamp: number): string {
-  // Handle both 10-digit (seconds) and 13-digit (milliseconds) timestamps
   const date =
     timestamp > 9999999999 ? new Date(timestamp) : new Date(timestamp * 1000);
   return date.toLocaleString("en-US", {
@@ -528,6 +526,73 @@ const Pagination = ({
   );
 };
 
+const generateCSV = (data: PaymentTransaction[]): string => {
+  if (data.length === 0) return "";
+
+  const headers = Object.keys(data[0]);
+
+  const isEpochTimestamp = (key: string, value: any): boolean => {
+    const timestampFields = [
+      "CREATED_EPOCH",
+      "CREATED_AT",
+      "PAID_AT",
+      "UPDATED_AT",
+      "TIMESTAMP",
+    ];
+    return (
+      timestampFields.includes(key) && typeof value === "number" && value > 0
+    );
+  };
+
+  const formatEpochToDateTime = (timestamp: number): string => {
+    const date =
+      timestamp > 9999999999 ? new Date(timestamp) : new Date(timestamp * 1000);
+
+    return date.toLocaleString("en-US", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  };
+
+  const csvRows = [
+    headers.join(","),
+    ...data.map((row) =>
+      headers
+        .map((header) => {
+          const value = row[header];
+
+          if (value === null || value === undefined) return "";
+
+          // Convert epoch timestamps & wrap them in quotes
+          if (isEpochTimestamp(header, value)) {
+            const formatted = formatEpochToDateTime(value);
+            return `"${formatted.replace(/"/g, '""')}"`;
+          }
+
+          const stringValue = String(value);
+
+          if (
+            stringValue.includes(",") ||
+            stringValue.includes('"') ||
+            stringValue.includes("\n")
+          ) {
+            return `"${stringValue.replace(/"/g, '""')}"`;
+          }
+
+          return stringValue;
+        })
+        .join(",")
+    ),
+  ];
+
+  return csvRows.join("\n");
+};
+
 // -------------------- Main Component --------------------
 export default function HomeChargingHistory({
   CustomerID,
@@ -662,6 +727,111 @@ export default function HomeChargingHistory({
     );
   }
 
+  // Check if there are no home charging records
+  if (!loading && analytics.chargingPayments.length === 0) {
+    return (
+      <div className="min-h-screen">
+        <div className="flex items-center justify-between mb-6">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold text-slate-100 flex items-center gap-3">
+              <Home className="w-8 h-8 text-cyan-400" />
+              Home Charging Analytics
+            </h1>
+            <p className="text-slate-400">
+              Personal charging insights, costs, and usage patterns for your
+              home EV charger
+            </p>
+          </div>
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </button>
+        </div>
+
+        <Card className="bg-gradient-to-br from-slate-900/70 to-slate-800/70 border-slate-700">
+          <CardContent className="p-12 text-center">
+            <div className="max-w-md mx-auto space-y-6">
+              <div className="w-24 h-24 mx-auto bg-slate-800/50 rounded-full flex items-center justify-center">
+                <Home className="w-12 h-12 text-cyan-400" />
+              </div>
+
+              <div className="space-y-3">
+                <h2 className="text-2xl font-bold text-slate-100">
+                  No Home Charging Records Yet
+                </h2>
+                <p className="text-slate-400 text-lg leading-relaxed">
+                  We haven't detected any home charging sessions for this
+                  account yet. Once start using your home charger, you'll see
+                  detailed analytics here including:
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 text-left bg-slate-800/30 rounded-lg p-6">
+                <div className="flex items-start gap-3">
+                  <DollarSign className="w-5 h-5 text-green-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-slate-200 font-medium">
+                      Cost Tracking
+                    </div>
+                    <div className="text-sm text-slate-400">
+                      Monitor your daily, weekly, and monthly charging expenses
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <Battery className="w-5 h-5 text-cyan-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-slate-200 font-medium">
+                      Energy Insights
+                    </div>
+                    <div className="text-sm text-slate-400">
+                      Track kWh consumption and charging patterns
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <TrendingUp className="w-5 h-5 text-purple-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-slate-200 font-medium">
+                      Usage Patterns
+                    </div>
+                    <div className="text-sm text-slate-400">
+                      Discover your peak charging hours and weekly trends
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <Activity className="w-5 h-5 text-orange-400 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <div className="text-slate-200 font-medium">
+                      Savings Calculator
+                    </div>
+                    <div className="text-sm text-slate-400">
+                      See how much you save vs public charging
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-700">
+                <p className="text-sm text-slate-500">
+                  Start charging at home to unlock personalized insights and
+                  track your EV charging journey!
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-6 p-6 min-h-screen">
       {/* Header */}
@@ -690,15 +860,18 @@ export default function HomeChargingHistory({
           <button
             className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg transition-colors"
             onClick={() => {
-              const csvContent = analytics.chargingPayments
-                .map((payment) => Object.values(payment).join(","))
-                .join("\n");
+              const csvContent = generateCSV(analytics.chargingPayments);
+              if (!csvContent) return;
+
               const blob = new Blob([csvContent], { type: "text/csv" });
               const url = window.URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
-              a.download = "my_home_charging_history.csv";
+              a.download = `home_charging_sessions_${
+                new Date().toISOString().split("T")[0]
+              }.csv`;
               a.click();
+              window.URL.revokeObjectURL(url);
             }}
           >
             <Download className="w-4 h-4" />

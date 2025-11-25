@@ -29,11 +29,12 @@ export const metadata: Metadata = {
     title: "Lencar E-Mobility Analytics Dashboard",
     description:
       "Performance and data analysis for Lencar's e-mobility fleet and charging infrastructure.",
-    url: "https://[Your-App-Domain-Here].com", // IMPORTANT: Update this URL for deployment
+    url: "https://slm-dashboard-e757.vercel.app/", // IMPORTANT: Update this URL for deployment
     siteName: "Lencar Analytics",
     images: [
-      // Add a full, publicly accessible image URL (e.g., '/og-image.png') here for social sharing.
-      // Note: Data URIs are generally NOT compatible with Open Graph image previews.
+      {
+        url: "/og-image.png", // IMPORTANT: Update this URL for deployment
+      },
     ],
     locale: "en_US",
     type: "website",
@@ -44,6 +45,7 @@ export const metadata: Metadata = {
     title: "Lencar E-Mobility Analytics Dashboard",
     description:
       "Performance and data analysis for Lencar's e-mobility fleet and charging infrastructure.",
+    images: ["/og-image.png"], // IMPORTANT: Update this URL for deployment
   },
 };
 

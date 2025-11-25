@@ -112,7 +112,7 @@ export function BatterySwapMetrics({ filters }: BatterySwapMetricsProps) {
         // Current period metrics
         const currentQuery = `
           SELECT 
-            COUNT(*) as totalSwaps,
+            SUM(rs.TOTAL_SWAPS) as totalSwaps,
             SUM(rs.TOTAL_REVENUE) as totalRevenue,
             AVG(rs.TOTAL_REVENUE) as avgRevenuePerSwap,
             1.2 as avgSwapTime
@@ -126,6 +126,7 @@ export function BatterySwapMetrics({ filters }: BatterySwapMetricsProps) {
               addOneDay(filters.dateRange.to).toISOString().split("T")[0]
             }'
             AND rs.TOTAL_REVENUE > 0
+            AND rs.LOCATIONNAME != 'HOME_CHARGING'
             ${geographicFilters}
         `;
 
@@ -144,7 +145,7 @@ export function BatterySwapMetrics({ filters }: BatterySwapMetricsProps) {
 
         const previousQuery = `
           SELECT 
-            COUNT(*) as previousTotalSwaps,
+            SUM(rs.TOTAL_SWAPS) as previousTotalSwaps,
             SUM(rs.TOTAL_REVENUE) as previousTotalRevenue,
             AVG(rs.TOTAL_REVENUE) as previousAvgRevenuePerSwap,
             1.2 as previousAvgSwapTime

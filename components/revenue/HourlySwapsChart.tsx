@@ -96,7 +96,7 @@ export function HourlyPaymentsChart({ filters }: HourlyPaymentsChartProps) {
         };
 
         // Convert timestamps to milliseconds for filtering
-        const fromTimestamp = addOneDay(filters.dateRange.from).getTime(); // add 1 day here
+        const fromTimestamp = filters.dateRange.from.getTime(); // add 1 day here
         const toTimestamp =
           Math.floor(filters.dateRange.to.getTime()) + 86399000; // End of day
 
@@ -117,7 +117,7 @@ export function HourlyPaymentsChart({ filters }: HourlyPaymentsChartProps) {
             AND fp.CREATED_EPOCH <= ${toTimestamp}
             AND fp.CREATED_EPOCH IS NOT NULL
             AND fp.PAYMENT_TYPE = 'BATTERY_SWAP'
-            AND fp.PAYMENT_STATUS IN ('PAID', 'VOIDED')
+            AND fp.PAYMENT_STATUS != 'CANCELLED'
             ${geographicFilters}
           GROUP BY HOUR(TO_TIMESTAMP_NTZ(fp.CREATED_EPOCH / 1000))
           ORDER BY HOUR(TO_TIMESTAMP_NTZ(fp.CREATED_EPOCH / 1000))
@@ -417,7 +417,7 @@ export function HourlyPaymentsChart({ filters }: HourlyPaymentsChartProps) {
           <div className="flex items-center gap-2 mb-3">
             <TrendingUp className="w-4 h-4 text-primary" />
             <span className="text-sm font-semibold">
-              Battery Swap Payment Analysis
+              Battery Swap Payment Analysis - {totalPayments} payments
             </span>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">

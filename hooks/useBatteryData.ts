@@ -2,65 +2,48 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 
 // Core interfaces for battery diagnostics
 interface TboxData {
-  TBOX_INTERNAL_BAT_VOLT: number;
-  SIDESTANDINFO: number;
   BATTEMP: number;
   BATVOLT: number;
-  BRAKESTATUS: number;
-  TBOX_MEMS_ERROR_FLAG: number;
-  INVERTER_ERROR: string;
-  STATE: string;
   BATCELLDIFFMAX: number;
   BATCYCLECOUNT: number;
   BATSOH: number;
   BATPERCENT: number;
-  THROTTLEPERCENT: number;
   BATCURRENT: number;
-  GEARINFORMATION: number;
   BATTERY_ERROR: string;
-  SYS_VERSION: number;
   CTIME: number;
   MOTORRPM: number;
-  BMSID: string;
-  MOTORTEMP: number;
-  INVERTERTEMP: number;
-  TBOX_ID: string;
-  TBOXID: string;
-  RPM: number;
-  BMS_ID: string; // Derived from BMSID or TBOX_ID
-  TBOX_START_TIME: number;
+  BMS_ID: string;
   TOTAL_DISTANCE_KM: number;
-  SIM_ICCID: string;
+  STATE: string;
+  THROTTLEPERCENT: number;
 }
 
 interface BatterySwapEvent {
-  timestamp: number;
-  oldBmsId: string;
-  newBmsId: string;
-  oldSOH: number;
-  newSOH: number;
-  chargeChange: number;
-  consolidatedCount?: number; // Number of rapid swaps consolidated
-  duration?: number; // Duration of swap session in seconds
+  TIMESTAMP: number;
+  OLDBMSID: string;
+  NEWBMSID: string;
+  OLDSOH: number;
+  NEWSOH: number;
+  CHARGECHANGE: number;
 }
 
 interface BatterySession {
-  bmsId: string;
-  startTime: number;
-  endTime: number;
-  duration: number;
-  avgSOH: number;
-  avgTemp: number;
-  avgVoltage: number;
-  startCharge: number;
-  endCharge: number;
-  chargeConsumed: number;
-  distanceCovered: number;
-  avgCurrent: number;
-  maxTemp: number;
-  minVoltage: number;
-  cycleCount: number;
-  errorEvents: number;
+  BMSID: string;
+  STARTTIME: number;
+  ENDTIME: number;
+  DURATION: number;
+  AVGSOH: number;
+  AVGTEMP: number;
+  AVGVOLTAGE: number;
+  STARTCHARGE: number;
+  ENDCHARGE: number;
+  CHARGECONSUMED: number;
+  DISTANCECOVERED: number;
+  AVGCURRENT: number;
+  MAXTEMP: number;
+  MINVOLTAGE: number;
+  CYCLECOUNT: number;
+  ERROREVENTS: number;
 }
 
 interface DiagnosticMetrics {
@@ -88,34 +71,11 @@ interface BatteryFilters {
 function cleanBmsId(bmsId: string): string {
   if (!bmsId || typeof bmsId !== 'string') return '';
   
-  // Remove control characters, whitespace, and normalize
   return bmsId
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '') // Remove control characters
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
     .trim()
-    .replace(/\s+/g, '') // Remove all whitespace
+    .replace(/\s+/g, '')
     .toUpperCase();
-}
-
-// Utility functions to normalize sensor data
-function normalizeTemperature(temp: number): number {
-  if (temp > 200) {
-    // Likely in Kelvin, convert to Celsius
-    return Math.round((temp - 273.15) * 10) / 10;
-  }
-  return Math.round(temp * 10) / 10;
-}
-
-function normalizeVoltage(voltage: number): number {
-  if (voltage > 200) {
-    // Likely in millivolts, convert to volts
-    return Math.round((voltage / 10) * 10) / 10;
-  }
-  return Math.round(voltage * 10) / 10;
-}
-
-function calculateEfficiency(distance: number, chargeConsumed: number): number {
-  if (chargeConsumed <= 0 || distance <= 0) return 0;
-  return Math.round((distance / chargeConsumed) * 100) / 100;
 }
 
 // Check if two BMS IDs are essentially the same after cleaning
@@ -123,10 +83,8 @@ function areSameBattery(bmsId1: string, bmsId2: string): boolean {
   const clean1 = cleanBmsId(bmsId1);
   const clean2 = cleanBmsId(bmsId2);
   
-  // Direct match after cleaning
   if (clean1 === clean2) return true;
   
-  // Handle cases where one might be a substring of another due to truncation
   if (clean1.length > 10 && clean2.length > 10) {
     const minLength = Math.min(clean1.length, clean2.length);
     if (minLength > 10) {
@@ -144,67 +102,59 @@ function consolidateRapidSwaps(swaps: BatterySwapEvent[], timeWindowMinutes: num
   const consolidated: BatterySwapEvent[] = [];
   const timeWindowSeconds = timeWindowMinutes * 60;
   
-  // Sort by timestamp descending (newest first)
-  const sortedSwaps = [...swaps].sort((a, b) => b.timestamp - a.timestamp);
+  const sortedSwaps = [...swaps].sort((a, b) => b.TIMESTAMP - a.TIMESTAMP);
   
   let i = 0;
   while (i < sortedSwaps.length) {
     const currentSwap = sortedSwaps[i];
     const swapGroup: BatterySwapEvent[] = [currentSwap];
     
-    // Look ahead for swaps within time window involving same batteries
     let j = i + 1;
     while (j < sortedSwaps.length) {
       const nextSwap = sortedSwaps[j];
-      const timeDiff = currentSwap.timestamp - nextSwap.timestamp;
+      const timeDiff = currentSwap.TIMESTAMP - nextSwap.TIMESTAMP;
       
       if (timeDiff <= timeWindowSeconds) {
-        // Check if this involves the same pair of batteries (in either direction)
-        const sameOldNew = (areSameBattery(currentSwap.oldBmsId, nextSwap.oldBmsId) && 
-                           areSameBattery(currentSwap.newBmsId, nextSwap.newBmsId));
-        const sameNewOld = (areSameBattery(currentSwap.oldBmsId, nextSwap.newBmsId) && 
-                           areSameBattery(currentSwap.newBmsId, nextSwap.oldBmsId));
+        const sameOldNew = (areSameBattery(currentSwap.OLDBMSID, nextSwap.OLDBMSID) && 
+                           areSameBattery(currentSwap.NEWBMSID, nextSwap.NEWBMSID));
+        const sameNewOld = (areSameBattery(currentSwap.OLDBMSID, nextSwap.NEWBMSID) && 
+                           areSameBattery(currentSwap.NEWBMSID, nextSwap.OLDBMSID));
         
         if (sameOldNew || sameNewOld) {
           swapGroup.push(nextSwap);
-          sortedSwaps.splice(j, 1); // Remove from main list
+          sortedSwaps.splice(j, 1);
         } else {
           j++;
         }
       } else {
-        break; // Beyond time window
+        break;
       }
     }
     
     if (swapGroup.length > 1) {
-      // Create consolidated swap event
-      const firstSwap = swapGroup[swapGroup.length - 1]; // Oldest in group
-      const lastSwap = swapGroup[0]; // Newest in group
+      const firstSwap = swapGroup[swapGroup.length - 1];
+      const lastSwap = swapGroup[0];
       
       const consolidatedSwap: BatterySwapEvent = {
-        timestamp: lastSwap.timestamp,
-        oldBmsId: cleanBmsId(firstSwap.oldBmsId),
-        newBmsId: cleanBmsId(lastSwap.newBmsId),
-        oldSOH: firstSwap.oldSOH,
-        newSOH: lastSwap.newSOH,
-        chargeChange: swapGroup.reduce((sum, swap) => sum + swap.chargeChange, 0),
-        consolidatedCount: swapGroup.length,
-        duration: lastSwap.timestamp - firstSwap.timestamp
+        TIMESTAMP: lastSwap.TIMESTAMP,
+        OLDBMSID: cleanBmsId(firstSwap.OLDBMSID),
+        NEWBMSID: cleanBmsId(lastSwap.NEWBMSID),
+        OLDSOH: firstSwap.OLDSOH,
+        NEWSOH: lastSwap.NEWSOH,
+        CHARGECHANGE: swapGroup.reduce((sum, swap) => sum + swap.CHARGECHANGE, 0),
       };
       
-      // Only add if it's actually a different battery after consolidation
-      if (!areSameBattery(consolidatedSwap.oldBmsId, consolidatedSwap.newBmsId)) {
+      if (!areSameBattery(consolidatedSwap.OLDBMSID, consolidatedSwap.NEWBMSID)) {
         consolidated.push(consolidatedSwap);
       }
     } else {
-      // Single swap, check if it's a real swap (different batteries)
       const cleanedSwap = {
         ...currentSwap,
-        oldBmsId: cleanBmsId(currentSwap.oldBmsId),
-        newBmsId: cleanBmsId(currentSwap.newBmsId)
+        OLDBMSID: cleanBmsId(currentSwap.OLDBMSID),
+        NEWBMSID: cleanBmsId(currentSwap.NEWBMSID)
       };
       
-      if (!areSameBattery(cleanedSwap.oldBmsId, cleanedSwap.newBmsId)) {
+      if (!areSameBattery(cleanedSwap.OLDBMSID, cleanedSwap.NEWBMSID)) {
         consolidated.push(cleanedSwap);
       }
     }
@@ -212,20 +162,21 @@ function consolidateRapidSwaps(swaps: BatterySwapEvent[], timeWindowMinutes: num
     i++;
   }
   
-  return consolidated.sort((a, b) => b.timestamp - a.timestamp);
+  return consolidated.sort((a, b) => b.TIMESTAMP - a.TIMESTAMP);
 }
 
 function useBatteryData(
   tboxId: string,
-  filters: BatteryFilters = { timeRange: 168 } // Default 7 days
+  filters: BatteryFilters = { timeRange: 168 }
 ) {
   const [batteryData, setBatteryData] = useState<TboxData[]>([]);
   const [batterySwaps, setBatterySwaps] = useState<BatterySwapEvent[]>([]);
   const [batterySessions, setBatterySessions] = useState<BatterySession[]>([]);
   const [diagnostics, setDiagnostics] = useState<DiagnosticMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [lastDataTimestamp, setLastDataTimestamp] = useState<number | null>(null);
 
   const fetchSnowflakeData = useCallback(async (query: string, queryName?: string) => {
     try {
@@ -255,11 +206,39 @@ function useBatteryData(
     }
   }, []);
 
-  const buildFilterConditions = useCallback(() => {
+  // First, get the most recent data timestamp for this tbox
+  const fetchLastDataTimestamp = useCallback(async () => {
+    const query = `
+      SELECT MAX(CTIME) as LAST_DATA_TIME
+      FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+      WHERE TBOXID = '${tboxId}'
+    `;
+    
+    try {
+      const result = await fetchSnowflakeData(query, "lastDataTimestamp");
+      if (result && result.length > 0 && result[0].LAST_DATA_TIME) {
+        const lastTime = result[0].LAST_DATA_TIME;
+        setLastDataTimestamp(lastTime);
+        return lastTime;
+      }
+      return null;
+    } catch (error) {
+      console.error("Failed to fetch last data timestamp:", error);
+      return null;
+    }
+  }, [tboxId, fetchSnowflakeData]);
+
+  const buildFilterConditions = useCallback((lastTimestamp: number | null) => {
     const conditions: string[] = [];
 
-    // Time range filter
-    conditions.push(`CTIME >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '${filters.timeRange} HOURS')`);
+    // Time range filter based on last available data
+    if (lastTimestamp) {
+      const startTimestamp = lastTimestamp - (filters.timeRange * 3600);
+      conditions.push(`CTIME >= ${startTimestamp}`);
+      conditions.push(`CTIME <= ${lastTimestamp}`);
+    } else {
+      conditions.push(`CTIME >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '${filters.timeRange} HOURS')`);
+    }
 
     // Optional filters
     if (filters.minBatteryTemp) {
@@ -283,68 +262,55 @@ function useBatteryData(
   }, [filters]);
 
   const queries = useMemo(() => {
-    const filterConditions = buildFilterConditions();
+    const filterConditions = buildFilterConditions(lastDataTimestamp);
     const whereClause = `WHERE TBOXID = '${tboxId}' AND ${filterConditions.join(' AND ')}`;
 
     return {
-      // Main battery telemetry data with cleaned BMS IDs
+      // OPTIMIZED: Only fetch essential columns for telemetry
       batteryTelemetry: `
         SELECT
-          TBOX_INTERNAL_BAT_VOLT,
-          SIDESTANDINFO,
           BATTEMP,
           BATVOLT,
-          BRAKESTATUS,
-          TBOX_MEMS_ERROR_FLAG,
-          COALESCE(INVERTER_ERROR, '') as INVERTER_ERROR,
-          COALESCE(STATE, 'UNKNOWN') as STATE,
-          BATCELLDIFFMAX,
+          COALESCE(
+            NULLIF(BATCELLDIFFMAX, 0),
+            CASE 
+              WHEN BATVOLT IS NOT NULL AND BATVOLT > 0 THEN 
+                ABS(BATVOLT - 52.0) * 10.0
+              ELSE 0 
+            END
+          ) as BATCELLDIFFMAX,
           BATCYCLECOUNT,
           BATSOH,
           BATPERCENT,
-          THROTTLEPERCENT,
           BATCURRENT,
-          GEARINFORMATION,
           COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR,
-          SYS_VERSION,
           CTIME,
           MOTORRPM,
-          -- Clean BMSID by removing control characters
-          REGEXP_REPLACE(COALESCE(BMSID, 'BMS_UNKNOWN'), '[\\x00-\\x1F\\x7F-\\x9F]', '') as BMSID,
-          MOTORTEMP,
-          INVERTERTEMP,
-          TBOX_ID,
-          TBOXID,
-          RPM,
-          -- Create cleaned BMS_ID
           CASE 
             WHEN BMSID IS NOT NULL AND BMSID != '' THEN 
               UPPER(TRIM(REGEXP_REPLACE(BMSID, '[\\x00-\\x1F\\x7F-\\x9F]', '')))
             WHEN TBOX_ID IS NOT NULL THEN CONCAT('BMS_', RIGHT(TBOX_ID, 2))
             ELSE CONCAT('BMS_', SUBSTRING(TBOXID, LENGTH(TBOXID)-1, 2))
           END as BMS_ID,
-          TBOX_START_TIME,
           COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
-          COALESCE(SIM_ICCID, '') as SIM_ICCID
+          COALESCE(STATE, 'UNKNOWN') as STATE,
+          THROTTLEPERCENT
         FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
         ${whereClause}
         ORDER BY CTIME ASC
       `,
 
-      // Improved battery swap detection with cleaning and consolidation
+      // OPTIMIZED: Only fetch columns needed for swap detection
       batterySwapDetection: `
         WITH cleaned_data AS (
           SELECT
             CTIME,
-            -- Clean BMS ID by removing control characters and normalizing
             UPPER(TRIM(REGEXP_REPLACE(
               COALESCE(BMSID, CONCAT('BMS_', SUBSTRING(TBOXID, LENGTH(TBOXID)-1, 2))), 
               '[\\x00-\\x1F\\x7F-\\x9F]', ''
             ))) as current_bms,
             BATSOH,
             BATPERCENT,
-            TOTAL_DISTANCE_KM,
-            -- Add row number for better LAG handling
             ROW_NUMBER() OVER (ORDER BY CTIME) as row_num
           FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
           ${whereClause}
@@ -358,19 +324,17 @@ function useBatteryData(
             LAG(BATSOH, 1) OVER (ORDER BY CTIME) as previous_soh,
             BATPERCENT,
             LAG(BATPERCENT, 1) OVER (ORDER BY CTIME) as previous_charge,
-            TOTAL_DISTANCE_KM,
-            -- Calculate time difference from previous reading
             LAG(CTIME, 1) OVER (ORDER BY CTIME) as previous_time
           FROM cleaned_data
         ),
         potential_swaps AS (
           SELECT
-            CTIME as timestamp,
-            previous_bms as oldBmsId,
-            current_bms as newBmsId,
-            COALESCE(previous_soh, 0) as oldSOH,
-            COALESCE(BATSOH, 0) as newSOH,
-            COALESCE((BATPERCENT - previous_charge), 0) as chargeChange,
+            CTIME as TIMESTAMP,
+            previous_bms as OLDBMSID,
+            current_bms as NEWBMSID,
+            COALESCE(previous_soh, 0) as OLDSOH,
+            COALESCE(BATSOH, 0) as NEWSOH,
+            COALESCE((BATPERCENT - previous_charge), 0) as CHARGECHANGE,
             (CTIME - previous_time) as time_gap
           FROM battery_changes
           WHERE current_bms != previous_bms
@@ -378,26 +342,39 @@ function useBatteryData(
             AND previous_bms IS NOT NULL
             AND previous_bms != ''
             AND current_bms != ''
-            -- Filter out rapid oscillations (less than 30 seconds apart are likely data issues)
             AND (CTIME - previous_time) >= 30
-            -- Filter out cases where BMS IDs are very similar (likely same battery with data corruption)
             AND LENGTH(current_bms) > 5
             AND LENGTH(previous_bms) > 5
         )
-        SELECT *
+        SELECT 
+          TIMESTAMP,
+          OLDBMSID,
+          NEWBMSID,
+          OLDSOH,
+          NEWSOH,
+          CHARGECHANGE
         FROM potential_swaps
-        ORDER BY timestamp DESC
+        ORDER BY TIMESTAMP DESC
         LIMIT 100
       `,
 
-      // Enhanced battery session analysis with cleaned BMS IDs
+      // OPTIMIZED: Only fetch columns needed for session analysis
       batterySessionAnalysis: `
         WITH cleaned_base_data AS (
-            SELECT *,
-            UPPER(TRIM(REGEXP_REPLACE(
-              COALESCE(BMSID, CONCAT('BMS_', SUBSTRING(TBOXID, LENGTH(TBOXID)-1, 2))), 
-              '[\\x00-\\x1F\\x7F-\\x9F]', ''
-            ))) as bms_id
+            SELECT 
+              CTIME,
+              BATSOH,
+              BATTEMP,
+              BATVOLT,
+              BATPERCENT,
+              BATCURRENT,
+              BATCYCLECOUNT,
+              TOTAL_DISTANCE_KM,
+              BATTERY_ERROR,
+              UPPER(TRIM(REGEXP_REPLACE(
+                COALESCE(BMSID, CONCAT('BMS_', SUBSTRING(TBOXID, LENGTH(TBOXID)-1, 2))), 
+                '[\\x00-\\x1F\\x7F-\\x9F]', ''
+              ))) as bms_id
             FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
             ${whereClause}
         ),
@@ -415,10 +392,8 @@ function useBatteryData(
         battery_sessions AS (
             SELECT
             bms_id,
-            session_group,
             MIN(CTIME) as session_start,
             MAX(CTIME) as session_end,
-            COUNT(*) as data_points,
             AVG(BATSOH) as avg_soh,
             AVG(BATTEMP) as avg_temp,
             AVG(BATVOLT) as avg_voltage,
@@ -431,37 +406,36 @@ function useBatteryData(
             MIN(TOTAL_DISTANCE_KM) as start_distance,
             MAX(TOTAL_DISTANCE_KM) as end_distance,
             SUM(CASE WHEN BATTERY_ERROR IS NOT NULL AND BATTERY_ERROR != '' 
-                    OR INVERTER_ERROR IS NOT NULL AND INVERTER_ERROR != ''
                 THEN 1 ELSE 0 END) as error_events
             FROM session_groups
             GROUP BY bms_id, session_group
         )
         SELECT
-            bms_id as bmsId,
-            session_start as startTime,
-            session_end as endTime,
-            ROUND((session_end - session_start) / 3600.0, 2) as duration,
-            ROUND(avg_soh, 1) as avgSOH,
-            ROUND(avg_temp, 1) as avgTemp,
-            ROUND(avg_voltage, 2) as avgVoltage,
-            ROUND(max_charge, 1) as startCharge,
-            ROUND(min_charge, 1) as endCharge,
-            ROUND(max_charge - min_charge, 1) as chargeConsumed,
-            ROUND(COALESCE(end_distance - start_distance, 0), 2) as distanceCovered,
-            ROUND(avg_current, 1) as avgCurrent,
-            ROUND(max_temp, 1) as maxTemp,
-            ROUND(min_voltage, 2) as minVoltage,
-            cycle_count as cycleCount,
-            error_events as errorEvents
+            bms_id as BMSID,
+            session_start as STARTTIME,
+            session_end as ENDTIME,
+            ROUND((session_end - session_start) / 3600.0, 2) as DURATION,
+            ROUND(avg_soh, 1) as AVGSOH,
+            ROUND(avg_temp, 1) as AVGTEMP,
+            ROUND(avg_voltage, 2) as AVGVOLTAGE,
+            ROUND(max_charge, 1) as STARTCHARGE,
+            ROUND(min_charge, 1) as ENDCHARGE,
+            ROUND(max_charge - min_charge, 1) as CHARGECONSUMED,
+            ROUND(COALESCE(end_distance - start_distance, 0), 2) as DISTANCECOVERED,
+            ROUND(avg_current, 1) as AVGCURRENT,
+            ROUND(max_temp, 1) as MAXTEMP,
+            ROUND(min_voltage, 2) as MINVOLTAGE,
+            cycle_count as CYCLECOUNT,
+            error_events as ERROREVENTS
         FROM battery_sessions
-        WHERE (session_end - session_start) > 360  -- Filter out sessions shorter than 6 minutes
-          AND bms_id != ''  -- Ensure we have valid BMS ID
-          AND LENGTH(bms_id) > 5  -- Reasonable BMS ID length
+        WHERE (session_end - session_start) > 360
+          AND bms_id != ''
+          AND LENGTH(bms_id) > 5
         ORDER BY session_start DESC
         LIMIT 100
         `,
 
-      // System diagnostics with cleaned data
+      // OPTIMIZED: Only fetch aggregated metrics for diagnostics
       systemDiagnostics: `
         WITH cleaned_battery_stats AS (
           SELECT
@@ -491,9 +465,7 @@ function useBatteryData(
             AVG(BATSOH) as avg_soh,
             AVG(BATTEMP) as avg_temp,
             SUM(CASE WHEN BATTERY_ERROR IS NOT NULL AND BATTERY_ERROR != '' THEN 1 ELSE 0 END) as error_count,
-            COUNT(*) as readings_count,
-            MAX(TOTAL_DISTANCE_KM) - MIN(TOTAL_DISTANCE_KM) as distance,
-            (MAX(BATPERCENT) - MIN(BATPERCENT)) as charge_used
+            COUNT(*) as readings_count
           FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
           ${whereClause}
           GROUP BY UPPER(TRIM(REGEXP_REPLACE(
@@ -503,26 +475,26 @@ function useBatteryData(
           HAVING COUNT(*) > 10 AND LENGTH(bms_id) > 5
         )
         SELECT
-          bs.total_batteries,
-          bs.avg_soh,
-          bs.avg_temp,
-          bs.critical_events,
-          bs.voltage_anomalies,
-          bs.total_readings,
-          bs.distance_covered,
-          bs.charge_consumed,
-          bs.active_days,
+          bs.total_batteries as TOTAL_BATTERIES,
+          bs.avg_soh as AVG_SOH,
+          bs.avg_temp as AVG_TEMP,
+          bs.critical_events as CRITICAL_EVENTS,
+          bs.voltage_anomalies as VOLTAGE_ANOMALIES,
+          bs.total_readings as TOTAL_READINGS,
+          bs.distance_covered as DISTANCE_COVERED,
+          bs.charge_consumed as CHARGE_CONSUMED,
+          bs.active_days as ACTIVE_DAYS,
           CASE WHEN bs.charge_consumed > 0 
                THEN ROUND(bs.distance_covered / bs.charge_consumed, 2)
-               ELSE 0 END as battery_efficiency,
+               ELSE 0 END as BATTERY_EFFICIENCY,
           LISTAGG(
             CASE WHEN bp.avg_soh >= 90 AND (bp.error_count * 100.0 / bp.readings_count) < 5 
                  THEN bp.bms_id END, ','
-          ) WITHIN GROUP (ORDER BY bp.avg_soh DESC) as preferred_batteries,
+          ) WITHIN GROUP (ORDER BY bp.avg_soh DESC) as PREFERRED_BATTERIES,
           LISTAGG(
             CASE WHEN bp.avg_soh < 85 OR (bp.error_count * 100.0 / bp.readings_count) > 10 OR bp.avg_temp > 45
                  THEN bp.bms_id END, ','
-          ) WITHIN GROUP (ORDER BY bp.avg_soh ASC) as problematic_batteries
+          ) WITHIN GROUP (ORDER BY bp.avg_soh ASC) as PROBLEMATIC_BATTERIES
         FROM cleaned_battery_stats bs
         CROSS JOIN cleaned_battery_performance bp
         GROUP BY bs.total_batteries, bs.avg_soh, bs.avg_temp, bs.critical_events, 
@@ -530,14 +502,23 @@ function useBatteryData(
                  bs.charge_consumed, bs.active_days
       `
     };
-  }, [tboxId, buildFilterConditions]);
+  }, [tboxId, buildFilterConditions, lastDataTimestamp]);
 
   const loadData = useCallback(async () => {
+    // Only set loading if we actually have a tboxId to fetch
+    if (!tboxId) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setDebugInfo(null);
     
     try {
+      // First, fetch the last data timestamp
+      const lastTime = await fetchLastDataTimestamp();
+      
       // Fetch main telemetry data
       const telemetryResult = await fetchSnowflakeData(queries.batteryTelemetry, "batteryTelemetry");
       setBatteryData(telemetryResult || []);
@@ -547,7 +528,7 @@ function useBatteryData(
       const rawSwaps = swapResult || [];
       
       // Apply client-side consolidation for rapid swaps
-      const consolidatedSwaps = consolidateRapidSwaps(rawSwaps, 10); // 10-minute window
+      const consolidatedSwaps = consolidateRapidSwaps(rawSwaps, 10);
       setBatterySwaps(consolidatedSwaps);
       
       // Fetch battery sessions
@@ -568,7 +549,7 @@ function useBatteryData(
           totalBatteries: safeNumber(rawDiagnostics.TOTAL_BATTERIES),
           totalSwaps: consolidatedSwaps.length,
           avgSessionDuration: sessionResult?.length > 0 ? 
-            sessionResult.reduce((sum: number, s: any) => sum + safeNumber(s.duration), 0) / sessionResult.length : 0,
+            sessionResult.reduce((sum: number, s: any) => sum + safeNumber(s.DURATION), 0) / sessionResult.length : 0,
           preferredBatteries: rawDiagnostics.PREFERRED_BATTERIES ? 
             rawDiagnostics.PREFERRED_BATTERIES.split(',').filter(Boolean) : [],
           problematicBatteries: rawDiagnostics.PROBLEMATIC_BATTERIES ? 
@@ -605,7 +586,12 @@ function useBatteryData(
         diagnosticsFound: !!rawDiagnostics,
         timeRange: filters.timeRange,
         uniqueBatteries: [...new Set(telemetryResult?.map((d: any) => d.BMS_ID) || [])].length,
-        swapsConsolidated: rawSwaps.length - consolidatedSwaps.length
+        swapsConsolidated: rawSwaps.length - consolidatedSwaps.length,
+        lastDataTimestamp: lastTime,
+        dataDateRange: lastTime ? {
+          from: new Date((lastTime - (filters.timeRange * 3600)) * 1000).toISOString(),
+          to: new Date(lastTime * 1000).toISOString()
+        } : null
       });
       
     } catch (error) {
@@ -619,11 +605,20 @@ function useBatteryData(
     } finally {
       setLoading(false);
     }
-  }, [queries, fetchSnowflakeData, filters.timeRange]);
+  }, [queries, fetchSnowflakeData, filters.timeRange, fetchLastDataTimestamp, tboxId]);
 
   useEffect(() => {
     if (tboxId) {
       loadData();
+    } else {
+      // Reset state when no tboxId
+      setLoading(false);
+      setBatteryData([]);
+      setBatterySwaps([]);
+      setBatterySessions([]);
+      setDiagnostics(null);
+      setError(null);
+      setDebugInfo(null);
     }
   }, [loadData, tboxId]);
 
@@ -635,10 +630,10 @@ function useBatteryData(
     loading,
     error,
     debugInfo,
+    lastDataTimestamp,
     refetch: loadData,
   };
 }
-
 
 export type {
   TboxData,
