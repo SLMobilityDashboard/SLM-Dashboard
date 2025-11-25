@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { cookies } from "next/headers";
 import Script from "next/script";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
 
 import DashboardLayout from "@/components/dashboard-layout";
 import AuthHeader from "@/components/AuthHeader";
@@ -40,7 +41,9 @@ export default function RootLayout({
       </head>
       <body>
         <Providers>
-          <DashboardLayout>{children}</DashboardLayout>
+          <ProtectedRoute>
+            <DashboardLayout>{children}</DashboardLayout>
+          </ProtectedRoute>
         </Providers>
       </body>
     </html>

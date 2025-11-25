@@ -29787,3 +29787,58 @@
 {"level":"INFO","message":"[9:29:53.008 AM]: No config file path found. Client config will not be used."}
 {"level":"INFO","message":"[9:29:53.016 AM]: Easy Logging is disabled as no config has been found"}
 {"level":"INFO","message":"[9:29:53.079 AM]: Connection[id: 9eae81ca-6de1-4abc-82a2-136e965e0995] - connected successfully after 157.7291000187397 milliseconds"}
+{"level":"INFO","message":"[9:44:06.561 AM]: Creating new connection object"}
+{"level":"INFO","message":"[9:44:06.579 AM]: Creating Connection[id: 45c2627b-7a0e-4a84-9525-1ab6fcfa6200] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26100"}
+{"level":"INFO","message":"[9:44:06.580 AM]: Connection[id: 45c2627b-7a0e-4a84-9525-1ab6fcfa6200] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[9:44:06.584 AM]: Connection[id: 45c2627b-7a0e-4a84-9525-1ab6fcfa6200] - connection object created successfully."}
+{"level":"INFO","message":"[9:44:06.587 AM]: Connection[id: 45c2627b-7a0e-4a84-9525-1ab6fcfa6200] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[9:44:06.643 AM]: Connection[id: 45c2627b-7a0e-4a84-9525-1ab6fcfa6200] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[9:44:06.648 AM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[9:44:06.672 AM]: No client config detected."}
+{"level":"INFO","message":"[9:44:06.685 AM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[9:44:06.697 AM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[9:44:06.721 AM]: Connection[id: 45c2627b-7a0e-4a84-9525-1ab6fcfa6200] - connected successfully after 134.4210000038147 milliseconds"}
+{"level":"INFO","message":"[9:45:29.410 AM]: Creating new connection object"}
+{"level":"INFO","message":"[9:45:29.432 AM]: Creating Connection[id: c8be371d-8f37-48f4-8573-3c44ce27bb9d] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26100"}
+{"level":"INFO","message":"[9:45:29.435 AM]: Connection[id: c8be371d-8f37-48f4-8573-3c44ce27bb9d] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[9:45:29.436 AM]: Connection[id: c8be371d-8f37-48f4-8573-3c44ce27bb9d] - connection object created successfully."}
+{"level":"INFO","message":"[9:45:29.438 AM]: Connection[id: c8be371d-8f37-48f4-8573-3c44ce27bb9d] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[9:45:29.447 AM]: Connection[id: c8be371d-8f37-48f4-8573-3c44ce27bb9d] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[9:45:29.449 AM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[9:45:29.456 AM]: No client config detected."}
+{"level":"INFO","message":"[9:45:29.457 AM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[9:45:29.458 AM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[9:45:29.463 AM]: Connection[id: c8be371d-8f37-48f4-8573-3c44ce27bb9d] - connected successfully after 25.298799991607666 milliseconds"}
+{"level":"INFO","message":"[9:49:49.210 AM]: Creating new connection object"}
+{"level":"INFO","message":"[9:49:49.226 AM]: Creating Connection[id: fea236b2-622d-4670-878a-5620495ea393] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26100"}
+{"level":"INFO","message":"[9:49:49.228 AM]: Connection[id: fea236b2-622d-4670-878a-5620495ea393] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[9:49:49.230 AM]: Connection[id: fea236b2-622d-4670-878a-5620495ea393] - connection object created successfully."}
+{"level":"INFO","message":"[9:49:49.231 AM]: Connection[id: fea236b2-622d-4670-878a-5620495ea393] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[9:49:49.241 AM]: Connection[id: fea236b2-622d-4670-878a-5620495ea393] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[9:49:49.244 AM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[9:49:49.250 AM]: No client config detected."}
+{"level":"INFO","message":"[9:49:49.251 AM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[9:49:49.253 AM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[9:49:49.263 AM]: Connection[id: fea236b2-622d-4670-878a-5620495ea393] - connected successfully after 31.452900022268295 milliseconds"}
+{"level":"INFO","message":"[10:04:37.094 AM]: Creating new connection object"}
+{"level":"INFO","message":"[10:04:37.108 AM]: Creating Connection[id: 149fbf0b-0ed8-4787-8dcb-7fa84bfb9445] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26100"}
+{"level":"INFO","message":"[10:04:37.111 AM]: Connection[id: 149fbf0b-0ed8-4787-8dcb-7fa84bfb9445] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[10:04:37.112 AM]: Connection[id: 149fbf0b-0ed8-4787-8dcb-7fa84bfb9445] - connection object created successfully."}
+{"level":"INFO","message":"[10:04:37.113 AM]: Connection[id: 149fbf0b-0ed8-4787-8dcb-7fa84bfb9445] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[10:04:37.133 AM]: Connection[id: 149fbf0b-0ed8-4787-8dcb-7fa84bfb9445] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[10:04:37.134 AM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[10:04:37.141 AM]: No client config detected."}
+{"level":"INFO","message":"[10:04:37.142 AM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[10:04:37.143 AM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[10:04:37.149 AM]: Connection[id: 149fbf0b-0ed8-4787-8dcb-7fa84bfb9445] - connected successfully after 36.07229998707771 milliseconds"}
+{"level":"INFO","message":"[10:05:10.409 AM]: Creating new connection object"}
+{"level":"INFO","message":"[10:05:10.432 AM]: Creating Connection[id: 4a22ce81-05fb-4291-a012-46a64f352046] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26100"}
+{"level":"INFO","message":"[10:05:10.433 AM]: Connection[id: 4a22ce81-05fb-4291-a012-46a64f352046] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[10:05:10.435 AM]: Connection[id: 4a22ce81-05fb-4291-a012-46a64f352046] - connection object created successfully."}
+{"level":"INFO","message":"[10:05:10.438 AM]: Connection[id: 4a22ce81-05fb-4291-a012-46a64f352046] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[10:05:10.448 AM]: Connection[id: 4a22ce81-05fb-4291-a012-46a64f352046] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[10:05:10.452 AM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[10:05:10.487 AM]: No client config detected."}
+{"level":"INFO","message":"[10:05:10.488 AM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[10:05:10.488 AM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[10:05:10.499 AM]: Connection[id: 4a22ce81-05fb-4291-a012-46a64f352046] - connected successfully after 61.16890001296997 milliseconds"}

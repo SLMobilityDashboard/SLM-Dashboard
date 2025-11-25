@@ -1,3 +1,7 @@
+// ============================================
+// 1. Root Layout (app/layout.tsx)
+// ============================================
+
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
@@ -24,28 +28,26 @@ export const metadata: Metadata = {
       type: "image/x-icon",
     },
   },
-  // ADDED: Essential metatags for social media sharing (Open Graph)
   openGraph: {
     title: "Lencar E-Mobility Analytics Dashboard",
     description:
       "Performance and data analysis for Lencar's e-mobility fleet and charging infrastructure.",
-    url: "https://slm-dashboard-e757.vercel.app/", // IMPORTANT: Update this URL for deployment
+    url: "https://slm-dashboard-e757.vercel.app/",
     siteName: "Lencar Analytics",
     images: [
       {
-        url: "/og-image.png", // IMPORTANT: Update this URL for deployment
+        url: "/og-image.png",
       },
     ],
     locale: "en_US",
     type: "website",
   },
-  // ADDED: Essential metatags for Twitter sharing
   twitter: {
     card: "summary_large_image",
     title: "Lencar E-Mobility Analytics Dashboard",
     description:
       "Performance and data analysis for Lencar's e-mobility fleet and charging infrastructure.",
-    images: ["/og-image.png"], // IMPORTANT: Update this URL for deployment
+    images: ["/og-image.png"],
   },
 };
 
@@ -60,7 +62,6 @@ export default function RootLayout({
         <meta name="favicon" content="/favicon.ico" />
       </Head>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        {/* Wrap children in SessionProvider via a Client Component */}
         <SessionProviderWrapper>{children}</SessionProviderWrapper>
       </body>
     </html>
