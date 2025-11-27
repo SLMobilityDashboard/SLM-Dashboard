@@ -5,7 +5,7 @@ import snowflake from "snowflake-sdk";
 // account = "IJJJEQK-OQ82434"
 // user = "USMAAN"
 // authenticator = "externalbrowser"
-// role = "ACCOUNTADMIN"
+// role = "SYSADMIN"
 // warehouse = "COMPUTE_WH"
 // database = "SOURCE_DATA"
 // schema = "DYNAMO_DB"
@@ -19,7 +19,7 @@ function createConnection() {
     warehouse: "test",
     database: "SOURCE_DATA",
     schema: "DYNAMO_DB",
-    role: "ACCOUNTADMIN",
+    role: "SYSADMIN",
   });
 }
 

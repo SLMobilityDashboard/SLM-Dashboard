@@ -29,7 +29,7 @@ export const authOptions: NextAuthOptions = {
 
     if (token.email) {
       const roles = getRolesForEmail(token.email);
-      console.log('✅ Roles assigned for:', token.email, '→', roles);
+      // console.log('✅ Roles assigned for:', token.email, '→', roles);
       token.roles = roles;
     } else {
       console.log('⚠️ No roles assigned for:', token.email);
@@ -56,7 +56,7 @@ export const authOptions: NextAuthOptions = {
         
         // Log role assignment for debugging
         if (allRoles.length > 0) {
-          console.log('✅ Roles assigned for:', token.email, '→', allRoles);
+          // console.log('✅ Roles assigned for:', token.email, '→', allRoles);
         } else {
           console.log('⚠️ No roles assigned for:', token.email);
         }

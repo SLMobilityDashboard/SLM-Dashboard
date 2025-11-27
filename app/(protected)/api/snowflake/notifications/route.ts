@@ -1,5 +1,6 @@
+// app/(protected)/api/snowflake/notifications/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import SnowflakeConnectionManager from "@/lib/snowflake";
+import SnowflakeNotificationManager from "@/lib/snowflake_notification"; // ✅ Correct import
 import crypto from "crypto";
 import { getRedis } from "@/lib/redis";
 
@@ -128,6 +129,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing or invalid SQL" }, { status: 400 });
     }
 
+    console.log(`📝 Request received - User: ${userId || 'anonymous'}`);
+
     // Determine if we should use cache
     const bypassCache = noCache === true || shouldBypassCache(sql);
     const isWrite = isWriteOperation(sql);
@@ -147,7 +150,7 @@ export async function POST(req: NextRequest) {
       const cachedData = await readFromCache(queryHash);
       if (cachedData) {
         const duration = Date.now() - startTime;
-        console.log(`🟢 CACHE HIT [${shortHash}] - ${cachedData.length} rows - ${duration}ms`);
+        console.log(`🟢 CACHE HIT [${shortHash}] - User: ${userId || 'anonymous'} - ${cachedData.length} rows - ${duration}ms`);
         return NextResponse.json(cachedData, {
           status: 200,
           headers: { "X-Cache-Status": "HIT", "X-Cache-Hash": queryHash },
@@ -157,14 +160,20 @@ export async function POST(req: NextRequest) {
       console.log(`⚠️ CACHE BYPASSED [${shortHash}] - ${noCache ? 'Explicit noCache flag' : 'Write operation detected'}`);
     }
 
-    // 2️⃣ Cache miss or bypassed → query Snowflake
-    console.log(`🔴 CACHE MISS [${shortHash}] - Executing Snowflake query...`);
-    await SnowflakeConnectionManager.connect();
-    const connection = SnowflakeConnectionManager.getConnection();
+    // 2️⃣ Cache miss or bypassed → query Snowflake with userId using SnowflakeNotificationManager
+    console.log(`🔴 CACHE MISS [${shortHash}] - Executing Snowflake query for user: ${userId || 'anonymous'}...`);
+    
+    // Pass userId to both connect and getConnection
+    await SnowflakeNotificationManager.connect(userId);
+    const connection = await SnowflakeNotificationManager.getConnection(userId);
 
     const rows = await new Promise<any[]>((resolve, reject) => {
+      // Add audit comment with userId
+      const auditComment = userId ? `-- Executed by: ${userId}\n` : '';
+      const finalSql = `${auditComment}${sql}`;
+
       connection.execute({
-        sqlText: sql,
+        sqlText: finalSql,
         complete: (err, stmt, rows) => {
           if (err) return reject(err);
           
@@ -201,9 +210,9 @@ export async function POST(req: NextRequest) {
     const totalDuration = Date.now() - startTime;
     
     if (isWrite) {
-      console.log(`✅ WRITE COMPLETE [${shortHash}] - ${rows[0]?.rowsAffected || 0} rows affected - ${totalDuration}ms`);
+      console.log(`✅ WRITE COMPLETE [${shortHash}] - User: ${userId || 'anonymous'} - ${rows[0]?.rowsAffected || 0} rows affected - ${totalDuration}ms`);
     } else {
-      console.log(`✅ QUERY COMPLETE [${shortHash}] - ${rows.length} rows - ${totalDuration}ms`);
+      console.log(`✅ QUERY COMPLETE [${shortHash}] - User: ${userId || 'anonymous'} - ${rows.length} rows - ${totalDuration}ms`);
     }
 
     return NextResponse.json(rows, {
@@ -212,7 +221,8 @@ export async function POST(req: NextRequest) {
         "X-Cache-Status": bypassCache ? "BYPASS" : "MISS", 
         "X-Cache-Hash": queryHash,
         "X-Query-Duration": `${totalDuration}ms`,
-        "X-Is-Write": isWrite ? "true" : "false"
+        "X-Is-Write": isWrite ? "true" : "false",
+        "X-User": userId || 'anonymous'
       },
     });
   } catch (err: any) {

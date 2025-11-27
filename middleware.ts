@@ -1,30 +1,9 @@
-// middleware.ts
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
-import { hasRouteAccess } from "@/lib/auth/roles";
 
 export default withAuth(
   function middleware(req) {
-    const token = req.nextauth.token;
-    const pathname = req.nextUrl.pathname;
-
-    // Get user roles from token
-    const userRoles = token?.roles as string[] | undefined;
-
-    // Public routes that don't need role checking
-    const publicRoutes = ['/auth', '/api/auth', '/'];
-    const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route));
-
-    if (isPublicRoute) {
-      return NextResponse.next();
-    }
-
-    // Check if user has access to the route based on their roles
-    if (!hasRouteAccess(userRoles, pathname)) {
-      // Redirect to unauthorized page or dashboard
-      return NextResponse.redirect(new URL('/unauthorized', req.url));
-    }
-
+    // Additional middleware logic if needed
     return NextResponse.next();
   },
   {
@@ -33,25 +12,27 @@ export default withAuth(
         // Check if user is authenticated
         const isAuthenticated = !!token;
         
-        const pathname = req.nextUrl.pathname;
+        // Check if trying to access protected routes
+        const isProtectedRoute = req.nextUrl.pathname.startsWith('/(protected)') ||
+                                req.nextUrl.pathname.startsWith('/analytics') ||
+                                req.nextUrl.pathname.startsWith('/battery') ||
+                                req.nextUrl.pathname.startsWith('/charging') ||
+                                req.nextUrl.pathname.startsWith('/complaints') ||
+                                req.nextUrl.pathname.startsWith('/fleet') ||
+                                req.nextUrl.pathname.startsWith('/gps') ||
+                                req.nextUrl.pathname.startsWith('/motor') ||
+                                req.nextUrl.pathname.startsWith('/predictive') ||
+                                req.nextUrl.pathname.startsWith('/realtime') ||
+                                req.nextUrl.pathname.startsWith('/revenue') ||
+                                req.nextUrl.pathname.startsWith('/sales') ||
+                                req.nextUrl.pathname.startsWith('/vehicles');
         
         // Allow access to auth pages and API routes
-        if (pathname.startsWith('/auth') || 
-            pathname.startsWith('/api/auth') ||
-            pathname === '/') {
+        if (req.nextUrl.pathname.startsWith('/auth') || 
+            req.nextUrl.pathname.startsWith('/api/auth') ||
+            req.nextUrl.pathname === '/') {
           return true;
         }
-        
-        // List of protected route prefixes
-        const protectedPrefixes = [
-          '/analytics', '/battery', '/charging', '/complaints',
-          '/fleet', '/gps', '/motor', '/predictive', '/realtime',
-          '/revenue', '/sales', '/vehicles', '/adhoc'
-        ];
-        
-        const isProtectedRoute = protectedPrefixes.some(prefix => 
-          pathname.startsWith(prefix)
-        );
         
         // Require authentication for protected routes
         if (isProtectedRoute) {
@@ -69,6 +50,13 @@ export default withAuth(
 
 export const config = {
   matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder
+     */
     '/((?!_next/static|_next/image|favicon.ico|public).*)',
   ],
 };

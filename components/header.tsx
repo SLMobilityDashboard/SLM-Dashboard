@@ -122,7 +122,11 @@ export function Header() {
       const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql, noCache: forceRefresh }),
+        body: JSON.stringify({
+          sql,
+          userId: session?.user?.name || session?.user?.email, // ✅ Pass userId
+          noCache: forceRefresh,
+        }),
       });
 
       if (!response.ok) {
@@ -153,7 +157,10 @@ export function Header() {
       const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql }),
+        body: JSON.stringify({
+          sql,
+          userId: session?.user?.name || session?.user?.email, // ✅ Pass userId
+        }),
       });
 
       if (!response.ok) throw new Error("Failed to mark as read");
@@ -185,7 +192,10 @@ export function Header() {
       const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql }),
+        body: JSON.stringify({
+          sql,
+          userId: session?.user?.name || session?.user?.email, // ✅ Pass userId
+        }),
       });
 
       if (!response.ok) throw new Error("Failed to mark all as read");
@@ -213,7 +223,10 @@ export function Header() {
       const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql }),
+        body: JSON.stringify({
+          sql,
+          userId: session?.user?.name || session?.user?.email, // ✅ Pass userId
+        }),
       });
 
       if (!response.ok) throw new Error("Failed to remove notification");
@@ -241,7 +254,10 @@ export function Header() {
       const response = await fetch("/api/snowflake/notifications", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql }),
+        body: JSON.stringify({
+          sql,
+          userId: session?.user?.name || session?.user?.email, // ✅ Pass userId
+        }),
       });
 
       if (!response.ok) throw new Error("Failed to clear all");

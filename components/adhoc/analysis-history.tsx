@@ -1,3 +1,5 @@
+"use client";
+
 import { useState, useMemo, useEffect } from "react";
 import {
   Card,
@@ -16,7 +18,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
 import {
   AlertDialog,
   AlertDialogContent,
@@ -27,6 +28,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
+import { useSession } from "next-auth/react";
 import {
   History,
   Search,
@@ -213,6 +215,9 @@ export function AnalysisHistory({
   // Animation states
   const [deletingAnimations, setDeletingAnimations] = useState<string[]>([]);
 
+  // Get session data
+  const { data: session } = useSession();
+
   const showToast = (type: "success" | "error", message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 4000);
@@ -366,7 +371,7 @@ export function AnalysisHistory({
     try {
       setRerunningIds((ids) => [...ids, analysis.id]);
 
-      // Call the RunSQLQuery API
+      // Call the RunSQLQuery API with username
       const response = await fetch("/api/RunSQLQuery", {
         method: "POST",
         headers: {
@@ -374,6 +379,8 @@ export function AnalysisHistory({
         },
         body: JSON.stringify({
           sql: analysis.sql,
+          connectionId: "snowflake_1751620346752",
+          username: session?.user?.name || session?.user?.email || "unknown", // Pass username
         }),
       });
 
@@ -568,6 +575,15 @@ export function AnalysisHistory({
           <CardTitle className="text-white flex items-center gap-2">
             <History className="h-5 w-5" />
             Analysis History
+            {session?.user && (
+              <Badge
+                variant="outline"
+                className="ml-2 text-xs bg-slate-700/30 border-slate-600 text-slate-300"
+              >
+                <User className="h-3 w-3 mr-1" />
+                {session.user.name || session.user.email}
+              </Badge>
+            )}
           </CardTitle>
           <CardDescription className="text-slate-400">
             View and rerun your previous queries

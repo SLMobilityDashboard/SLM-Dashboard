@@ -521,7 +521,7 @@ export default function AIQueryBuilder({
         body: JSON.stringify({
           sql: sqlToExecute,
           connectionId: "snowflake_1751620346752",
-          username: session?.user?.name || session?.user?.email || undefined, // Pass username, make it optional
+          username: session?.user?.name || undefined, // Pass username, make it optional
         }),
       });
 

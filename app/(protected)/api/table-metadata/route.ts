@@ -45,10 +45,10 @@ interface TableMetadataResponse {
 
 // Helper function to execute SQL queries
 async function executeSQLQuery(sql: string): Promise<any> {
-  const response = await fetch(`http://localhost:3000/api/RunSQLQuery`, {
+  const response = await fetch(`http://localhost:3000/api/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql, username: 'HANSIKA' }), // Use session username here
+    body: JSON.stringify({ sql, username: 'SAFNAS' }), // Use session username here
   });
 
   if (!response.ok) {

@@ -1,0 +1,73 @@
+{
+  "Records": [
+    {
+      "eventID": "2db34d4486abb33f419a7f4e5efb1de5",
+      "eventName": "MODIFY",
+      "eventVersion": "1.1",
+      "eventSource": "aws:dynamodb",
+      "awsRegion": "ap-southeast-1",
+      "dynamodb": {
+        "ApproximateCreationDateTime": 1754980784,
+        "Keys": {
+          "createdAt": { "N": "0" },
+          "pk": { "S": "P#ad5b9cb7-61e6-43d4-9d1d-a9848ed7910a" }
+        },
+        "NewImage": {
+          "refundPercentage": { "S": "20" },
+          "locationName": { "S": "Panadura" },
+          "previousWalletBal": { "S": "N/A" },
+          "chargePercentage": { "S": "100" },
+          "paymentType": { "S": "BATTERY_SWAP" },
+          "trnxId": { "S": "P#8f94db1c-5147-4612-9650-d4d0a32a9031" },
+          "createdAt": { "N": "0" },
+          "createdEpoch": { "N": "1754980764395" },
+          "packageDetailID": { "S": "P#None" },
+          "locationId": { "S": "P#f9655640-a39a-4607-803a-eea0ddd040ba" },
+          "paymentId": { "S": "ad5b9cb7-61e6-43d4-9d1d-a9848ed7910a" },
+          "paymentTries": { "N": "1" },
+          "ratingId": { "S": "P#0ad036b6-a991-4757-bbeb-b6c3dc74c66c" },
+          "customerId": { "S": "P#f1658173-403e-4033-851f-7497f6e95344" },
+          "paymentMethod": { "S": "CARD_PAYMENT" },
+          "chargeAmount": { "S": "250.00" },
+          "model": { "S": "Payment" },
+          "stationName": { "S": "Panadura  1 Station" },
+          "pk": { "S": "P#ad5b9cb7-61e6-43d4-9d1d-a9848ed7910a" },
+          "net": { "S": "250.00" },
+          "openDoor": { "S": "TRUE" },
+          "refundAmount": { "S": "0.00" },
+          "stationId": { "S": "P#98deea01-73d2-48b9-8f7c-ac062ea76a1f" },
+          "status": { "S": "PENDING" }
+        },
+        "OldImage": {
+          "refundPercentage": { "S": "20" },
+          "locationName": { "S": "Panadura" },
+          "previousWalletBal": { "S": "N/A" },
+          "chargePercentage": { "S": "100" },
+          "paymentType": { "S": "BATTERY_SWAP" },
+          "trnxId": { "S": "P#8f94db1c-5147-4612-9650-d4d0a32a9031" },
+          "createdAt": { "N": "0" },
+          "createdEpoch": { "N": "1754980764395" },
+          "packageDetailID": { "S": "P#None" },
+          "locationId": { "S": "P#f9655640-a39a-4607-803a-eea0ddd040ba" },
+          "paymentId": { "S": "ad5b9cb7-61e6-43d4-9d1d-a9848ed7910a" },
+          "ratingId": { "S": "P#0ad036b6-a991-4757-bbeb-b6c3dc74c66c" },
+          "customerId": { "S": "P#f1658173-403e-4033-851f-7497f6e95344" },
+          "paymentMethod": { "S": "CARD_PAYMENT" },
+          "chargeAmount": { "S": "250.00" },
+          "model": { "S": "Payment" },
+          "stationName": { "S": "Panadura  1 Station" },
+          "pk": { "S": "P#ad5b9cb7-61e6-43d4-9d1d-a9848ed7910a" },
+          "net": { "S": "250.00" },
+          "openDoor": { "S": "TRUE" },
+          "refundAmount": { "S": "0.00" },
+          "stationId": { "S": "P#98deea01-73d2-48b9-8f7c-ac062ea76a1f" },
+          "status": { "S": "PENDING" }
+        },
+        "SequenceNumber": "3337235700000803969899719355",
+        "SizeBytes": 1272,
+        "StreamViewType": "NEW_AND_OLD_IMAGES"
+      },
+      "eventSourceARN": "arn:aws:dynamodb:ap-southeast-1:442993539750:table/EZROperational/stream/2025-06-29T17:07:43.584"
+    }
+  ]
+}
