@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSession, signOut } from "next-auth/react";
 import { createPortal } from "react-dom";
+import { useRouter } from "next/navigation";
 
 interface TaskNotification {
   QUERY_ID: string;
@@ -58,8 +59,10 @@ interface TaskNotification {
 export function Header() {
   const { theme, setTheme } = useTheme();
   const { data: session, status } = useSession();
+  const router = useRouter();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isClient, setIsClient] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Notifications state
   const [notifications, setNotifications] = useState<TaskNotification[]>([]);
@@ -341,13 +344,12 @@ export function Header() {
     if (!date) return "N/A";
     try {
       if (typeof date === "string") {
-        // Parse the string as UTC and add 5:30
+        // Parse the string as UTC and add 8 hours
         const cleanDate = date.split(".")[0];
         const dateObj = new Date(cleanDate + "Z"); // Treat as UTC
 
-        // Add 5 hours and 30 minutes
+        // Add 8 hours
         dateObj.setUTCHours(dateObj.getUTCHours() + 8);
-        dateObj.setUTCMinutes(dateObj.getUTCMinutes());
 
         const hours = String(dateObj.getUTCHours()).padStart(2, "0");
         const minutes = String(dateObj.getUTCMinutes()).padStart(2, "0");
@@ -374,13 +376,12 @@ export function Header() {
     if (!date) return "N/A";
     try {
       if (typeof date === "string") {
-        // Parse as UTC and add 5:30
+        // Parse as UTC and add 8 hours
         const cleanDate = date.split(".")[0];
         const dateObj = new Date(cleanDate + "Z"); // Treat as UTC
 
-        // Add 5 hours and 30 minutes
+        // Add 8 hours
         dateObj.setUTCHours(dateObj.getUTCHours() + 8);
-        dateObj.setUTCMinutes(dateObj.getUTCMinutes());
 
         const year = dateObj.getUTCFullYear();
         const month = dateObj.getUTCMonth();
@@ -418,10 +419,29 @@ export function Header() {
   };
 
   const handleSignOut = async () => {
-    await signOut({
-      callbackUrl: "/auth/sign-in",
-      redirect: true,
-    });
+    try {
+      setIsLoggingOut(true);
+
+      // Sign out from NextAuth
+      await signOut({
+        redirect: false, // Don't auto-redirect, we'll handle it manually
+      });
+
+      // Clear any additional cookies or local storage if needed
+      // localStorage.clear(); // Uncomment if you're using localStorage
+      // sessionStorage.clear(); // Uncomment if you're using sessionStorage
+
+      // Redirect to sign-in page
+      router.push("/auth/sign-in");
+
+      // Force a hard refresh to clear all client-side state
+      window.location.href = "/auth/sign-in";
+    } catch (error) {
+      console.error("Error signing out:", error);
+      setIsLoggingOut(false);
+      // Still try to redirect even if there's an error
+      window.location.href = "/auth/sign-in";
+    }
   };
 
   const getUserInitials = (name?: string | null) => {
@@ -526,7 +546,7 @@ export function Header() {
             </Tooltip>
           </TooltipProvider>
 
-          <DropdownMenu>
+          {/* <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
@@ -555,7 +575,7 @@ export function Header() {
                 System
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
+          </DropdownMenu> */}
 
           {isClient && status === "authenticated" && session?.user ? (
             <DropdownMenu>
@@ -563,6 +583,7 @@ export function Header() {
                 <Button
                   variant="ghost"
                   className="relative h-10 w-10 rounded-full"
+                  disabled={isLoggingOut}
                 >
                   <Avatar className="h-10 w-10">
                     <AvatarImage
@@ -570,7 +591,11 @@ export function Header() {
                       alt={session.user.name || "User"}
                     />
                     <AvatarFallback className="bg-slate-700 text-slate-200">
-                      {getUserInitials(session.user.name)}
+                      {isLoggingOut ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        getUserInitials(session.user.name)
+                      )}
                     </AvatarFallback>
                   </Avatar>
                 </Button>
@@ -603,9 +628,19 @@ export function Header() {
                 <DropdownMenuItem
                   className="text-red-600 focus:text-red-600"
                   onClick={handleSignOut}
+                  disabled={isLoggingOut}
                 >
-                  <LogOut className="mr-2 h-4 w-4" />
-                  <span>Log out</span>
+                  {isLoggingOut ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <span>Signing out...</span>
+                    </>
+                  ) : (
+                    <>
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>Log out</span>
+                    </>
+                  )}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -615,7 +650,7 @@ export function Header() {
             <Button
               variant="outline"
               className="border-slate-700 bg-slate-900/50"
-              onClick={() => (window.location.href = "/auth/signin")}
+              onClick={() => router.push("/auth/sign-in")}
             >
               Sign In
             </Button>

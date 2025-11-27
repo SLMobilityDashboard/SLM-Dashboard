@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { useSession } from "next-auth/react";
 import {
   Brain,
   Send,
@@ -35,7 +36,7 @@ import {
   Truck,
 } from "lucide-react";
 import { useGenerateSQL } from "@/hooks/useGenerateSQL";
-import { ca } from "date-fns/locale";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 interface DatabaseConnection {
   id: string;
@@ -412,13 +413,16 @@ export default function AIQueryBuilder({
   const [isEditingSQL, setIsEditingSQL] = useState(false);
   const [editedSQL, setEditedSQL] = useState("");
 
+  // Get session data
+  const { data: session } = useSession();
+
   const {
     sql: generatedSQL,
     loading: isGenerating,
     error,
     explanation,
     generate,
-    setSql, // Assuming this exists in your hook to update the SQL
+    setSql,
   } = useGenerateSQL();
 
   const getCategoryFromPrompt = (prompt: string): string => {
@@ -517,6 +521,7 @@ export default function AIQueryBuilder({
         body: JSON.stringify({
           sql: sqlToExecute,
           connectionId: "snowflake_1751620346752",
+          username: session?.user?.name || session?.user?.email || undefined, // Pass username, make it optional
         }),
       });
 
@@ -598,7 +603,7 @@ export default function AIQueryBuilder({
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      {/* Connection Status Bar */}
+      {/* Connection Status Bar - Updated with User Info */}
       <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm">
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
@@ -625,14 +630,43 @@ export default function AIQueryBuilder({
                 {connection.type}
               </Badge>
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <Clock className="h-3.5 w-3.5" />
-              <span>
-                Last connected:{" "}
-                {connection.lastConnected
-                  ? new Date(connection.lastConnected).toLocaleString()
-                  : "N/A"}
-              </span>
+
+            {/* User Info Section */}
+            <div className="flex items-center gap-4">
+              {session?.user && (
+                <div className="flex items-center gap-3">
+                  {/* User Avatar and Name */}
+                  <div className="flex items-center gap-2 text-sm text-slate-300">
+                    {/* <Avatar className="h-6 w-6 border border-slate-600">
+                      <AvatarImage
+                        src="/placeholder.svg?height=24&width=24"
+                        alt="User"
+                      />
+                      <AvatarFallback className="bg-slate-700 text-cyan-400 text-xs">
+                        {session?.user?.name?.substring(0, 2).toUpperCase() ||
+                          "U"}
+                      </AvatarFallback>
+                    </Avatar> */}
+                    <span className="font-medium">
+                      {session.user.name || session.user.email}
+                    </span>
+                  </div>
+
+                  {/* Separator */}
+                  <div className="h-4 w-px bg-slate-600"></div>
+
+                  {/* Connection Time */}
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span>
+                      Last connected:{" "}
+                      {connection.lastConnected
+                        ? new Date(connection.lastConnected).toLocaleString()
+                        : "N/A"}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </CardContent>
@@ -644,6 +678,15 @@ export default function AIQueryBuilder({
           <CardTitle className="text-white flex items-center gap-2 text-lg">
             <Brain className="h-5 w-5 text-cyan-400" />
             AI Query Builder
+            {session?.user && (
+              <Badge
+                variant="outline"
+                className="ml-2 text-xs bg-slate-700/30 border-slate-600 text-slate-300"
+              >
+                <User className="h-3 w-3 mr-1" />
+                {session.user.name || session.user.email}
+              </Badge>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -700,6 +743,39 @@ export default function AIQueryBuilder({
                       <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />
                     </h4>
                     <div className="flex items-center gap-2">
+                      {/* Edit/Save/Cancel Buttons */}
+                      {isEditingSQL ? (
+                        <>
+                          <Button
+                            onClick={handleSaveSQL}
+                            size="sm"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                          >
+                            <Save className="h-4 w-4 mr-2" />
+                            Save
+                          </Button>
+                          <Button
+                            onClick={handleCancelEdit}
+                            size="sm"
+                            variant="outline"
+                            className="border-slate-600/50 text-slate-300"
+                          >
+                            <X className="h-4 w-4 mr-2" />
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          onClick={handleEditSQL}
+                          size="sm"
+                          variant="outline"
+                          className="border-slate-600/50 bg-slate-700/50 hover:bg-slate-600/60 text-slate-300 hover:text-white transition-all duration-200"
+                        >
+                          <Edit3 className="h-4 w-4 mr-2" />
+                          Edit
+                        </Button>
+                      )}
+
                       {/* Copy Button */}
                       <Button
                         onClick={handleCopySQL}

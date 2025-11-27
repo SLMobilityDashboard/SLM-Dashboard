@@ -2,31 +2,53 @@
 
 /**
  * Define available roles in the system
+ * Currently active: Admin, FactoryManager, QA
+ * Future roles: Manager, Analyst, Viewer
  */
-export type Role = 'Admin' | 'Manager' | 'Analyst' | 'User' | 'Support' | 'Viewer';
+export type Role = 'Admin' | 'Manager' | 'Analyst' | 'Viewer' | 'FactoryManager' | 'QA';
 
 /**
  * Email to roles mapping
  * Add or modify email-role associations here
  */
 export const ROLE_MAPPINGS: Record<string, Role[]> = {
-  'safnas@slmobility.com': ['Admin'],
-  'hansika@slmobility.com': ['Analyst', 'User'],
-  'jane@slmobility.com': ['User'],
-  'support@slmobility.com': ['Support', 'User'],
-  'viewer@slmobility.com': ['Viewer'],
-  // Add more mappings as needed
+  // Current Active Users
+  'safnas@slmobility.com': ['Admin'],            // Safnas
+  'hansika@slmobility.com': ['Admin'],           // Hansika
+  'janaka@ascensionit.com': ['Admin'],           // Janaka
+  'rifkhan@slmobility.com': ['Admin'],           // Rifkhan
+  'zaid@slmobility.com': ['Admin'],              // Zaid
+  'udara@slmobility.com': ['Admin'],             // Udara
+  'rasika@slmobility.com': ['FactoryManager'],   // Rasika
+  'oshani@slmobility.com': ['QA'],               // Oshani
+  'zainab@slmobility.com': ['QA'],               // Zainab
+  
+  // Future users - uncomment and assign roles as needed
+  // 'manager@slmobility.com': ['Manager'],
+  // 'analyst@slmobility.com': ['Analyst'],
+  // 'viewer@slmobility.com': ['Viewer'],
 };
 
 /**
  * Role hierarchy - defines what permissions each role inherits
  * Higher roles inherit permissions from lower roles
+ * 
+ * Current Structure:
+ * - Admin: Full access to everything (super user)
+ * - QA: Full access to everything (quality assurance oversight)
+ * - FactoryManager: Access to everything except revenue
+ * 
+ * Future roles ready for when needed:
+ * - Manager: Access to most features except some admin-specific ones
+ * - Analyst: Data analysis and reporting access
+ * - Viewer: Read-only access
  */
 export const ROLE_HIERARCHY: Record<Role, Role[]> = {
-  Admin: ['Admin', 'Manager', 'User', 'Support', 'Viewer'],
-  Manager: ['Manager', 'User', 'Viewer'],
-  Support: ['Support', 'User', 'Viewer'],
-  User: ['User', 'Viewer'],
+  Admin: ['Admin', 'Manager', 'Analyst', 'Viewer', 'FactoryManager', 'QA'],
+  QA: ['QA', 'Manager', 'Analyst', 'Viewer'],
+  FactoryManager: ['FactoryManager', 'Analyst', 'Viewer'],
+  Manager: ['Manager', 'Analyst', 'Viewer'],
+  Analyst: ['Analyst', 'Viewer'],
   Viewer: ['Viewer'],
 };
 

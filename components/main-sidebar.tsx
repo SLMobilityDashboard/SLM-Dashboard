@@ -1,4 +1,7 @@
+"use client";
+
 import { usePathname } from "next/navigation";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import {
   SIDEBAR as Sidebar,
@@ -57,9 +60,13 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import { hasMenuAccess } from "@/lib/auth/roles";
 
 export function MainSidebar() {
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const userRoles = session?.user?.roles || [];
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     dashboard: true,
@@ -70,6 +77,7 @@ export function MainSidebar() {
     fleet: pathname?.startsWith("/fleet") || false,
     charging: pathname?.startsWith("/charging") || false,
     revenue: pathname?.startsWith("/revenue") || false,
+    sales: pathname?.startsWith("/sales") || false,
   });
 
   // Prevent body scroll when mobile menu is open
@@ -120,37 +128,14 @@ export function MainSidebar() {
       icon: <ShoppingCart className="h-4 w-4" />,
       color: "text-orange-500",
     },
+    vehicles: {
+      icon: <Bike className="h-4 w-4" />,
+      color: "text-amber-500",
+    },
   };
 
   // Define menu categories and their items for consistency
   const menuCategories = [
-    {
-      id: "fleet",
-      label: "Fleet Management",
-      icon: categoryIcons.fleet,
-      items: [
-        {
-          path: "/fleet",
-          label: "Overview",
-          icon: <Activity className="h-4 w-4" />,
-        },
-        {
-          path: "/fleet/vehicles",
-          label: "Vehicles",
-          icon: <Hexagon className="h-4 w-4" />,
-        },
-        {
-          path: "/fleet/maintenance",
-          label: "Maintenance",
-          icon: <Wrench className="h-4 w-4" />,
-        },
-        {
-          path: "/fleet/schedule",
-          label: "Schedule",
-          icon: <Calendar className="h-4 w-4" />,
-        },
-      ],
-    },
     {
       id: "gps",
       label: "GPS Analytics",
@@ -185,34 +170,7 @@ export function MainSidebar() {
       ],
     },
     {
-      id: "battery",
-      label: "Battery Analytics",
-      icon: categoryIcons.battery,
-      items: [
-        {
-          path: "/battery",
-          label: "Overview",
-          icon: <Activity className="h-4 w-4" />,
-        },
-        {
-          path: "/battery/health",
-          label: "Health Monitoring",
-          icon: <Gauge className="h-4 w-4" />,
-        },
-        {
-          path: "/battery/performance",
-          label: "Performance",
-          icon: <LineChart className="h-4 w-4" />,
-        },
-        {
-          path: "/battery/prediction",
-          label: "Prediction",
-          icon: <PieChart className="h-4 w-4" />,
-        },
-      ],
-    },
-    {
-      id: "Vehicles",
+      id: "vehicles",
       label: "360 Analytics",
       icon: categoryIcons.motor,
       show: true,
@@ -221,65 +179,6 @@ export function MainSidebar() {
           path: "/vehicles",
           label: "Vehicle Overview",
           icon: <Activity className="h-4 w-4" />,
-        },
-      ],
-    },
-    {
-      id: "sales",
-      label: "Sales Management",
-      icon: categoryIcons.sales,
-      items: [
-        {
-          path: "/sales",
-          label: "Overview",
-          icon: <Activity className="h-4 w-4" />,
-        },
-        {
-          path: "/sales/regional",
-          label: "Regional Analysis",
-          icon: <MapPin className="h-4 w-4" />,
-        },
-        {
-          path: "/sales/financial",
-          label: "Financial Analysis",
-          icon: <Calculator className="h-4 w-4" />,
-        },
-        {
-          path: "/sales/dealers",
-          label: "Dealer Performance",
-          icon: <Building2 className="h-4 w-4" />,
-        },
-        {
-          path: "/sales/customers",
-          label: "Customer Insights",
-          icon: <UserCheck className="h-4 w-4" />,
-        },
-      ],
-    },
-    {
-      id: "charging",
-      label: "Swapping Stations",
-      icon: categoryIcons.charging,
-      items: [
-        {
-          path: "/charging",
-          label: "Overview",
-          icon: <Activity className="h-4 w-4" />,
-        },
-        {
-          path: "/charging/stations",
-          label: "Station Map",
-          icon: <MapPin className="h-4 w-4" />,
-        },
-        {
-          path: "/charging/usage",
-          label: "Usage Analytics",
-          icon: <BarChart3 className="h-4 w-4" />,
-        },
-        {
-          path: "/charging/Cabinets",
-          label: "Cabinet",
-          icon: <Calendar className="h-4 w-4" />,
         },
       ],
     },
@@ -314,38 +213,12 @@ export function MainSidebar() {
         },
       ],
     },
-    {
-      id: "analytics",
-      label: "Analytics",
-      icon: categoryIcons.analytics,
-      items: [
-        {
-          path: "/analytics",
-          label: "Dashboard",
-          icon: <Activity className="h-4 w-4" />,
-        },
-        {
-          path: "/analytics/reports",
-          label: "Reports",
-          icon: <LineChart className="h-4 w-4" />,
-        },
-        {
-          path: "/analytics/predictions",
-          label: "Predictions",
-          icon: <PieChart className="h-4 w-4" />,
-        },
-        {
-          path: "/analytics/alerts",
-          label: "Alerts",
-          icon: <AlertTriangle className="h-4 w-4" />,
-        },
-      ],
-    },
   ];
 
-  // Filter categories to show only those with show: true
+  // Filter categories: show only those with show: true AND user has access
   const visibleCategories = menuCategories.filter(
-    (category) => category.show === true
+    (category) =>
+      category.show === true && hasMenuAccess(userRoles, category.id)
   );
 
   const SidebarContentComponent = ({
@@ -455,12 +328,16 @@ export function MainSidebar() {
                     alt="User"
                   />
                   <AvatarFallback className="bg-slate-800 text-cyan-500">
-                    SK
+                    {session?.user?.name?.substring(0, 2).toUpperCase() || "U"}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex flex-col">
-                  <span className="text-sm font-medium">Safnas Kaldeen</span>
-                  <span className="text-xs text-slate-400">Data Analyst</span>
+                  <span className="text-sm font-medium">
+                    {session?.user?.name || "User"}
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    {userRoles.join(", ") || "Loading..."}
+                  </span>
                 </div>
               </div>
             </div>
@@ -505,12 +382,16 @@ export function MainSidebar() {
                     alt="User"
                   />
                   <AvatarFallback className="bg-slate-800 text-cyan-500">
-                    SK
+                    {session?.user?.name?.substring(0, 2).toUpperCase() || "U"}
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex flex-col">
-                  <span className="text-sm font-medium">Safnas Kaldeen</span>
-                  <span className="text-xs text-slate-400">Data Analyst</span>
+                  <span className="text-sm font-medium">
+                    {session?.user?.name || "User"}
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    {userRoles.join(", ") || "Loading..."}
+                  </span>
                 </div>
               </div>
             </SidebarFooter>
@@ -627,7 +508,7 @@ export function MainSidebar() {
         <SidebarSeparator className="my-1 bg-slate-800" />
       )}
 
-      {/* Menu Categories - Only show categories with show: true */}
+      {/* Menu Categories - Only show categories with show: true AND user has access */}
       {visibleCategories.map((category) => (
         <Collapsible
           key={category.id}

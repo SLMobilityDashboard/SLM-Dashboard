@@ -48,7 +48,7 @@ async function executeSQLQuery(sql: string): Promise<any> {
   const response = await fetch(`http://localhost:3000/api/RunSQLQuery`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sql }),
+    body: JSON.stringify({ sql, username: 'HANSIKA' }), // Use session username here
   });
 
   if (!response.ok) {

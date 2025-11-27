@@ -6,79 +6,114 @@ export const ROLES = {
   MANAGER: 'Manager',
   ANALYST: 'Analyst',
   VIEWER: 'Viewer',
+  FACTORY_MANAGER: 'FactoryManager',
+  QA: 'QA',
 } as const
 
 export type UserRole = typeof ROLES[keyof typeof ROLES]
 
+/**
+ * Current Access Rules:
+ * - Admin: Full access to everything (super user)
+ * - QA: Full access to everything (quality assurance oversight)
+ * - FactoryManager: Access to everything EXCEPT revenue
+ * 
+ * Future roles (Manager, Analyst, Viewer) are defined but not yet assigned
+ */
+
 // Define which roles can access which menu categories
 export const MENU_PERMISSIONS: Record<string, UserRole[]> = {
-  realtime: [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-  fleet: [ROLES.ADMIN, ROLES.MANAGER],
-  gps: [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  battery: [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  vehicles: [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  sales: [ROLES.ADMIN, ROLES.MANAGER],
-  charging: [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  revenue: [ROLES.ADMIN, ROLES.MANAGER],
-  analytics: [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
+  realtime: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
+  fleet: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
+  gps: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  battery: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  vehicles: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  sales: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
+  charging: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  revenue: [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER], // FactoryManager excluded
+  analytics: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
+  factory: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER], // Factory-specific
+  production: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER], // Factory-specific
+  quality: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER], // QA and Factory oversight
 }
 
 // Define which roles can access which routes
 export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
   // Dashboard routes
-  '/realtime': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-  '/adhoc': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/predictive': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
+  '/realtime': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
+  '/adhoc': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/predictive': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
   
   // Fleet Management
-  '/fleet': [ROLES.ADMIN, ROLES.MANAGER],
-  '/fleet/vehicles': [ROLES.ADMIN, ROLES.MANAGER],
-  '/fleet/maintenance': [ROLES.ADMIN, ROLES.MANAGER],
-  '/fleet/schedule': [ROLES.ADMIN, ROLES.MANAGER],
+  '/fleet': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
+  '/fleet/vehicles': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
+  '/fleet/maintenance': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
+  '/fleet/schedule': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
   
   // GPS Analytics
-  '/gps': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/gps/route-planning': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/gps/usage-patterns': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/gps/area-analysis': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/gps/density-analysis': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
+  '/gps': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/gps/route-planning': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/gps/usage-patterns': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/gps/area-analysis': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/gps/density-analysis': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
   
   // Battery Analytics
-  '/battery': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/battery/health': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/battery/performance': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/battery/prediction': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
+  '/battery': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/battery/health': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/battery/performance': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/battery/prediction': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
   
   // Vehicles
-  '/vehicles': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
+  '/vehicles': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
   
   // Sales Management
-  '/sales': [ROLES.ADMIN, ROLES.MANAGER],
-  '/sales/regional': [ROLES.ADMIN, ROLES.MANAGER],
-  '/sales/financial': [ROLES.ADMIN, ROLES.MANAGER],
-  '/sales/dealers': [ROLES.ADMIN, ROLES.MANAGER],
-  '/sales/customers': [ROLES.ADMIN, ROLES.MANAGER],
+  '/sales': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
+  '/sales/regional': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
+  '/sales/financial': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
+  '/sales/dealers': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
+  '/sales/customers': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
   
   // Charging Stations
-  '/charging': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/charging/stations': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/charging/usage': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/charging/cabinets': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
+  '/charging': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/charging/stations': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/charging/usage': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/charging/cabinets': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
   
-  // Revenue Management
-  '/revenue': [ROLES.ADMIN, ROLES.MANAGER],
-  '/revenue/analytics': [ROLES.ADMIN, ROLES.MANAGER],
-  '/revenue/patterns': [ROLES.ADMIN, ROLES.MANAGER],
-  '/revenue/package': [ROLES.ADMIN, ROLES.MANAGER],
+  // Revenue Management - FactoryManager EXCLUDED
+  '/revenue': [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER],
+  '/revenue/analytics': [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER],
+  '/revenue/patterns': [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER],
+  '/revenue/package': [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER],
   
   // Analytics
-  '/analytics': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-  '/analytics/reports': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-  '/analytics/predictions': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
-  '/analytics/alerts': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST],
+  '/analytics': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
+  '/analytics/reports': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
+  '/analytics/predictions': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  '/analytics/alerts': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+  
+  // Factory Management - Factory-specific routes
+  '/factory': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/factory/production': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/factory/assembly': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/factory/inventory': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  
+  // Production Management
+  '/production': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/production/schedule': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/production/status': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/production/line': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  
+  // Quality Assurance
+  '/qa': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/qa/inspections': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/qa/reports': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/qa/defects': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/quality': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/quality/control': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
+  '/quality/standards': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
   
   // Settings
-  '/settings': [ROLES.ADMIN, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
+  '/settings': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
 }
 
 // Helper function to check if user has access to a route
