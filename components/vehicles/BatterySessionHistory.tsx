@@ -855,93 +855,99 @@ export default function BatterySwapAnalytics({ IMEI }: { IMEI: string }) {
             },
             body: JSON.stringify({
               sql: `
-              WITH ordered AS (
+              WITH last_date AS (
+                    SELECT MAX(START_TIME) as max_date
+                    FROM REPORT_DB.GPS_DASHBOARD.TBOX_BMS_BRIDGE
+                    WHERE TBOXID = '${IMEI}'
+                      AND END_TIME IS NOT NULL
+                ),
+                ordered AS (
+                    SELECT 
+                        SESSION_ID,
+                        TBOXID,
+                        BMSID,
+                        START_TIME,
+                        END_TIME,
+                        LEAD(START_TIME) OVER (PARTITION BY TBOXID ORDER BY START_TIME) AS NEXT_START
+                    FROM REPORT_DB.GPS_DASHBOARD.TBOX_BMS_BRIDGE
+                    WHERE END_TIME IS NOT NULL
+                      AND TBOXID = '${IMEI}'
+                      AND START_TIME >= DATEADD(day, -90, (SELECT max_date FROM last_date))
+                ),
+                gaps AS (
+                    SELECT 
+                        TBOXID,
+                        END_TIME AS GAP_START,
+                        NEXT_START AS GAP_END
+                    FROM ordered
+                    WHERE NEXT_START IS NOT NULL 
+                      AND DATEDIFF(minute, END_TIME, NEXT_START) > 10
+                ),
+                split_gaps AS (
+                    SELECT
+                        TBOXID,
+                        GAP_START,
+                        GAP_END,
+                        CASE 
+                            WHEN DATE(GAP_START) = DATE(GAP_END) THEN 1
+                            ELSE 2
+                        END AS parts
+                    FROM gaps
+                )
                 SELECT 
                     SESSION_ID,
                     TBOXID,
                     BMSID,
                     START_TIME,
                     END_TIME,
-                    LEAD(START_TIME) OVER (PARTITION BY TBOXID ORDER BY START_TIME) AS NEXT_START
-                FROM REPORT_DB.GPS_DASHBOARD.TBOX_BMS_BRIDGE
-                WHERE END_TIME IS NOT NULL
-                  AND TBOXID = '${IMEI}'
-                  AND START_TIME > '2025-07-29 00:00:00.000'
-            ),
-            gaps AS (
-                SELECT 
-                    TBOXID,
-                    END_TIME AS GAP_START,
-                    NEXT_START AS GAP_END
+                    LPAD(DATEDIFF(second, START_TIME, END_TIME) / 3600, 2, '0') || 'h ' ||
+                    LPAD(MOD(DATEDIFF(second, START_TIME, END_TIME) / 60, 60), 2, '0') || 'm' AS DURATION
                 FROM ordered
-                WHERE NEXT_START IS NOT NULL 
-                  AND DATEDIFF(minute, END_TIME, NEXT_START) > 10
-            ),
-            split_gaps AS (
-                SELECT
+
+                UNION ALL
+
+                -- Gaps that stay within the same day
+                SELECT 
+                    NULL AS SESSION_ID,
                     TBOXID,
-                    GAP_START,
-                    GAP_END,
-                    CASE 
-                        WHEN DATE(GAP_START) = DATE(GAP_END) THEN 1
-                        ELSE 2
-                    END AS parts
-                FROM gaps
-            )
-            SELECT 
-                SESSION_ID,
-                TBOXID,
-                BMSID,
-                START_TIME,
-                END_TIME,
-                LPAD(DATEDIFF(second, START_TIME, END_TIME) / 3600, 2, '0') || 'h ' ||
-                LPAD(MOD(DATEDIFF(second, START_TIME, END_TIME) / 60, 60), 2, '0') || 'm' AS DURATION
-            FROM ordered
+                    'UNAVAILABLE' AS BMSID,
+                    GAP_START AS START_TIME,
+                    GAP_END AS END_TIME,
+                    LPAD(DATEDIFF(second, GAP_START, GAP_END) / 3600, 2, '0') || 'h ' ||
+                    LPAD(MOD(DATEDIFF(second, GAP_START, GAP_END) / 60, 60), 2, '0') || 'm' AS DURATION
+                FROM split_gaps
+                WHERE parts = 1
 
-            UNION ALL
+                UNION ALL
 
-            -- Gaps that stay within the same day
-            SELECT 
-                NULL AS SESSION_ID,
-                TBOXID,
-                'UNAVAILABLE' AS BMSID,
-                GAP_START AS START_TIME,
-                GAP_END AS END_TIME,
-                LPAD(DATEDIFF(second, GAP_START, GAP_END) / 3600, 2, '0') || 'h ' ||
-                LPAD(MOD(DATEDIFF(second, GAP_START, GAP_END) / 60, 60), 2, '0') || 'm' AS DURATION
-            FROM split_gaps
-            WHERE parts = 1
+                -- First part of gaps that cross midnight (remainder of first day)
+                SELECT 
+                    NULL AS SESSION_ID,
+                    TBOXID,
+                    'UNAVAILABLE' AS BMSID,
+                    GAP_START AS START_TIME,
+                    DATEADD(day, 1, DATE_TRUNC('day', GAP_START)) AS END_TIME,
+                    LPAD(DATEDIFF(second, GAP_START, DATEADD(day, 1, DATE_TRUNC('day', GAP_START))) / 3600, 2, '0') || 'h ' ||
+                    LPAD(MOD(DATEDIFF(second, GAP_START, DATEADD(day, 1, DATE_TRUNC('day', GAP_START))) / 60, 60), 2, '0') || 'm' AS DURATION
+                FROM split_gaps
+                WHERE parts = 2
 
-            UNION ALL
+                UNION ALL
 
-            -- First part of gaps that cross midnight (remainder of first day)
-            SELECT 
-                NULL AS SESSION_ID,
-                TBOXID,
-                'UNAVAILABLE' AS BMSID,
-                GAP_START AS START_TIME,
-                DATEADD(day, 1, DATE_TRUNC('day', GAP_START)) AS END_TIME,  -- Midnight of next day
-                LPAD(DATEDIFF(second, GAP_START, DATEADD(day, 1, DATE_TRUNC('day', GAP_START))) / 3600, 2, '0') || 'h ' ||
-                LPAD(MOD(DATEDIFF(second, GAP_START, DATEADD(day, 1, DATE_TRUNC('day', GAP_START))) / 60, 60), 2, '0') || 'm' AS DURATION
-            FROM split_gaps
-            WHERE parts = 2
+                -- Second part of gaps that cross midnight (from 00:00:00 next day)
+                SELECT 
+                    NULL AS SESSION_ID,
+                    TBOXID,
+                    'UNAVAILABLE' AS BMSID,
+                    DATEADD(day, 1, DATE_TRUNC('day', GAP_START)) AS START_TIME,
+                    GAP_END AS END_TIME,
+                    LPAD(DATEDIFF(second, DATEADD(day, 1, DATE_TRUNC('day', GAP_START)), GAP_END) / 3600, 2, '0') || 'h ' ||
+                    LPAD(MOD(DATEDIFF(second, DATEADD(day, 1, DATE_TRUNC('day', GAP_START)), GAP_END) / 60, 60), 2, '0') || 'm' AS DURATION
+                FROM split_gaps
+                WHERE parts = 2
 
-            UNION ALL
-
-            -- Second part of gaps that cross midnight (from 00:00:00 next day)
-            SELECT 
-                NULL AS SESSION_ID,
-                TBOXID,
-                'UNAVAILABLE' AS BMSID,
-                DATEADD(day, 1, DATE_TRUNC('day', GAP_START)) AS START_TIME,  -- 00:00:00 next day
-                GAP_END AS END_TIME,
-                LPAD(DATEDIFF(second, DATEADD(day, 1, DATE_TRUNC('day', GAP_START)), GAP_END) / 3600, 2, '0') || 'h ' ||
-                LPAD(MOD(DATEDIFF(second, DATEADD(day, 1, DATE_TRUNC('day', GAP_START)), GAP_END) / 60, 60), 2, '0') || 'm' AS DURATION
-            FROM split_gaps
-            WHERE parts = 2
-
-            ORDER BY START_TIME
-            LIMIT 1000
+                ORDER BY START_TIME
+                LIMIT 1000
             `,
             }),
           }

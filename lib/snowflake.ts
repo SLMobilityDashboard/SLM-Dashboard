@@ -36,7 +36,7 @@ class SnowflakeConnectionManager {
       'safnas@slmobility.com': 'SAFNAS',
       'hansika': 'HANSIKA',
       'hansika@slmobility.com': 'HANSIKA',
-      'oshaniqa': 'OSHANI',
+      'Oshani': 'OSHANI',
       'oshani@slmobility.com': 'OSHANI',
       'authenticated-user': process.env.SNOWFLAKE_USERNAME || 'DEFAULT_USER',
       'authenticated user': process.env.SNOWFLAKE_USERNAME || 'DEFAULT_USER',
