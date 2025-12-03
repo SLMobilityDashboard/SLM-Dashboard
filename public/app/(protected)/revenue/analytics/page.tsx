@@ -47,6 +47,8 @@ import {
 
 export default function RevenueAnalyticsPage() {
   const [filters, setFilters] = useState<RevenueFiltersType>({
+    selectedProvinces: [],
+    selectedDistricts: [],
     selectedAreas: [],
     selectedStations: [],
     customerSegments: [],

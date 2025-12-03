@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 import SnowflakeConnectionManager from "@/lib/snowflake";
 import crypto from "crypto";
 import { getRedis } from "@/lib/redis";
@@ -9,6 +10,8 @@ interface QueryLogEntry {
   shortHash: string;
   sql: string;
   userId?: string;
+  username?: string;
+  email?: string;
   cacheStatus: "HIT" | "MISS" | "REVALIDATED";
   rowCount: number;
   duration: number;
@@ -41,6 +44,52 @@ interface CacheMetadata {
   verificationCount: number;
   lastDataChange: string | null;
   dataChangeCount: number;
+}
+
+// -------------------- User Extraction --------------------
+async function extractUserFromRequest(req: NextRequest): Promise<{ 
+  userId?: string; 
+  username?: string;
+  email?: string;
+  roles?: string[];
+}> {
+  try {
+    // Get token from NextAuth - this works with Cognito
+    const token = await getToken({ 
+      req, 
+      secret: process.env.NEXTAUTH_SECRET 
+    });
+    
+    if (token) {
+      console.log('🔐 [GPS] Token found:', {
+        sub: token.sub,
+        name: token.name,
+        email: token.email,
+        username: token.username,
+        roles: token.roles
+      });
+      
+      return {
+        userId: token.sub || token.id,
+        username: token.name as string || token.userName || token.email,
+        email: token.email as string,
+        roles: token.roles as string[] || []
+      };
+    }
+
+    // Check for session cookie as fallback
+    const cookieHeader = req.headers.get('cookie');
+    if (cookieHeader?.includes('next-auth.session-token')) {
+      console.log('🔐 [GPS] Session cookie found but token not decoded');
+      return { userId: 'authenticated', username: 'user' };
+    }
+    
+    console.log('🔐 [GPS] No user session found');
+    return {}; // No user info available
+  } catch (error) {
+    console.error('[GPS] Error extracting user from request:', error);
+    return {};
+  }
 }
 
 // -------------------- Query Normalization --------------------
@@ -78,18 +127,17 @@ function normalizeSQL(sql: string): string {
   return normalized.trim();
 }
 
-function generateQueryHash(sql: string, userId?: string): string {
+function generateQueryHash(sql: string): string {
   const normalizedSql = normalizeSQL(sql);
-  const queryString = userId ? `${userId}:${normalizedSql}` : normalizedSql;
-  return crypto.createHash("sha256").update(queryString).digest("hex");
+  return crypto.createHash("sha256").update(normalizedSql).digest("hex");
 }
 
 function generateCacheKey(queryHash: string, sql: string, forceDynamic?: boolean): string {
   if (hasDynamicDates(sql) || forceDynamic) {
     const today = new Date().toISOString().slice(0, 10);
-    return `cache:${queryHash}:${today}`;
+    return `cache:gps:${queryHash}:${today}`;
   }
-  return `cache:${queryHash}`;
+  return `cache:gps:${queryHash}`;
 }
 
 function generateDataHash(data: any[]): string {
@@ -159,24 +207,16 @@ async function performRevalidation(
   cacheKey: string,
   shortHash: string,
   sql: string,
-  connection: any
+  username?: string
 ): Promise<{ dataChanged: boolean; newData?: any[]; error?: string }> {
-  console.log(`[REVALIDATE] [${shortHash}] Checking for data changes...`);
+  console.log(`[REVALIDATE GPS] [${shortHash}] Checking for data changes...`);
   
   const redis = await getRedis();
   const metaKey = `${cacheKey}:meta`;
   
   try {
-    // Execute query to get fresh data
-    const freshData = await new Promise<any[]>((resolve, reject) => {
-      connection.execute({
-        sqlText: sql,
-        complete: (err: any, _stmt: any, rows: any) => {
-          if (err) return reject(err);
-          resolve(rows || []);
-        },
-      });
-    });
+    const result = await SnowflakeConnectionManager.executeQuery(sql, username, false);
+    const freshData = result.rows;
     
     const freshDataHash = generateDataHash(freshData);
     const existingMetaData = await redis.get(metaKey);
@@ -205,14 +245,14 @@ async function performRevalidation(
     }
     
     if (dataChanged) {
-      console.log(`[REVALIDATE] [${shortHash}] Data changed (change #${newMeta.dataChangeCount})`);
+      console.log(`[REVALIDATE GPS] [${shortHash}] Data changed (change #${newMeta.dataChangeCount})`);
       return { dataChanged: true, newData: freshData };
     } else {
-      console.log(`[REVALIDATE] [${shortHash}] Data unchanged (check #${newMeta.verificationCount})`);
+      console.log(`[REVALIDATE GPS] [${shortHash}] Data unchanged (check #${newMeta.verificationCount})`);
       return { dataChanged: false };
     }
   } catch (error: any) {
-    console.error(`[REVALIDATE] [${shortHash}] Failed:`, error.message);
+    console.error(`[REVALIDATE GPS] [${shortHash}] Failed:`, error.message);
     return { dataChanged: false, error: error.message };
   }
 }
@@ -225,10 +265,10 @@ async function logQueryAnalytics(entry: QueryLogEntry): Promise<void> {
     const today = new Date().toISOString().slice(0, 10);
     
     // Log entry with 7 day expiration
-    const logKey = `query:log:${entry.shortHash}:${Date.now()}`;
+    const logKey = `query:gps:log:${entry.shortHash}:${Date.now()}`;
     await redis.set(logKey, JSON.stringify(entry), { EX: 604800 });
 
-    const statsKey = `query:stats:${entry.queryHash}`;
+    const statsKey = `query:gps:stats:${entry.queryHash}`;
     const existingStats = await redis.get(statsKey);
     
     let stats: QueryStats = existingStats ? JSON.parse(existingStats) : {
@@ -283,16 +323,17 @@ async function logQueryAnalytics(entry: QueryLogEntry): Promise<void> {
     await redis.set(statsKey, JSON.stringify(stats));
     
     // Update sorted set for candidates
-    await redis.zAdd('query:prewarm:candidates', {
+    await redis.zAdd('query:gps:prewarm:candidates', {
       score: stats.preWarmScore,
       value: entry.queryHash
     });
     
     const statusLabel = entry.cacheStatus === 'REVALIDATED' ? 'REVALIDATED' : entry.cacheStatus;
-    console.log(`[${entry.shortHash}] ${statusLabel} | Score: ${stats.preWarmScore.toFixed(2)} | Persistent: ${stats.isPersistent} | No-hit: ${stats.consecutiveDaysNoHits}d`);
+    const userLabel = entry.username ? `[${entry.username}]` : '[Anonymous]';
+    console.log(`[GPS ${entry.shortHash}] ${userLabel} ${statusLabel} | Score: ${stats.preWarmScore.toFixed(2)} | Persistent: ${stats.isPersistent} | No-hit: ${stats.consecutiveDaysNoHits}d`);
     
   } catch (error) {
-    console.error("Failed to log analytics:", error);
+    console.error("Failed to log GPS analytics:", error);
   }
 }
 
@@ -432,7 +473,7 @@ async function writeToCache(
       }
       
       const action = isRevalidation ? "Refreshed" : "Cached";
-      console.log(`${action} [${shortHash}] PERSISTENT - ${data.length} rows (${(dataSize / 1024 / 1024).toFixed(1)}MB)`);
+      console.log(`${action} [GPS ${shortHash}] PERSISTENT - ${data.length} rows (${(dataSize / 1024 / 1024).toFixed(1)}MB)`);
     } else if (strategy.ttl) {
       await redis.set(cacheKey, JSON.stringify(data), { EX: strategy.ttl });
       
@@ -448,13 +489,13 @@ async function writeToCache(
       await redis.set(metaKey, JSON.stringify(meta), { EX: strategy.ttl });
       
       const hours = Math.floor(strategy.ttl / 3600);
-      console.log(`Cached [${shortHash}] for ${hours}h (${strategy.type}) - ${data.length} rows (${(dataSize / 1024 / 1024).toFixed(1)}MB)`);
+      console.log(`Cached [GPS ${shortHash}] for ${hours}h (${strategy.type}) - ${data.length} rows (${(dataSize / 1024 / 1024).toFixed(1)}MB)`);
     } else {
       await redis.set(cacheKey, JSON.stringify(data), { EX: 86400 });
-      console.log(`Cached [${shortHash}] for 24h - ${data.length} rows (${(dataSize / 1024 / 1024).toFixed(1)}MB)`);
+      console.log(`Cached [GPS ${shortHash}] for 24h - ${data.length} rows (${(dataSize / 1024 / 1024).toFixed(1)}MB)`);
     }
   } catch (error: any) {
-    console.error(`Cache write failed for [${shortHash}]:`, error.message);
+    console.error(`Cache write failed for [GPS ${shortHash}]:`, error.message);
   }
 }
 
@@ -463,18 +504,30 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
-    const { sql, userId, forceDynamic } = await req.json();
+    // Extract systemUser parameter from request body
+    const { sql, forceDynamic, systemUser } = await req.json();
     if (!sql || typeof sql !== "string") {
       return NextResponse.json({ error: "Missing or invalid SQL" }, { status: 400 });
     }
 
-    const queryHash = generateQueryHash(sql, userId);
+    // Extract user information from the request automatically
+    const userInfo = await extractUserFromRequest(req);
+    
+    // Use systemUser if provided, otherwise use extracted user info
+    const userId = systemUser || userInfo.userId;
+    const username = systemUser || userInfo.username || 'ANONYMOUS';
+    const email = userInfo.email;
+
+    const queryHash = generateQueryHash(sql);
     const cacheKey = generateCacheKey(queryHash, sql, forceDynamic);
     const shortHash = queryHash.substring(0, 8);
     const strategy = getCacheStrategy(sql, forceDynamic);
 
+    const userLabel = username ? `[${username}]` : email ? `[${email}]` : userId ? `[${userId}]` : '[Anonymous]';
+    console.log(`[GPS ${shortHash}] ${userLabel} - Processing query`);
+
     const redis = await getRedis();
-    const statsKey = `query:stats:${queryHash}`;
+    const statsKey = `query:gps:stats:${queryHash}`;
     const statsData = await redis.get(statsKey);
     const stats = statsData ? JSON.parse(statsData) as QueryStats : undefined;
     const isPersistent = stats?.isPersistent || false;
@@ -490,19 +543,16 @@ export async function POST(req: NextRequest) {
         
         if (lockAcquired) {
           const duration = Date.now() - startTime;
-          console.log(`🟡   [CACHE HIT] [${shortHash}] [PERSISTENT] - Revalidating in background - ${cachedData.length} rows - ${duration}ms`);
+          console.log(`🟡 [GPS CACHE HIT] [${shortHash}] ${userLabel} [PERSISTENT] - Revalidating in background - ${cachedData.length} rows - ${duration}ms`);
           
           // Return cached data immediately, revalidate in background
           (async () => {
             try {
-              await SnowflakeConnectionManager.connect();
-              const connection = SnowflakeConnectionManager.getConnection();
-              
               const revalidationResult = await performRevalidation(
                 cacheKey,
                 shortHash,
                 sql,
-                connection
+                username
               );
               
               if (revalidationResult.dataChanged && revalidationResult.newData) {
@@ -513,7 +563,7 @@ export async function POST(req: NextRequest) {
                 });
               }
             } catch (error) {
-              console.error(`Background revalidation failed for [${shortHash}]:`, error);
+              console.error(`Background revalidation failed for [GPS ${shortHash}]:`, error);
             } finally {
               await releaseRevalidationLock(cacheKey);
             }
@@ -524,6 +574,8 @@ export async function POST(req: NextRequest) {
             shortHash,
             sql,
             userId,
+            username,
+            email,
             cacheStatus: "REVALIDATED",
             rowCount: cachedData.length,
             duration,
@@ -538,7 +590,8 @@ export async function POST(req: NextRequest) {
               "X-Cache-Hash": queryHash,
               "X-Cache-Type": strategy.type,
               "X-Persistent": "true",
-              "X-Revalidation": "background"
+              "X-Revalidation": "background",
+              "X-User": username || userId || "anonymous"
             },
           });
         }
@@ -547,13 +600,15 @@ export async function POST(req: NextRequest) {
       // Standard cache hit
       const duration = Date.now() - startTime;
       const persistentLabel = isPersistent ? " [PERSISTENT]" : "";
-      console.log(`🟢 [CACHE HIT] [${shortHash}] (${strategy.type})${persistentLabel} - ${cachedData.length} rows - ${duration}ms`);
-      console.log(`Query: ${sql}`);
+      console.log(`🟢 [GPS CACHE HIT] [${shortHash}] ${userLabel} (${strategy.type})${persistentLabel} - ${cachedData.length} rows - ${duration}ms`);
+      
       await logQueryAnalytics({
         queryHash,
         shortHash,
         sql,
         userId,
+        username,
+        email,
         cacheStatus: "HIT",
         rowCount: cachedData.length,
         duration,
@@ -567,31 +622,23 @@ export async function POST(req: NextRequest) {
           "X-Cache-Status": "HIT", 
           "X-Cache-Hash": queryHash,
           "X-Cache-Type": strategy.type,
-          "X-Persistent": isPersistent ? "true" : "false"
+          "X-Persistent": isPersistent ? "true" : "false",
+          "X-User": username || userId || "anonymous"
         },
       });
     }
 
     // Cache miss - execute query
-    console.log(`🔴 [CACHE MISS] [${shortHash}] (${strategy.type}) - Executing Snowflake`);
-    await SnowflakeConnectionManager.connect();
-    const connection = SnowflakeConnectionManager.getConnection();
-
-    const rows = await new Promise<any[]>((resolve, reject) => {
-      connection.execute({
-        sqlText: sql,
-        complete: (err, _stmt, rows) => {
-          if (err) return reject(err);
-          resolve(rows || []);
-        },
-      });
-    });
+    console.log(`🔴 [GPS CACHE MISS] [${shortHash}] ${userLabel} (${strategy.type}) - Executing Snowflake`);
+    
+    const result = await SnowflakeConnectionManager.executeQuery(sql, username, false);
+    const rows = result.rows;
 
     // Cache empty results with shorter TTL (1 hour)
     if (!rows || rows.length === 0) {
       const emptyResult: any[] = [];
       await redis.set(cacheKey, JSON.stringify(emptyResult), { EX: 3600 });
-      console.log(`[EMPTY RESULT] [${shortHash}] - Cached for 1h`);
+      console.log(`[GPS EMPTY RESULT] [${shortHash}] ${userLabel} - Cached for 1h`);
       
       const duration = Date.now() - startTime;
       await logQueryAnalytics({
@@ -599,6 +646,8 @@ export async function POST(req: NextRequest) {
         shortHash,
         sql,
         userId,
+        username,
+        email,
         cacheStatus: "MISS",
         rowCount: 0,
         duration,
@@ -612,7 +661,8 @@ export async function POST(req: NextRequest) {
           "X-Cache-Status": "MISS",
           "X-Cache-Hash": queryHash,
           "X-Cache-Type": "hourly",
-          "X-Row-Count": "0"
+          "X-Row-Count": "0",
+          "X-User": username || userId || "anonymous"
         },
       });
     }
@@ -620,7 +670,7 @@ export async function POST(req: NextRequest) {
     await writeToCache(cacheKey, rows, shortHash, { strategy, stats });
 
     const totalDuration = Date.now() - startTime;
-    console.log(`✅ [QUERY COMPLETE] [${shortHash}] - ${rows.length} rows - ${totalDuration}ms`);
+    console.log(`✅ [GPS QUERY COMPLETE] [${shortHash}] ${userLabel} - ${rows.length} rows - ${totalDuration}ms`);
 
     const dataSize = Buffer.byteLength(JSON.stringify(rows), "utf-8");
     await logQueryAnalytics({
@@ -628,6 +678,8 @@ export async function POST(req: NextRequest) {
       shortHash,
       sql,
       userId,
+      username,
+      email,
       cacheStatus: "MISS",
       rowCount: rows.length,
       duration: totalDuration,
@@ -642,13 +694,14 @@ export async function POST(req: NextRequest) {
         "X-Cache-Hash": queryHash,
         "X-Cache-Type": strategy.type,
         "X-Row-Count": rows.length.toString(),
-        "X-Query-Duration": totalDuration.toString()
+        "X-Query-Duration": totalDuration.toString(),
+        "X-User": username || userId || "anonymous"
       },
     });
   } catch (err: any) {
-    console.error(`❌ [ERROR] Duration: ${Date.now() - startTime}ms`, err);
+    console.error(`❌ [GPS ERROR] Duration: ${Date.now() - startTime}ms`, err);
     return NextResponse.json(
-      { error: "Query execution failed", details: err.message }, 
+      { error: "GPS query execution failed", details: err.message }, 
       { status: 500 }
     );
   }

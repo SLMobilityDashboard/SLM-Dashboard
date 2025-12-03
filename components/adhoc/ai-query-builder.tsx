@@ -320,7 +320,7 @@ const VERIFIED_QUERIES = [
       },
       {
         text: "Analyze GPS tracking patterns for route optimization",
-        description: "Location analysis using FACT-TBOX-GPS for common routes",
+        description: "Location analysis using FACT_TBOX_GPS for common routes",
       },
       {
         text: "Show vehicle telemetry anomalies and error patterns",

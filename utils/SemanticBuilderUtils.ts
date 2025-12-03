@@ -59,9 +59,9 @@ export class SemanticBuilderUtils {
     "FACT_VEHICLE_OWNER": "ADHOC.MASTER_DATA",
     "LOOKUP_VIEW": "ADHOC.MASTER_DATA", // New lookup view for simplified joins
     "FACT_PAYMENT": "ADHOC.PAYMENTS",
-    "FACT-TBOX-GPS": "ADHOC.VEHICLE_MOVEMENTS", 
+    "FACT_TBOX_GPS": "ADHOC.VEHICLE_MOVEMENTS", 
     "FACT_VEHICLE_DISTANCE": "ADHOC.VEHICLE_MOVEMENTS",
-    "FACT-TBOX_BMS_SESSION": "ADHOC.VEHICLE_TELEMETRY",
+    "FACT_TBOX_BMS_SESSION": "ADHOC.VEHICLE_TELEMETRY",
     "FACT_VEHICLE_TELEMETRY": "ADHOC.VEHICLE_TELEMETRY"
   };
 
@@ -139,9 +139,9 @@ export class SemanticBuilderUtils {
       FACT_VEHICLE_OWNER: ["vehicle_ownership", "customer_vehicles", "ownership_mapping"],
       LOOKUP_VIEW: ["master_lookup", "entity_lookup", "relationship_view", "dimension_bridge"],
       FACT_PAYMENT: ["payments", "transactions", "billing", "payment_data"],
-      "FACT-TBOX-GPS": ["gps_data", "location_tracking", "vehicle_gps", "gps_telemetry"],
+      FACT_TBOX_GPS: ["gps_data", "location_tracking", "vehicle_gps", "gps_telemetry"],
       FACT_VEHICLE_DISTANCE: ["vehicle_distance", "trip_data", "journey_logs", "distance_data"],
-      "FACT-TBOX_BMS_SESSION": ["vehicle_sessions", "trip_sessions", "telemetry_sessions"],
+      FACT_TBOX_BMS_SESSION: ["vehicle_sessions", "trip_sessions", "telemetry_sessions"],
       FACT_VEHICLE_TELEMETRY: ["telemetry", "vehicle_data", "sensor_data", "telemetry_readings"]
     };
 
@@ -205,7 +205,7 @@ export class SemanticBuilderUtils {
         columns: ["PAYMENT_ID", "PAYMENT_METHOD_ID", "CUSTOMER_ID", "RATING_ID", "PAYMENT_METHOD", "PAYMENT_STATUS", "AMOUNT", "CURRENCY", "TRANSACTION_ID", "LOCATION_NAME", "STATION_NAME", "PAID_AT", "CREATED_AT", "AMOUNT_PAID", "CHARGE_AMOUNT", "CHARGE_PERCENTAGE", "REFUND_AMOUNT", "REFUND_PERCENTAGE", "PAYMENT_TRIES", "PREVIOUS_WALLET_BAL", "WALLET_BALANCE", "WALLET_MIN_BAL", "WALLET_CODE", "PAYMENT_METHOD_TYPE", "PAYMENT_TYPE", "REASON", "AGREEMENT", "EVENT_CODE", "EVENT_MSG", "CREATED_EPOCH", "DETAILS_JSON"] 
       },
       { 
-        name: "FACT-TBOX-GPS", 
+        name: "FACT_TBOX_GPS", 
         description: "Raw GPS telemetry data captured at 30-second intervals for vehicle location tracking", 
         columns: ["LONGDIR", "LONG", "LAT", "CTIME", "LATDIR", "TBOXID"] 
       },
@@ -215,7 +215,7 @@ export class SemanticBuilderUtils {
         columns: ["SESSION_ID", "TBOX_IMEI_NO", "BMSID", "GPS_DATE", "SESSION_START_TIME", "SESSION_END_TIME", "DISTANCE_KM", "TOTAL_GPS_POINTS", "BATTERY_TYPE_ID", "BATTERY_NAME", "CAPACITY"] 
       },
       { 
-        name: "FACT-TBOX_BMS_SESSION", 
+        name: "FACT_TBOX_BMS_SESSION", 
         description: "Session mapping between vehicles, TBOX devices, and battery management systems", 
         columns: ["SESSION_ID", "TBOXID", "BMSID", "START_TIME", "END_TIME"] 
       },
@@ -273,15 +273,15 @@ export class SemanticBuilderUtils {
       { left_table: "FACT_PAYMENT", left_column: "STATION_NAME", right_table: "DIM_SWAPPING_STATION", right_column: "NAME", type: "many-to-one" },
       
       // Telemetry relationships - can now use LOOKUP_VIEW for simplified joins
-      { left_table: "FACT-TBOX-GPS", left_column: "TBOXID", right_table: "DIM_TBOXES", right_column: "TBOX_ID", type: "many-to-one" },
-      { left_table: "FACT-TBOX-GPS", left_column: "TBOXID", right_table: "LOOKUP_VIEW", right_column: "TBOX_ID", type: "many-to-one" },
-      { left_table: "FACT-TBOX_BMS_SESSION", left_column: "TBOXID", right_table: "DIM_TBOXES", right_column: "TBOX_ID", type: "many-to-one" },
-      { left_table: "FACT-TBOX_BMS_SESSION", left_column: "TBOXID", right_table: "LOOKUP_VIEW", right_column: "TBOX_ID", type: "many-to-one" },
-      { left_table: "FACT-TBOX_BMS_SESSION", left_column: "BMSID", right_table: "DIM_BATTERY", right_column: "BMS_ID", type: "many-to-one" },
+      { left_table: "FACTTBOXGPS", left_column: "TBOXID", right_table: "DIM_TBOXES", right_column: "TBOX_ID", type: "many-to-one" },
+      { left_table: "FACTTBOXGPS", left_column: "TBOXID", right_table: "LOOKUP_VIEW", right_column: "TBOX_ID", type: "many-to-one" },
+      { left_table: "FACT_TBOX_BMS_SESSION", left_column: "TBOXID", right_table: "DIM_TBOXES", right_column: "TBOX_ID", type: "many-to-one" },
+      { left_table: "FACT_TBOX_BMS_SESSION", left_column: "TBOXID", right_table: "LOOKUP_VIEW", right_column: "TBOX_ID", type: "many-to-one" },
+      { left_table: "FACT_TBOX_BMS_SESSION", left_column: "BMSID", right_table: "DIM_BATTERY", right_column: "BMS_ID", type: "many-to-one" },
       
       // Session relationships
-      { left_table: "FACT_VEHICLE_DISTANCE", left_column: "SESSION_ID", right_table: "FACT-TBOX_BMS_SESSION", right_column: "SESSION_ID", type: "one-to-one" },
-      { left_table: "FACT_VEHICLE_TELEMETRY", left_column: "SESSION_ID", right_table: "FACT-TBOX_BMS_SESSION", right_column: "SESSION_ID", type: "many-to-one" },
+      { left_table: "FACT_VEHICLE_DISTANCE", left_column: "SESSION_ID", right_table: "FACT_TBOX_BMS_SESSION", right_column: "SESSION_ID", type: "one-to-one" },
+      { left_table: "FACT_VEHICLE_TELEMETRY", left_column: "SESSION_ID", right_table: "FACT_TBOX_BMS_SESSION", right_column: "SESSION_ID", type: "many-to-one" },
       { left_table: "FACT_VEHICLE_DISTANCE", left_column: "TBOXID", right_table: "DIM_TBOXES", right_column: "TBOX_ID", type: "many-to-one" },
       { left_table: "FACT_VEHICLE_DISTANCE", left_column: "TBOX_IMEI_NO", right_table: "LOOKUP_VIEW", right_column: "TBOX_IMEI_NO", type: "many-to-one" },
       { left_table: "FACT_VEHICLE_DISTANCE", left_column: "BMSID", right_table: "DIM_BATTERY", right_column: "BMS_ID", type: "many-to-one" },
@@ -516,7 +516,7 @@ export class SemanticBuilderUtils {
     });
     
     // Always suggest LOOKUP_VIEW for fact tables that connect to telemetry
-    if (["FACT_VEHICLE_TELEMETRY", "FACT-TBOX-GPS", "FACT_VEHICLE_DISTANCE", "FACT-TBOX_BMS_SESSION"].includes(factTable)) {
+    if (["FACT_VEHICLE_TELEMETRY", "FACT_TBOX_GPS", "FACT_VEHICLE_DISTANCE", "FACT_TBOX_BMS_SESSION"].includes(factTable)) {
       suggestedDims.add("LOOKUP_VIEW");
     }
     

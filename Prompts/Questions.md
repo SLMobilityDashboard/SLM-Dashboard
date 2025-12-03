@@ -66,9 +66,9 @@ _Complexity: Systems-level analysis requiring integration of all data sources wi
 
 ### Key Tables Required for These Questions:
 
-- **Primary Fact Tables**: FACT_PAYMENT, FACT_EXPENSES, FACT_VEHICLE_TELEMETRY, FACT_VEHICLE_DISTANCE, FACT-TBOX-GPS
+- **Primary Fact Tables**: FACT_PAYMENT, FACT_EXPENSES, FACT_VEHICLE_TELEMETRY, FACT_VEHICLE_DISTANCE, FACT_TBOX_GPS
 - **Core Dimensions**: DIM_CUSTOMERS, DIM_VEHICLE, DIM_BATTERY, DIM_SWAPPING_STATION, DIM_DEALER, DIM_BATTERY_TYPE
-- **Bridge Tables**: FACT_VEHICLE_OWNER, LOOKUP_VIEW, FACT-TBOX_BMS_SESSION
+- **Bridge Tables**: FACT_VEHICLE_OWNER, LOOKUP_VIEW, FACT_TBOX_BMS_SESSION
 
 ### Advanced Analytics Required:
 

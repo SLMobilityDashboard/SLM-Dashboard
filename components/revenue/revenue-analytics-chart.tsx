@@ -61,15 +61,18 @@ export function RevenueAnalyticsChart({
 
       // Prevent concurrent fetches
       if (isFetchingRef.current) {
-        console.log("Already fetching, skipping duplicate request");
+        console.log("Already fetching, skipping duplicate requests");
         return;
       }
 
       console.log("Fetching revenue metrics with filters:", filters);
+
+      // 🔧 FIX: Update ref BEFORE starting fetch
+      prevFiltersRef.current = currentFiltersString;
       isFetchingRef.current = true;
 
-      swapLoading(true);
-      swapError(null);
+      setSwapLoading(true);
+      setSwapError(null);
 
       try {
         // Build geographic filter conditions (same as revenue chart)

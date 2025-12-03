@@ -15,13 +15,17 @@ export const ROLE_MAPPINGS: Record<string, Role[]> = {
   // Current Active Users
   'safnas@slmobility.com': ['Admin'],            // Safnas
   'hansika@slmobility.com': ['Admin'],           // Hansika
-  'janaka@ascensionit.com': ['Admin'],           // Janaka
-  'rifkhan@slmobility.com': ['Admin'],           // Rifkhan
-  'zaid@slmobility.com': ['Admin'],              // Zaid
-  'udara@slmobility.com': ['Admin'],             // Udara
-  'rasika@slmobility.com': ['FactoryManager'],   // Rasika
   'oshani@slmobility.com': ['QA'],               // Oshani
+  'rasika@slmobility.com': ['FactoryManager'],   // Rasika
   'zainab@slmobility.com': ['QA'],               // Zainab
+  'nayanakabuddhi@gmail.com': ['FactoryManager'],// Nayanaka
+  'mafaz@slmobility.com': ['FactoryManager'],    // Mafaz
+  'zaid@slmobility.com': ['Admin'],              // Zaid
+  'udara@slmobility.com': ['FactoryManager'],    // Udara
+  'janaka@ascensionit.com': ['Admin'],           // Janaka
+  'dinusha@slmobility.com': ['FactoryManager'],  // Dinusha
+  'rifkhan@slmobility.com': ['Admin'],           // Rifkhan
+
   
   // Future users - uncomment and assign roles as needed
   // 'manager@slmobility.com': ['Manager'],

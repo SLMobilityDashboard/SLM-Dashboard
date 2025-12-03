@@ -40,7 +40,7 @@ QUERY OPTIMIZATION:
 PERFORMANCE METRICS:
 - Vehicle distance and session data in FACT_VEHICLE_DISTANCE
 - Battery health monitoring (SOH, cycle count, voltage, temperature) in telemetry
-- GPS tracking with 30-second intervals in FACT-TBOX-GPS
+- GPS tracking with 30-second intervals in FACT_TBOX_GPS
 - Session-based vehicle utilization through FACT_TBOX_BMS_SESSION
 
         
