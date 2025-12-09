@@ -228,18 +228,22 @@ export function AnalysisHistory({
     const fetchHistory = async () => {
       setLoading(true);
       setError(null);
+
       try {
         const res = await fetch(
           "/api/query-history?connectionId=default_snowflake"
         );
+
         if (!res.ok) throw new Error("Failed to fetch query history");
-        const data = await res.json();
-        // console.log("Fetched query history:", data);
-        const processed = data.map((item: any) => ({
+
+        const response = await res.json(); // <-- Object with data, success, executionTime
+
+        // Access array inside response.data
+        const processed = response.data.map((item: any) => ({
           ...item,
           timestamp: item.timestamp ? new Date(item.timestamp) : new Date(),
         }));
-        // console.log("Processed query history:", processed);
+
         setMongoHistory(processed);
       } catch (err: any) {
         setError(err.message || "Unknown error");

@@ -15,7 +15,7 @@ export const ROLE_MAPPINGS: Record<string, Role[]> = {
   // Current Active Users
   'safnas@slmobility.com': ['Admin'],            // Safnas
   'hansika@slmobility.com': ['Admin'],           // Hansika
-  'oshani@slmobility.com': ['QA'],               // Oshani
+  'oshani@slmobility.com': ['FactoryManager'],   // Oshani
   'rasika@slmobility.com': ['FactoryManager'],   // Rasika
   'zainab@slmobility.com': ['QA'],               // Zainab
   'nayanakabuddhi@gmail.com': ['FactoryManager'],// Nayanaka

@@ -21,17 +21,29 @@ export class SQLQueryService {
     // Remove code fences
     let cleaned = text.replace(/```json\n?|```/g, "").trim();
 
-    // Fix JS-style multi-line strings with + signs into valid JSON
-    cleaned = cleaned.replace(/"\s*\+\s*"/g, ""); // remove `" + "` concatenations
-    cleaned = cleaned.replace(/\\n/g, "\\n"); // keep newlines escaped
-
     // Try to match the actual JSON
     const jsonMatch = cleaned.match(/\{[\s\S]*?\}/);
     if (!jsonMatch) {
       throw new Error("No JSON object found in LLM response.");
     }
 
-    return jsonMatch[0];
+    let jsonStr = jsonMatch[0];
+
+    // 🔧 FIX: Clean the SQL field to remove literal newlines/tabs that break JSON parsing
+    // Match the "sql" field value and collapse all whitespace
+    jsonStr = jsonStr.replace(
+      /"sql"\s*:\s*"([\s\S]*?)"/,
+      (match, sqlContent) => {
+        // Replace all literal newlines, tabs, and multiple spaces with single space
+        const cleanedSql = sqlContent
+          .replace(/[\n\r\t]/g, " ") // Replace newlines/tabs with space
+          .replace(/\s+/g, " ") // Collapse multiple spaces
+          .trim(); // Remove leading/trailing spaces
+        return `"sql": "${cleanedSql}"`;
+      }
+    );
+
+    return jsonStr;
   }
 
   static async callLLM(prompt) {
@@ -67,14 +79,14 @@ export class SQLQueryService {
     const prompt = permissionCheckPrompt(semanticModel);
     // console.log("🔄 LLM Request for Permission Check:", prompt);
     const llmResponse = await this.callLLM(prompt);
-    const jsonText = this.extractJSON(llmResponse);
-    // console.log("🔄 LLM Response for Permission Check:", jsonText);
 
     try {
+      const jsonText = this.extractJSON(llmResponse);
+      // console.log("🔄 LLM Response for Permission Check:", jsonText);
       return JSON.parse(jsonText);
     } catch (err) {
       console.error("JSON parse error on permission check response:", err);
-      console.error("Raw JSON text:", jsonText);
+      console.error("Raw LLM Response:", llmResponse);
       throw new Error(
         "Failed to parse permission check JSON response: " + err.message
       );
@@ -85,14 +97,17 @@ export class SQLQueryService {
     const prompt = sqlGenerationPrompt(semanticModel, resolvedQuery);
     console.log("🔄 LLM Request for SQL Generation:", prompt);
     const llmResponse = await this.callLLM(prompt);
-    const jsonText = this.extractJSON(llmResponse);
-    // console.log("🔄 LLM Response for SQL Generation:", jsonText);
 
     try {
+      const jsonText = this.extractJSON(llmResponse);
+      console.log(
+        "🔄 Extracted JSON (first 200 chars):",
+        jsonText.substring(0, 200) + "..."
+      );
       return JSON.parse(jsonText);
     } catch (err) {
       console.error("JSON parse error on SQL generation response:", err);
-      console.error("Raw JSON text:", jsonText);
+      console.error("Raw LLM Response:", llmResponse);
       throw new Error(
         "Failed to parse SQL generation JSON response: " + err.message
       );

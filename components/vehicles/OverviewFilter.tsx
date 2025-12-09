@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { Filter, X, Loader2, Search, Info } from "lucide-react";
+import { Filter, X, Loader2, Info, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -25,7 +25,6 @@ import {
 // STATUS LOGIC
 // ============================================================================
 
-// Derive actual vehicle status based on customer and dealer assignment
 const deriveVehicleStatus = (
   customerId?: string,
   dealerId?: string
@@ -46,7 +45,6 @@ const deriveVehicleStatus = (
   return "UNKNOWN";
 };
 
-// Available status options for filtering (based on business logic)
 const AVAILABLE_STATUSES = [
   "SOLD",
   "FACTORY_INSTOCK",
@@ -55,34 +53,33 @@ const AVAILABLE_STATUSES = [
 ] as const;
 
 // ============================================================================
-// INTERFACES - Updated to include names
+// INTERFACES
 // ============================================================================
 
-// Updated filter interface to use derived statuses and include names
 export interface SimpleOverviewFilterType {
   selectedModels: string[];
-  selectedBatteryTypes: string[]; // Still stores IDs internally
-  selectedBatteryTypeNames: string[]; // New: stores names for display
+  selectedBatteryTypes: string[];
+  selectedBatteryTypeNames: string[];
   selectedStatuses: string[];
   customerTypes: string[];
-  dealerIds: string[]; // Still stores IDs internally
-  dealerNames: string[]; // New: stores names for display
+  dealerIds: string[];
+  dealerNames: string[];
   vehicleIdSearch: string;
   chassisNumberSearch: string;
   tboxIdSearch: string;
-  dealerIdSearch: string; // New: dealer ID search field
-  IMEISearch: string; // New: IMEI search field
+  dealerIdSearch: string;
+  IMEISearch: string;
 }
 
 interface FilterCombination {
   VEHICLE_ID: string;
   CHASSIS_NUMBER: string;
   BATTERY_TYPE_ID: string;
-  BATTERY_TYPE_NAME?: string; // New: battery type name
+  BATTERY_TYPE_NAME?: string;
   CUSTOMER_ID?: string;
   DEALER_ID?: string;
-  DEALER_NAME?: string; // New: dealer name
-  STATUS: string; // This will be the derived status
+  DEALER_NAME?: string;
+  STATUS: string;
   MODEL?: string;
 }
 
@@ -93,7 +90,6 @@ interface SimpleOverviewFilterProps {
   filterCombinations: FilterCombination[];
 }
 
-// Helper interfaces for managing ID to name mappings
 interface BatteryTypeOption {
   id: string;
   name: string;
@@ -111,10 +107,15 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
   filterCombinations,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [filters, setFilters] =
+
+  // Applied filters (real state that triggers parent callback)
+  const [appliedFilters, setAppliedFilters] =
     useState<SimpleOverviewFilterType>(initialFilters);
 
-  // Track original counts for cascading info
+  // Temporary filters (local state for editing)
+  const [tempFilters, setTempFilters] =
+    useState<SimpleOverviewFilterType>(initialFilters);
+
   const [originalCounts, setOriginalCounts] = useState({
     models: 0,
     batteryTypes: 0,
@@ -123,13 +124,13 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
     dealerIds: 0,
   });
 
-  // Extract unique values from filterCombinations with derived status logic
+  // Extract unique values from filterCombinations
   const availableOptions = useMemo(() => {
     if (!filterCombinations.length) {
       return {
         models: [],
         batteryTypes: [] as BatteryTypeOption[],
-        statuses: AVAILABLE_STATUSES.slice(), // Use business logic statuses
+        statuses: AVAILABLE_STATUSES.slice(),
         customerIds: [],
         dealers: [] as DealerOption[],
       };
@@ -144,13 +145,11 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
       ),
     ];
 
-    // Create battery type options with ID and name mapping
     const batteryTypeMap = new Map<string, string>();
     filterCombinations.forEach((f) => {
       if (f.BATTERY_TYPE_ID && f.BATTERY_TYPE_NAME) {
         batteryTypeMap.set(f.BATTERY_TYPE_ID, f.BATTERY_TYPE_NAME);
       } else if (f.BATTERY_TYPE_ID) {
-        // Fallback to ID if name is not available
         batteryTypeMap.set(f.BATTERY_TYPE_ID, f.BATTERY_TYPE_ID);
       }
     });
@@ -161,7 +160,6 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    // Use derived statuses instead of the raw STATUS field
     const derivedStatuses = [
       ...new Set(
         filterCombinations
@@ -180,11 +178,9 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
       ),
     ];
 
-    // Create dealer options with ID and name mapping
     const dealerMap = new Map<string, string>();
     filterCombinations.forEach((f) => {
       if (f.DEALER_ID) {
-        // Use dealer name if available, otherwise use ID as fallback
         const dealerName = f.DEALER_NAME || f.DEALER_ID;
         dealerMap.set(f.DEALER_ID, dealerName);
       }
@@ -203,14 +199,14 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
     };
   }, [filterCombinations]);
 
-  // Update original counts when data first loads (no filters applied)
+  // Update original counts when data first loads
   useEffect(() => {
     const hasFilters =
-      filters.selectedModels.length > 0 ||
-      filters.selectedBatteryTypes.length > 0 ||
-      filters.selectedStatuses.length > 0 ||
-      filters.customerTypes.length > 0 ||
-      filters.dealerIds.length > 0;
+      appliedFilters.selectedModels.length > 0 ||
+      appliedFilters.selectedBatteryTypes.length > 0 ||
+      appliedFilters.selectedStatuses.length > 0 ||
+      appliedFilters.customerTypes.length > 0 ||
+      appliedFilters.dealerIds.length > 0;
 
     if (!hasFilters && !loading) {
       setOriginalCounts({
@@ -221,19 +217,27 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
         dealerIds: availableOptions.dealers.length,
       });
     }
-  }, [availableOptions, loading, filters]);
+  }, [availableOptions, loading, appliedFilters]);
 
-  // Update parent filters when local filters change
+  // Only notify parent when applied filters change
   useEffect(() => {
-    onFiltersChange(filters);
-  }, [filters, onFiltersChange]);
+    onFiltersChange(appliedFilters);
+  }, [appliedFilters, onFiltersChange]);
 
-  const updateFilters = useCallback(
+  const updateTempFilters = useCallback(
     (newFilters: Partial<SimpleOverviewFilterType>) => {
-      setFilters((prev) => ({ ...prev, ...newFilters }));
+      setTempFilters((prev) => ({ ...prev, ...newFilters }));
     },
     []
   );
+
+  const applyFilters = useCallback(() => {
+    setAppliedFilters({ ...tempFilters });
+  }, [tempFilters]);
+
+  const hasUnappliedChanges = useCallback(() => {
+    return JSON.stringify(tempFilters) !== JSON.stringify(appliedFilters);
+  }, [tempFilters, appliedFilters]);
 
   const clearAllFilters = useCallback(() => {
     const cleared: SimpleOverviewFilterType = {
@@ -251,10 +255,10 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
       IMEISearch: "",
     };
 
-    setFilters(cleared);
+    setTempFilters(cleared);
+    setAppliedFilters(cleared);
   }, []);
 
-  // Updated handler for battery types (manages both ID and name)
   const handleBatteryTypeChange = useCallback(
     (batteryTypeId: string, checked: boolean) => {
       const batteryType = availableOptions.batteryTypes.find(
@@ -263,51 +267,50 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
       if (!batteryType) return;
 
       if (checked) {
-        updateFilters({
+        updateTempFilters({
           selectedBatteryTypes: [
-            ...filters.selectedBatteryTypes,
+            ...tempFilters.selectedBatteryTypes,
             batteryType.id,
           ],
           selectedBatteryTypeNames: [
-            ...filters.selectedBatteryTypeNames,
+            ...tempFilters.selectedBatteryTypeNames,
             batteryType.name,
           ],
         });
       } else {
-        updateFilters({
-          selectedBatteryTypes: filters.selectedBatteryTypes.filter(
+        updateTempFilters({
+          selectedBatteryTypes: tempFilters.selectedBatteryTypes.filter(
             (id) => id !== batteryType.id
           ),
-          selectedBatteryTypeNames: filters.selectedBatteryTypeNames.filter(
+          selectedBatteryTypeNames: tempFilters.selectedBatteryTypeNames.filter(
             (name) => name !== batteryType.name
           ),
         });
       }
     },
-    [filters, availableOptions.batteryTypes, updateFilters]
+    [tempFilters, availableOptions.batteryTypes, updateTempFilters]
   );
 
-  // Updated handler for dealers (manages both ID and name)
   const handleDealerChange = useCallback(
     (dealerId: string, checked: boolean) => {
       const dealer = availableOptions.dealers.find((d) => d.id === dealerId);
       if (!dealer) return;
 
       if (checked) {
-        updateFilters({
-          dealerIds: [...filters.dealerIds, dealer.id],
-          dealerNames: [...filters.dealerNames, dealer.name],
+        updateTempFilters({
+          dealerIds: [...tempFilters.dealerIds, dealer.id],
+          dealerNames: [...tempFilters.dealerNames, dealer.name],
         });
       } else {
-        updateFilters({
-          dealerIds: filters.dealerIds.filter((id) => id !== dealer.id),
-          dealerNames: filters.dealerNames.filter(
+        updateTempFilters({
+          dealerIds: tempFilters.dealerIds.filter((id) => id !== dealer.id),
+          dealerNames: tempFilters.dealerNames.filter(
             (name) => name !== dealer.name
           ),
         });
       }
     },
-    [filters, availableOptions.dealers, updateFilters]
+    [tempFilters, availableOptions.dealers, updateTempFilters]
   );
 
   const handleArrayFilterChange = useCallback(
@@ -316,38 +319,37 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
       value: string,
       checked: boolean
     ) => {
-      const currentArray = filters[filterKey] as string[];
+      const currentArray = tempFilters[filterKey] as string[];
       const newArray = checked
         ? [...currentArray, value]
         : currentArray.filter((item) => item !== value);
 
-      updateFilters({ [filterKey]: newArray });
+      updateTempFilters({ [filterKey]: newArray });
     },
-    [filters, updateFilters]
+    [tempFilters, updateTempFilters]
   );
 
   const getActiveFiltersCount = useCallback(() => {
     let count = 0;
-    if (filters.selectedModels.length > 0) count++;
-    if (filters.selectedBatteryTypes.length > 0) count++;
-    if (filters.selectedStatuses.length > 0) count++;
-    if (filters.customerTypes.length > 0) count++;
-    if (filters.dealerIds.length > 0) count++;
-    if (filters.vehicleIdSearch) count++;
-    if (filters.chassisNumberSearch) count++;
-    if (filters.tboxIdSearch) count++;
-    if (filters.dealerIdSearch) count++;
-    if (filters.IMEISearch) count++;
+    if (appliedFilters.selectedModels.length > 0) count++;
+    if (appliedFilters.selectedBatteryTypes.length > 0) count++;
+    if (appliedFilters.selectedStatuses.length > 0) count++;
+    if (appliedFilters.customerTypes.length > 0) count++;
+    if (appliedFilters.dealerIds.length > 0) count++;
+    if (appliedFilters.vehicleIdSearch) count++;
+    if (appliedFilters.chassisNumberSearch) count++;
+    if (appliedFilters.tboxIdSearch) count++;
+    if (appliedFilters.dealerIdSearch) count++;
+    if (appliedFilters.IMEISearch) count++;
     return count;
-  }, [filters]);
+  }, [appliedFilters]);
 
-  // Check if options are being filtered by cascading
   const isCascadingActive =
-    filters.selectedModels.length > 0 ||
-    filters.selectedBatteryTypes.length > 0 ||
-    filters.selectedStatuses.length > 0 ||
-    filters.customerTypes.length > 0 ||
-    filters.dealerIds.length > 0;
+    appliedFilters.selectedModels.length > 0 ||
+    appliedFilters.selectedBatteryTypes.length > 0 ||
+    appliedFilters.selectedStatuses.length > 0 ||
+    appliedFilters.customerTypes.length > 0 ||
+    appliedFilters.dealerIds.length > 0;
 
   const getCascadingInfo = (
     type: "models" | "batteryTypes" | "statuses" | "customerIds" | "dealerIds"
@@ -372,7 +374,6 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
     return null;
   };
 
-  // Helper function to get friendly status labels
   const getStatusLabel = (status: string) => {
     switch (status) {
       case "SOLD":
@@ -479,7 +480,6 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
     );
   };
 
-  // Specialized render functions for battery types and dealers
   const renderBatteryTypeSelect = () => {
     const cascadingInfo = getCascadingInfo("batteryTypes");
 
@@ -495,8 +495,8 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
                 placeholder={
                   loading
                     ? "Loading..."
-                    : filters.selectedBatteryTypeNames.length > 0
-                    ? `${filters.selectedBatteryTypeNames.length} selected`
+                    : tempFilters.selectedBatteryTypeNames.length > 0
+                    ? `${tempFilters.selectedBatteryTypeNames.length} selected`
                     : "Select battery types"
                 }
               />
@@ -513,7 +513,9 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
                 </div>
               ) : (
                 availableOptions.batteryTypes
-                  .filter((bt) => !filters.selectedBatteryTypes.includes(bt.id))
+                  .filter(
+                    (bt) => !tempFilters.selectedBatteryTypes.includes(bt.id)
+                  )
                   .map((batteryType) => (
                     <SelectItem key={batteryType.id} value={batteryType.id}>
                       {batteryType.name}
@@ -572,8 +574,8 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
                 placeholder={
                   loading
                     ? "Loading..."
-                    : filters.dealerNames.length > 0
-                    ? `${filters.dealerNames.length} selected`
+                    : tempFilters.dealerNames.length > 0
+                    ? `${tempFilters.dealerNames.length} selected`
                     : "Select dealers"
                 }
               />
@@ -590,7 +592,9 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
                 </div>
               ) : (
                 availableOptions.dealers
-                  .filter((dealer) => !filters.dealerIds.includes(dealer.id))
+                  .filter(
+                    (dealer) => !tempFilters.dealerIds.includes(dealer.id)
+                  )
                   .map((dealer) => (
                     <SelectItem key={dealer.id} value={dealer.id}>
                       {dealer.name}
@@ -647,6 +651,14 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
                 {getActiveFiltersCount()} active
               </Badge>
             )}
+            {hasUnappliedChanges() && (
+              <Badge
+                variant="outline"
+                className="bg-slate-500 text-white border-yellow-50"
+              >
+                Unapplied changes
+              </Badge>
+            )}
             {isCascadingActive && (
               <Badge
                 variant="outline"
@@ -678,6 +690,16 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
             >
               {isExpanded ? "Less" : "More"} Filters
             </Button>
+            {/* Apply Button */}
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={applyFilters}
+              disabled={!hasUnappliedChanges()}
+            >
+              <Check className="h-4 w-4 mr-1" />
+              Apply
+            </Button>
           </div>
         </div>
 
@@ -688,14 +710,14 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
             <Label>Models</Label>
             {renderFilterSelect(
               availableOptions.models,
-              filters.selectedModels,
+              tempFilters.selectedModels,
               "Select models",
               (item, checked) =>
                 handleArrayFilterChange("selectedModels", item, checked),
               "models"
             )}
             <div className="flex flex-wrap gap-1">
-              {filters.selectedModels.map((model) => (
+              {tempFilters.selectedModels.map((model) => (
                 <Badge key={model} variant="secondary" className="text-xs">
                   {model}
                   <X
@@ -709,13 +731,13 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
             </div>
           </div>
 
-          {/* Battery Types - Now showing names */}
+          {/* Battery Types */}
           <div className="space-y-2">
             <Label>Battery Types</Label>
             {renderBatteryTypeSelect()}
             <div className="flex flex-wrap gap-1">
-              {filters.selectedBatteryTypeNames.map((typeName, index) => {
-                const typeId = filters.selectedBatteryTypes[index];
+              {tempFilters.selectedBatteryTypeNames.map((typeName, index) => {
+                const typeId = tempFilters.selectedBatteryTypes[index];
                 return (
                   <Badge key={typeId} variant="secondary" className="text-xs">
                     {typeName}
@@ -729,19 +751,19 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
             </div>
           </div>
 
-          {/* Status - Using derived status logic */}
+          {/* Status */}
           <div className="space-y-2">
             <Label>Status</Label>
             {renderFilterSelect(
               availableOptions.statuses,
-              filters.selectedStatuses,
+              tempFilters.selectedStatuses,
               "Select status",
               (item, checked) =>
                 handleArrayFilterChange("selectedStatuses", item, checked),
               "statuses"
             )}
             <div className="flex flex-wrap gap-1">
-              {filters.selectedStatuses.map((status) => (
+              {tempFilters.selectedStatuses.map((status) => (
                 <Badge key={status} variant="secondary" className="text-xs">
                   {getStatusLabel(status)}
                   <X
@@ -755,13 +777,13 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
             </div>
           </div>
 
-          {/* Dealers - Now showing names */}
+          {/* Dealers */}
           <div className="space-y-2">
             <Label>Dealers</Label>
             {renderDealerSelect()}
             <div className="flex flex-wrap gap-1">
-              {filters.dealerNames.map((dealerName, index) => {
-                const dealerId = filters.dealerIds[index];
+              {tempFilters.dealerNames.map((dealerName, index) => {
+                const dealerId = tempFilters.dealerIds[index];
                 return (
                   <Badge key={dealerId} variant="secondary" className="text-xs">
                     {dealerName}
@@ -776,58 +798,48 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
           </div>
         </div>
 
+        {/* Search Fields */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Search Vehicle ID */}
           <div className="space-y-2">
             <Label>Vehicle ID Search</Label>
             <Input
-              value={filters.vehicleIdSearch}
+              value={tempFilters.vehicleIdSearch}
               onChange={(e) =>
-                updateFilters({ vehicleIdSearch: e.target.value })
+                updateTempFilters({ vehicleIdSearch: e.target.value })
               }
               placeholder="Enter vehicle ID..."
             />
           </div>
 
-          {/* TBOX ID */}
           <div className="space-y-2">
             <Label>TBOX ID Search</Label>
             <Input
-              value={filters.tboxIdSearch}
-              onChange={(e) => updateFilters({ tboxIdSearch: e.target.value })}
+              value={tempFilters.tboxIdSearch}
+              onChange={(e) =>
+                updateTempFilters({ tboxIdSearch: e.target.value })
+              }
               placeholder="Enter TBOX ID..."
             />
           </div>
 
-          {/* Search Chassis Number */}
           <div className="space-y-2">
             <Label>Chassis Number Search</Label>
             <Input
-              value={filters.chassisNumberSearch}
+              value={tempFilters.chassisNumberSearch}
               onChange={(e) =>
-                updateFilters({ chassisNumberSearch: e.target.value })
+                updateTempFilters({ chassisNumberSearch: e.target.value })
               }
               placeholder="Enter chassis number..."
             />
           </div>
 
-          {/* Dealer ID Search */}
-          {/* <div className="space-y-2">
-            <Label>Dealer ID Search</Label>
-            <Input
-              value={filters.dealerIdSearch}
-              onChange={(e) =>
-                updateFilters({ dealerIdSearch: e.target.value })
-              }
-              placeholder="Enter dealer ID..."
-            />
-          </div> */}
-
           <div className="space-y-2">
             <Label>IMEI Search</Label>
             <Input
-              value={filters.IMEISearch}
-              onChange={(e) => updateFilters({ IMEISearch: e.target.value })}
+              value={tempFilters.IMEISearch}
+              onChange={(e) =>
+                updateTempFilters({ IMEISearch: e.target.value })
+              }
               placeholder="Enter IMEI..."
             />
           </div>
@@ -836,21 +848,20 @@ export const SimpleOverviewFilter: React.FC<SimpleOverviewFilterProps> = ({
         {/* Expanded Filters */}
         {isExpanded && (
           <>
-            {/* Customer Types Section - Only show if there are customer IDs */}
             {availableOptions.customerIds.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-1 gap-4 pt-4 border-t">
                 <div className="space-y-2">
                   <Label>Customer ID</Label>
                   {renderFilterSelect(
                     availableOptions.customerIds,
-                    filters.customerTypes,
+                    tempFilters.customerTypes,
                     "Select customers",
                     (item, checked) =>
                       handleArrayFilterChange("customerTypes", item, checked),
                     "customerIds"
                   )}
                   <div className="flex flex-wrap gap-1">
-                    {filters.customerTypes.map((type) => (
+                    {tempFilters.customerTypes.map((type) => (
                       <Badge key={type} variant="secondary" className="text-xs">
                         {type}
                         <X

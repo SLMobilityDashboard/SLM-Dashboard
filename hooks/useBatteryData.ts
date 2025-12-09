@@ -60,7 +60,9 @@ interface DiagnosticMetrics {
 }
 
 interface BatteryFilters {
-  timeRange: number; // hours
+  timeRange?: number; // hours (optional, for backward compatibility)
+  startTimestamp?: number; // Unix timestamp in seconds
+  endTimestamp?: number; // Unix timestamp in seconds
   includeIdleData?: boolean;
   minBatteryTemp?: number;
   maxBatteryTemp?: number;
@@ -176,7 +178,6 @@ function useBatteryData(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<any>(null);
-  const [lastDataTimestamp, setLastDataTimestamp] = useState<number | null>(null);
 
   const fetchSnowflakeData = useCallback(async (query: string, queryName?: string) => {
     try {
@@ -206,37 +207,14 @@ function useBatteryData(
     }
   }, []);
 
-  // First, get the most recent data timestamp for this tbox
-  const fetchLastDataTimestamp = useCallback(async () => {
-    const query = `
-      SELECT MAX(CTIME) as LAST_DATA_TIME
-      FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-      WHERE TBOXID = '${tboxId}'
-    `;
-    
-    try {
-      const result = await fetchSnowflakeData(query, "lastDataTimestamp");
-      if (result && result.length > 0 && result[0].LAST_DATA_TIME) {
-        const lastTime = result[0].LAST_DATA_TIME;
-        setLastDataTimestamp(lastTime);
-        return lastTime;
-      }
-      return null;
-    } catch (error) {
-      console.error("Failed to fetch last data timestamp:", error);
-      return null;
-    }
-  }, [tboxId, fetchSnowflakeData]);
-
-  const buildFilterConditions = useCallback((lastTimestamp: number | null) => {
+  const buildFilterConditions = useCallback(() => {
     const conditions: string[] = [];
 
-    // Time range filter based on last available data
-    if (lastTimestamp) {
-      const startTimestamp = lastTimestamp - (filters.timeRange * 3600);
-      conditions.push(`CTIME >= ${startTimestamp}`);
-      conditions.push(`CTIME <= ${lastTimestamp}`);
-    } else {
+    // Use start/end timestamps if provided, otherwise fall back to timeRange
+    if (filters.startTimestamp && filters.endTimestamp) {
+      conditions.push(`CTIME >= ${filters.startTimestamp}`);
+      conditions.push(`CTIME <= ${filters.endTimestamp}`);
+    } else if (filters.timeRange) {
       conditions.push(`CTIME >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '${filters.timeRange} HOURS')`);
     }
 
@@ -262,7 +240,7 @@ function useBatteryData(
   }, [filters]);
 
   const queries = useMemo(() => {
-    const filterConditions = buildFilterConditions(lastDataTimestamp);
+    const filterConditions = buildFilterConditions();
     const whereClause = `WHERE TBOXID = '${tboxId}' AND ${filterConditions.join(' AND ')}`;
 
     return {
@@ -502,10 +480,9 @@ function useBatteryData(
                  bs.charge_consumed, bs.active_days
       `
     };
-  }, [tboxId, buildFilterConditions, lastDataTimestamp]);
+  }, [tboxId, buildFilterConditions]);
 
   const loadData = useCallback(async () => {
-    // Only set loading if we actually have a tboxId to fetch
     if (!tboxId) {
       setLoading(false);
       return;
@@ -516,9 +493,6 @@ function useBatteryData(
     setDebugInfo(null);
     
     try {
-      // First, fetch the last data timestamp
-      const lastTime = await fetchLastDataTimestamp();
-      
       // Fetch main telemetry data
       const telemetryResult = await fetchSnowflakeData(queries.batteryTelemetry, "batteryTelemetry");
       setBatteryData(telemetryResult || []);
@@ -585,12 +559,13 @@ function useBatteryData(
         sessionCount: sessionResult?.length || 0,
         diagnosticsFound: !!rawDiagnostics,
         timeRange: filters.timeRange,
+        startTimestamp: filters.startTimestamp,
+        endTimestamp: filters.endTimestamp,
         uniqueBatteries: [...new Set(telemetryResult?.map((d: any) => d.BMS_ID) || [])].length,
         swapsConsolidated: rawSwaps.length - consolidatedSwaps.length,
-        lastDataTimestamp: lastTime,
-        dataDateRange: lastTime ? {
-          from: new Date((lastTime - (filters.timeRange * 3600)) * 1000).toISOString(),
-          to: new Date(lastTime * 1000).toISOString()
+        dataDateRange: filters.startTimestamp && filters.endTimestamp ? {
+          from: new Date(filters.startTimestamp * 1000).toISOString(),
+          to: new Date(filters.endTimestamp * 1000).toISOString()
         } : null
       });
       
@@ -605,13 +580,12 @@ function useBatteryData(
     } finally {
       setLoading(false);
     }
-  }, [queries, fetchSnowflakeData, filters.timeRange, fetchLastDataTimestamp, tboxId]);
+  }, [queries, fetchSnowflakeData, filters, tboxId]);
 
   useEffect(() => {
     if (tboxId) {
       loadData();
     } else {
-      // Reset state when no tboxId
       setLoading(false);
       setBatteryData([]);
       setBatterySwaps([]);
@@ -630,7 +604,6 @@ function useBatteryData(
     loading,
     error,
     debugInfo,
-    lastDataTimestamp,
     refetch: loadData,
   };
 }

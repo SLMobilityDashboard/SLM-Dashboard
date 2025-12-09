@@ -45,7 +45,10 @@ export async function GET(req: NextRequest) {
     try {
       const connectionId = req.nextUrl.searchParams.get("connectionId");
       if (!connectionId) {
-        return NextResponse.json({ error: "Connection ID is required" }, { status: 400 });
+        return NextResponse.json({ 
+          data: [],
+          error: "Connection ID is required" 
+        }, { status: 400 });
       }
 
       // Connect with timeout
@@ -61,6 +64,8 @@ export async function GET(req: NextRequest) {
         'Database query'
       );
 
+      console.log(`Fetched ${history.length} history items for connectionId: ${connectionId}`);
+
       const formatted = history.map((item) => ({
         ...item,
         _id: item._id.toString(),
@@ -68,6 +73,7 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({
         data: formatted,
+        success: true,
         executionTime: Date.now() - requestStart
       });
 
@@ -76,14 +82,18 @@ export async function GET(req: NextRequest) {
       
       if (error instanceof Error && error.message.includes('timeout')) {
         return NextResponse.json({ 
+          data: [],
           error: "Operation timeout. Please try again.",
           code: "TIMEOUT_ERROR",
+          success: false,
           executionTime: Date.now() - requestStart
         }, { status: 408 });
       }
       
       return NextResponse.json({ 
+        data: [],
         error: "Internal server error",
+        success: false,
         executionTime: Date.now() - requestStart
       }, { status: 500 });
     }
@@ -94,12 +104,21 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     if (error instanceof Error && error.message === 'Request timeout') {
       return NextResponse.json({
+        data: [],
         error: "Request timeout after 45 seconds. Please try again.",
         code: "REQUEST_TIMEOUT",
+        success: false,
         executionTime: Date.now() - requestStart
       }, { status: 408 });
     }
-    throw error;
+    
+    // Fallback for any other errors
+    return NextResponse.json({
+      data: [],
+      error: "Unexpected error occurred",
+      success: false,
+      executionTime: Date.now() - requestStart
+    }, { status: 500 });
   }
 }
 
@@ -131,8 +150,11 @@ export async function POST(req: NextRequest) {
       );
 
       return NextResponse.json({ 
-        ...item, 
-        _id: result.insertedId.toString(),
+        data: {
+          ...item,
+          _id: result.insertedId.toString(),
+        },
+        success: true,
         executionTime: Date.now() - requestStart
       }, { status: 201 });
 
@@ -141,14 +163,18 @@ export async function POST(req: NextRequest) {
       
       if (error instanceof Error && error.message.includes('timeout')) {
         return NextResponse.json({ 
+          data: null,
           error: "Operation timeout. Please try again.",
           code: "TIMEOUT_ERROR",
+          success: false,
           executionTime: Date.now() - requestStart
         }, { status: 408 });
       }
       
       return NextResponse.json({ 
+        data: null,
         error: "Internal server error",
+        success: false,
         executionTime: Date.now() - requestStart
       }, { status: 500 });
     }
@@ -159,11 +185,20 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     if (error instanceof Error && error.message === 'Request timeout') {
       return NextResponse.json({
+        data: null,
         error: "Request timeout after 45 seconds. Please try again.",
         code: "REQUEST_TIMEOUT",
+        success: false,
         executionTime: Date.now() - requestStart
       }, { status: 408 });
     }
-    throw error;
+    
+    // Fallback for any other errors
+    return NextResponse.json({
+      data: null,
+      error: "Unexpected error occurred",
+      success: false,
+      executionTime: Date.now() - requestStart
+    }, { status: 500 });
   }
 }

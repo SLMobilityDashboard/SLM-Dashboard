@@ -199,12 +199,12 @@ const CHART_TYPES = [
     description: "Show relationships",
   },
   { id: "kpi", name: "KPI Cards", icon: Zap, description: "Key metrics" },
-  {
-    id: "map",
-    name: "Geographic Map",
-    icon: MapPin,
-    description: "Interactive map visualization",
-  },
+  // {
+  //   id: "map",
+  //   name: "Geographic Map",
+  //   icon: MapPin,
+  //   description: "Interactive map visualization",
+  // },
   {
     id: "treemap",
     name: "Treemap",
@@ -218,12 +218,12 @@ const CHART_TYPES = [
     description: "Circular progress",
   },
   { id: "heatmap", name: "Heatmap", icon: Layers, description: "Data density" },
-  {
-    id: "choropleth",
-    name: "Choropleth Map",
-    icon: MapPin,
-    description: "Regional data visualization",
-  },
+  // {
+  //   id: "choropleth",
+  //   name: "Choropleth Map",
+  //   icon: MapPin,
+  //   description: "Regional data visualization",
+  // },
 ];
 
 const COLOR_SCHEMES = {

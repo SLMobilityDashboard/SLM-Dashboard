@@ -121,6 +121,7 @@ ${formattedFilters}
 5. Resolve ambiguous terms using synonyms or predefined measures **but never introduce new columns or tables not explicitly listed in the schema. If a join seems missing, always route through LOOKUP_VIEW.**
 6. **Date filtering rules (enforced):**
    - "CREATED_EPOCH" and "TIME_STAMP" fields are proper TIMESTAMP(0) types in UTC.
+          Ex - 2025-12-01T18:29:57.000+0000
    - For month/year aggregation, use:
        TO_NUMBER(TO_CHAR(CREATED_EPOCH, 'YYYYMM'))
      or
