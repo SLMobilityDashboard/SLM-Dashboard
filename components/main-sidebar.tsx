@@ -132,6 +132,10 @@ export function MainSidebar() {
       icon: <Bike className="h-4 w-4" />,
       color: "text-amber-500",
     },
+    batteries: {
+      icon: <Battery className="h-4 w-4" />,
+      color: "text-green-500",
+    },
   };
 
   // Define menu categories and their items for consistency
@@ -170,15 +174,20 @@ export function MainSidebar() {
       ],
     },
     {
-      id: "vehicles",
+      id: "360",
       label: "360 Analytics",
       icon: categoryIcons.motor,
       show: true,
       items: [
         {
           path: "/vehicles",
-          label: "Vehicle Overview",
+          label: "Vehicle 360",
           icon: <Activity className="h-4 w-4" />,
+        },
+        {
+          path: "/batteries",
+          label: "Battery 360",
+          icon: <Battery className="h-4 w-4" />,
         },
       ],
     },
