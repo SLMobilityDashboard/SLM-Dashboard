@@ -1,3 +1,5 @@
+// app/(protected)/api/testquery/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import snowflake from "snowflake-sdk";
 
@@ -13,13 +15,13 @@ import snowflake from "snowflake-sdk";
 // -------------------- Snowflake Connection --------------------
 function createConnection() {
   return snowflake.createConnection({
-    account: "IJJJEQK-OQ82434",
+    account: "LZIJWHS-SRB81930",
     username: "USMAAN",
     password: "@Snowflake33340",
-    warehouse: "test",
-    database: "SOURCE_DATA",
-    schema: "DYNAMO_DB",
-    role: "SYSADMIN",
+    warehouse: "COMPUTE_WH",
+    database: "SOURCE_DATA_NEW",
+    schema: "VEHICLE_DATA",
+    role: "ACCOUNTADMIN",
   });
 }
 
