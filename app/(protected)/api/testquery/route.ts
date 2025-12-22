@@ -17,11 +17,12 @@ function createConnection() {
   return snowflake.createConnection({
     account: "LZIJWHS-SRB81930",
     username: "USMAAN",
-    password: "@Snowflake33340",
     warehouse: "COMPUTE_WH",
     database: "SOURCE_DATA_NEW",
     schema: "VEHICLE_DATA",
     role: "ACCOUNTADMIN",
+    privateKey: process.env.SNOWFLAKE_PRIVATE_KEY?.replace(/\\n/g, '\n'),  
+    authenticator: 'SNOWFLAKE_JWT',
   });
 }
 
