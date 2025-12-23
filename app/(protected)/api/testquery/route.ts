@@ -17,16 +17,16 @@ function createConnection() {
   });
 }
 
-// -------------------- Helper: Execute Single Query --------------------
+// -------------------- Helper: Execute Query --------------------
 async function executeQuery(
   connection: any, 
   sqlText: string, 
-  multiStatement = false
+  options: { multiStatement?: boolean } = {}
 ): Promise<any[]> {
   return new Promise((resolve, reject) => {
     connection.execute({
       sqlText,
-      multiStatement, // Enable multi-statement support when needed
+      ...options,
       complete: (err: any, _stmt: any, rows: any) => {
         if (err) return reject(err);
         resolve(rows || []);
@@ -62,14 +62,18 @@ export async function POST(req: NextRequest) {
       });
     });
 
-    // 2. Set warehouse, database, and schema in single statement (CRITICAL FIX)
-    console.log("🔧 Setting warehouse, database, and schema...");
-    await executeQuery(
-      connection, 
-      "USE WAREHOUSE COMPUTE_WH; USE DATABASE SOURCE_DATA_NEW; USE SCHEMA VEHICLE_DATA;",
-      true // Enable multi-statement support
-    );
-    console.log("✅ Warehouse, database, and schema configured");
+    // 2. Set warehouse, database, and schema separately (CRITICAL FIX)
+    console.log("🔧 Setting warehouse...");
+    await executeQuery(connection, "USE WAREHOUSE COMPUTE_WH");
+    console.log("✅ Warehouse set");
+    
+    console.log("🔧 Setting database...");
+    await executeQuery(connection, "USE DATABASE SOURCE_DATA_NEW");
+    console.log("✅ Database set");
+    
+    console.log("🔧 Setting schema...");
+    await executeQuery(connection, "USE SCHEMA VEHICLE_DATA");
+    console.log("✅ Schema set");
 
     // 3. Execute main query
     console.log("🔍 Executing main query...");
