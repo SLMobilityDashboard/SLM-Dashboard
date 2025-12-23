@@ -18,10 +18,15 @@ function createConnection() {
 }
 
 // -------------------- Helper: Execute Single Query --------------------
-async function executeQuery(connection: any, sqlText: string): Promise<any[]> {
+async function executeQuery(
+  connection: any, 
+  sqlText: string, 
+  multiStatement = false
+): Promise<any[]> {
   return new Promise((resolve, reject) => {
     connection.execute({
       sqlText,
+      multiStatement, // Enable multi-statement support when needed
       complete: (err: any, _stmt: any, rows: any) => {
         if (err) return reject(err);
         resolve(rows || []);
@@ -61,7 +66,8 @@ export async function POST(req: NextRequest) {
     console.log("🔧 Setting warehouse, database, and schema...");
     await executeQuery(
       connection, 
-      "USE WAREHOUSE COMPUTE_WH; USE DATABASE SOURCE_DATA_NEW; USE SCHEMA VEHICLE_DATA;"
+      "USE WAREHOUSE COMPUTE_WH; USE DATABASE SOURCE_DATA_NEW; USE SCHEMA VEHICLE_DATA;",
+      true // Enable multi-statement support
     );
     console.log("✅ Warehouse, database, and schema configured");
 
