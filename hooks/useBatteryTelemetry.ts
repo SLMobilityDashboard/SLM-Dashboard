@@ -107,11 +107,11 @@ const loadFromCache = (): CacheData | null => {
   try {
     const cached = localStorage.getItem(CACHE_KEY);
     if (!cached) return null;
-
+    
     const cacheData: CacheData = JSON.parse(cached);
     const cacheAge = Date.now() - cacheData.timestamp;
     const isValid = cacheAge < CACHE_DURATION_MS;
-
+    
     if (isValid) {
       console.log(`📂 Loaded ${cacheData.rawData.length} raw records from cache (${Math.round(cacheAge / 1000 / 60)} minutes old)`);
       return cacheData;
@@ -147,10 +147,10 @@ const calculateTimeMetrics = (lastPulseTime: Date): {
 } => {
   const now = new Date();
   const hoursSinceLastPulse = Math.floor((now.getTime() - lastPulseTime.getTime()) / (1000 * 60 * 60));
-
+  
   const isOnline = hoursSinceLastPulse < 24;
   const offlineDuration = Math.max(0, hoursSinceLastPulse - 24);
-
+  
   return {
     hoursSinceLastPulse,
     isOnline,
@@ -166,7 +166,7 @@ const parseCellVoltages = (singleVolStr: string | null): number[] | null => {
   if (!singleVolStr || singleVolStr.trim() === '') {
     return null;
   }
-
+  
   try {
     // First try parsing as JSON array (e.g., "[3.33,3.33,3.33]")
     const parsed = JSON.parse(singleVolStr);
@@ -177,7 +177,7 @@ const parseCellVoltages = (singleVolStr: string | null): number[] | null => {
   } catch (error) {
     // Not JSON, that's okay - will try CSV parsing below
   }
-
+  
   try {
     // Try parsing as comma-separated values (e.g., "3.33,3.33,3.33")
     const values = singleVolStr.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
@@ -188,7 +188,7 @@ const parseCellVoltages = (singleVolStr: string | null): number[] | null => {
   } catch (error) {
     console.warn('Failed to parse cell voltages:', singleVolStr, error);
   }
-
+  
   return null;
 };
 
@@ -243,7 +243,7 @@ distance_metrics AS (
       AND TRIM(BMSID) <> ''
       AND BMSID NOT ILIKE '%TEST%'
       AND DISTANCE_KM > 0
-    GROUP BY TRIM(BMSID)
+    GROUP BY TRIM(BMSID), TRIM(TBOXID)
 ),
 
 /* Get most recent BSS location */
@@ -397,6 +397,7 @@ LEFT JOIN last_known_telemetry lt
     ON mb.BMSID = lt.BMSID
 LEFT JOIN distance_metrics dm
     ON lt.BMSID = dm.BMSID
+   AND lt.TBOXID = dm.TBOXID
 LEFT JOIN bss_fallback bf
     ON mb.BMSID = bf.BMSID
 LEFT JOIN bss_voltage_latest bv
@@ -431,10 +432,10 @@ const detectAnomalies = (
 ): Anomaly[] => {
   const anomalies: Anomaly[] = [];
 
-  const {
-    batteryError,
-    batSOH,
-    batCycleCount,
+  const { 
+    batteryError, 
+    batSOH, 
+    batCycleCount, 
     avgDistancePerCycle,
     telemetryStatus,
     telemetryAgeHours,
@@ -465,7 +466,7 @@ const detectAnomalies = (
       message: `Telemetry data is ${daysOld} days old`,
       impact: 2,
       recommendation:
-        dataSource === "bss"
+        dataSource === "bss" 
           ? `Battery currently in BSS. Last vehicle telemetry from ${daysOld} days ago.`
           : `Using historical data. Battery may be offline or in BSS.`,
     });
@@ -591,7 +592,7 @@ const detectAnomalies = (
   // ============================================================================
   // WARNING ANOMALIES
   // ============================================================================
-
+  
   if (offlineDuration >= 48 && offlineDuration <= 168) {
     anomalies.push({
       type: "warning",
@@ -725,22 +726,22 @@ const calculateHealthScore = (anomalies: Anomaly[], telemetryStatus: string): nu
 
   let totalImpact = 0;
   const typeCounts = { critical: 0, warning: 0, info: 0 };
-
+  
   anomalies.forEach(anomaly => {
     typeCounts[anomaly.type]++;
-
+    
     let multiplier = 1.0;
     if (typeCounts[anomaly.type] > 1) {
       multiplier = 0.7;
     }
-
+    
     totalImpact += anomaly.impact * multiplier;
   });
 
   const maxImpact = 75;
   const effectiveImpact = Math.min(totalImpact, maxImpact);
   const baseScore = 100 - effectiveImpact;
-
+  
   let finalScore;
   if (baseScore >= 80) {
     finalScore = baseScore;
@@ -751,9 +752,9 @@ const calculateHealthScore = (anomalies: Anomaly[], telemetryStatus: string): nu
   } else {
     finalScore = 25 + (baseScore - 25) * 0.6;
   }
-
+  
   finalScore = Math.max(25, Math.min(95, Math.round(finalScore)));
-
+  
   return finalScore;
 };
 
@@ -764,20 +765,20 @@ const calculateHealthScore = (anomalies: Anomaly[], telemetryStatus: string): nu
 const processBatteryData = (rawData: RawBatteryData[]): BatteryTelemetry[] => {
   const startTime = performance.now();
   const result = new Array(rawData.length);
-
+  
   for (let i = 0; i < rawData.length; i++) {
     const raw = rawData[i];
-
+    
     const lastPulseTime = new Date(raw.lastPulseTime);
     const dataIngestionTime = new Date(raw.dataIngestionTime);
     const lastTelemetryTime = raw.lastTelemetryTime ? new Date(raw.lastTelemetryTime) : null;
     const bssVoltageTimestamp = raw.bssVoltageTimestamp ? new Date(raw.bssVoltageTimestamp) : null;
-
+    
     // Parse cell voltages
     const cellVoltages = parseCellVoltages(raw.bssSingleVol);
-
+    
     const timeMetrics = calculateTimeMetrics(lastPulseTime);
-
+    
     let finalStatus = raw.status;
     if (finalStatus === 'error') {
       // Keep error status
@@ -818,7 +819,7 @@ const processBatteryData = (rawData: RawBatteryData[]): BatteryTelemetry[] => {
       timeMetrics.hoursSinceLastPulse,
       timeMetrics.offlineDuration
     );
-
+    
     const healthScore = calculateHealthScore(anomalies, raw.telemetryStatus);
 
     result[i] = {
@@ -827,10 +828,10 @@ const processBatteryData = (rawData: RawBatteryData[]): BatteryTelemetry[] => {
       healthScore,
     };
   }
-
+  
   const endTime = performance.now();
   console.log(`⚡ Processed ${rawData.length} batteries in ${(endTime - startTime).toFixed(2)}ms`);
-
+  
   return result;
 };
 
@@ -845,7 +846,7 @@ export const useBatteryTelemetry = (): UseBatteryTelemetryReturn => {
   const [processingTime, setProcessingTime] = useState<number | null>(null);
   const [fromCache, setFromCache] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
-
+  
   const isFetchingRef = useRef<boolean>(false);
 
   const fetchAndProcessData = useCallback(async (forceRefresh = false) => {
@@ -874,7 +875,7 @@ export const useBatteryTelemetry = (): UseBatteryTelemetryReturn => {
 
       if (forceRefresh || rawData.length === 0) {
         console.log(forceRefresh ? "🔄 Force refreshing data..." : "🔵 Fetching fresh data...");
-
+        
         const fetchStartTime = performance.now();
         const response = await fetch("/api/testquery", {
           method: "POST",
@@ -897,11 +898,11 @@ export const useBatteryTelemetry = (): UseBatteryTelemetryReturn => {
 
         rawData = await response.json();
         console.log(`📊 Received ${rawData.length} BMS records`);
-
+        
         if (!forceRefresh) {
           saveToCache(rawData);
         }
-
+        
         setFromCache(false);
         setLastUpdated(Date.now());
       }
@@ -911,19 +912,19 @@ export const useBatteryTelemetry = (): UseBatteryTelemetryReturn => {
       const processedBatteries = processBatteryData(rawData);
       const processEndTime = performance.now();
       const processTime = processEndTime - processStartTime;
-
+      
       setProcessingTime(processTime);
       console.log(`✅ Processed ${processedBatteries.length} batteries in ${processTime.toFixed(2)}ms`);
 
       setBatteries(processedBatteries);
-
+      
       const totalTime = processEndTime - (fromCache ? processStartTime : processStartTime);
       console.log(`🎯 Total operation time: ${totalTime.toFixed(2)}ms (${fromCache ? 'cache' : 'fresh'})`);
 
     } catch (err: any) {
       console.error("❌ Failed to fetch/process BMS data:", err);
       setError(err.message || "Failed to load battery telemetry data");
-
+      
       if (!forceRefresh) {
         const cachedData = loadFromCache();
         if (cachedData) {
