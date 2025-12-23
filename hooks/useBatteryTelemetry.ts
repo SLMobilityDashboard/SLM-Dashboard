@@ -195,7 +195,6 @@ const parseCellVoltages = (singleVolStr: string | null): number[] | null => {
 // ============================================================================
 // UPDATED SNOWFLAKE QUERY WITH BSS VOLTAGE DATA
 // ============================================================================
-
 const SNOWFLAKE_QUERY = `
 WITH master_bms AS (
     SELECT DISTINCT
@@ -206,7 +205,6 @@ WITH master_bms AS (
       AND BMS_ID NOT ILIKE '%TEST%'
 ),
 
-/* Get LAST KNOWN telemetry per BMS (not just recent) */
 last_known_telemetry AS (
     SELECT 
         TRIM(BMSID) AS BMSID,
@@ -218,7 +216,7 @@ last_known_telemetry AS (
         BATCYCLECOUNT,
         BATTERY_ERROR,
         _PROCESSED_AT
-    FROM SOURCE_DATA_NEW.VEHICLE_DATA.TBOX_MESSAGE_DATA
+    FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
     WHERE BMSID IS NOT NULL
       AND TRIM(BMSID) <> ''
       AND BMSID NOT ILIKE '%TEST%'
@@ -234,7 +232,6 @@ last_known_telemetry AS (
 distance_metrics AS (
     SELECT 
         TRIM(BMSID) AS BMSID,
-        TRIM(TBOXID) AS TBOXID,
         SUM(DISTANCE_KM) AS total_distance_traveled,
         MAX(GPS_DATE) AS last_gps_date
     FROM REPORT_DB_NEW.GPS_DASHBOARD.VEHICLE_DAILY_DISTANCE
@@ -243,10 +240,9 @@ distance_metrics AS (
       AND TRIM(BMSID) <> ''
       AND BMSID NOT ILIKE '%TEST%'
       AND DISTANCE_KM > 0
-    GROUP BY TRIM(BMSID), TRIM(TBOXID)
+    GROUP BY TRIM(BMSID)
 ),
 
-/* Get most recent BSS location */
 bss_latest AS (
     SELECT 
         TRIM(BID) AS BMSID,
@@ -274,7 +270,6 @@ bss_fallback AS (
     SELECT * FROM bss_latest WHERE rn = 1
 ),
 
-/* Get last SINGLE_VOL data from BSS_CABINET_STATUS - across ALL cabinets */
 bss_voltage_data AS (
     SELECT 
         TRIM(BID) AS BMSID,
@@ -285,7 +280,7 @@ bss_voltage_data AS (
         to_timestamp(CT) as CT,
         ROW_NUMBER() OVER (
             PARTITION BY TRIM(BID)
-            ORDER BY CT DESC  -- Get the absolute latest record by timestamp
+            ORDER BY CT DESC
         ) as rn
     FROM SOURCE_DATA.BSS_ANALYTICS.BSS_CABINET_STATUS
     WHERE BID IS NOT NULL 
@@ -293,7 +288,7 @@ bss_voltage_data AS (
       AND BID NOT ILIKE '%TEST%'
       AND SINGLE_VOL IS NOT NULL
       AND TRIM(SINGLE_VOL) <> ''
-      AND (IS_BATTERY = '1' OR IS_BATTERY = 1)  -- Only rows with actual batteries
+      AND (IS_BATTERY = '1' OR IS_BATTERY = 1)
 ),
 
 bss_voltage_latest AS (
@@ -305,7 +300,7 @@ bss_voltage_latest AS (
         NO,
         DEVICE_ID
     FROM bss_voltage_data 
-    WHERE rn = 1  -- Most recent record for each battery
+    WHERE rn = 1
 ),
 
 station_lookup AS (
@@ -313,113 +308,123 @@ station_lookup AS (
         STATION_ID,
         NAME
     FROM SOURCE_DATA.MASTER_DATA.SWAPPING_STATION
+),
+
+final_data AS (
+    SELECT 
+        mb.BMSID,
+        
+        CASE
+            WHEN lt.TBOXID IS NOT NULL AND DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) < 48
+            THEN lt.TBOXID
+            WHEN bf._CABINET_NO IS NOT NULL
+            THEN COALESCE(sl.NAME, 'Unknown Station') || '-Cabinet-' || bf._CABINET_NO
+            ELSE COALESCE(lt.TBOXID, 'Unknown')
+        END AS TBOXID,
+        
+        CASE WHEN lt.BATVOLT IS NOT NULL THEN lt.BATVOLT / 100.0 ELSE NULL END AS BATVOLT,
+        lt.BATCURRENT,
+        CASE WHEN lt.BATTEMP IS NOT NULL THEN lt.BATTEMP / 10.0 ELSE NULL END AS BATTEMP,
+        lt.BATSOH,
+        lt.BATCYCLECOUNT,
+        COALESCE(lt.BATTERY_ERROR, '') AS BATTERY_ERROR,
+        
+        lt._PROCESSED_AT AS LAST_TELEMETRY_TIME,
+        COALESCE(lt._PROCESSED_AT, bf.CT) AS LAST_PULSE_TIME,
+        
+        CASE 
+            WHEN HOUR(CURRENT_TIMESTAMP()) < 1 
+            THEN DATEADD(hour, 1, DATEADD(day, -1, DATE_TRUNC('day', CURRENT_TIMESTAMP())))
+            ELSE DATEADD(hour, 1, DATE_TRUNC('day', CURRENT_TIMESTAMP()))
+        END AS DATA_INGESTION_TIME,
+        
+        COALESCE(dm.total_distance_traveled, 0) AS TOTAL_DISTANCE_TRAVELED,
+        
+        CASE 
+            WHEN lt.BATCYCLECOUNT > 0
+            THEN COALESCE(dm.total_distance_traveled, 0) / lt.BATCYCLECOUNT
+            ELSE 0
+        END AS AVG_DISTANCE_PER_CYCLE,
+        
+        bv.SINGLE_VOL AS BSS_SINGLE_VOL,
+        bv.CT AS BSS_VOLTAGE_TIMESTAMP,
+        
+        CASE
+            WHEN lt._PROCESSED_AT IS NULL THEN 'no_data'
+            WHEN DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) > 48 THEN 'stale'
+            ELSE 'current'
+        END AS TELEMETRY_STATUS,
+        
+        CASE
+            WHEN lt._PROCESSED_AT IS NOT NULL
+            THEN DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP())
+            ELSE NULL
+        END AS TELEMETRY_AGE_HOURS,
+        
+        CASE
+            WHEN lt.TBOXID IS NOT NULL AND DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) < 48
+            THEN 'tbox'
+            WHEN bf.CT IS NOT NULL AND DATEDIFF(hour, bf.CT, CURRENT_TIMESTAMP()) < 48
+            THEN 'bss'
+            WHEN lt._PROCESSED_AT IS NOT NULL
+            THEN 'historical'
+            ELSE 'bss'
+        END AS DATA_SOURCE,
+        
+        CASE
+            WHEN lt.BATTERY_ERROR IS NOT NULL AND lt.BATTERY_ERROR <> '' THEN 'error'
+            WHEN bf.CT IS NOT NULL AND DATEDIFF(hour, bf.CT, CURRENT_TIMESTAMP()) < 48 THEN 'bss'
+            WHEN lt._PROCESSED_AT IS NOT NULL AND DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) < 24 THEN 'online'
+            ELSE 'offline'
+        END AS STATUS
+        
+    FROM master_bms mb
+    LEFT JOIN last_known_telemetry lt ON mb.BMSID = lt.BMSID
+    LEFT JOIN distance_metrics dm ON mb.BMSID = dm.BMSID
+    LEFT JOIN bss_fallback bf ON mb.BMSID = bf.BMSID
+    LEFT JOIN bss_voltage_latest bv ON mb.BMSID = bv.BMSID
+    LEFT JOIN station_lookup sl ON bf.DEVICE_ID = sl.STATION_ID
+    
+    WHERE mb.BMSID NOT ILIKE '%TEST%'
+      AND (lt.BMSID IS NULL OR lt.BMSID NOT ILIKE '%TEST%')
+    
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY mb.BMSID
+        ORDER BY 
+            CASE 
+                WHEN lt._PROCESSED_AT IS NOT NULL AND DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) < 24 THEN 1
+                WHEN bf.CT IS NOT NULL AND DATEDIFF(hour, bf.CT, CURRENT_TIMESTAMP()) < 48 THEN 2
+                WHEN lt._PROCESSED_AT IS NOT NULL THEN 3
+                WHEN bf.CT IS NOT NULL THEN 4
+                ELSE 5
+            END,
+            COALESCE(lt._PROCESSED_AT, bf.CT) DESC NULLS LAST
+    ) = 1
 )
 
 SELECT 
-    mb.BMSID AS "bmsId",
+    BMSID,
+    TBOXID,
+    BATVOLT,
+    BATCURRENT,
+    BATTEMP,
+    BATSOH,
+    BATCYCLECOUNT,
+    BATTERY_ERROR,
+    LAST_TELEMETRY_TIME,
+    LAST_PULSE_TIME,
+    DATA_INGESTION_TIME,
+    TOTAL_DISTANCE_TRAVELED,
+    AVG_DISTANCE_PER_CYCLE,
+    BSS_SINGLE_VOL,
+    BSS_VOLTAGE_TIMESTAMP,
+    TELEMETRY_STATUS,
+    TELEMETRY_AGE_HOURS,
+    DATA_SOURCE,
+    STATUS
+FROM final_data;
+`;
 
-    -- Determine location: TBOX (if recent) or BSS station
-    CASE
-        WHEN lt.TBOXID IS NOT NULL AND DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) < 48
-        THEN lt.TBOXID
-        WHEN bf._CABINET_NO IS NOT NULL
-        THEN COALESCE(sl.NAME, 'Unknown Station') || '-Cabinet-' || bf._CABINET_NO
-        ELSE COALESCE(lt.TBOXID, 'Unknown')
-    END AS "tboxId",
-
-    -- Telemetry data (may be null for BSS batteries with no history)
-    CASE WHEN lt.BATVOLT IS NOT NULL THEN lt.BATVOLT / 100.0 ELSE NULL END AS "batVolt",
-    lt.BATCURRENT AS "batCurrent",
-    CASE WHEN lt.BATTEMP IS NOT NULL THEN lt.BATTEMP / 10.0 ELSE NULL END AS "batTemp",
-    lt.BATSOH AS "batSOH",
-    lt.BATCYCLECOUNT AS "batCycleCount",
-    COALESCE(lt.BATTERY_ERROR, '') AS "batteryError",
-
-    -- Store last known telemetry timestamp separately
-    lt._PROCESSED_AT AS "lastTelemetryTime",
-
-    -- Last pulse is most recent: telemetry OR BSS
-    COALESCE(lt._PROCESSED_AT, bf.CT) AS "lastPulseTime",
-
-    COALESCE(dm.total_distance_traveled, 0) AS "totalDistanceTraveled",
-    
-    CASE 
-        WHEN lt.BATCYCLECOUNT > 0
-        THEN COALESCE(dm.total_distance_traveled, 0) / lt.BATCYCLECOUNT
-        ELSE 0
-    END AS "avgDistancePerCycle",
-
-    CASE 
-        WHEN HOUR(CURRENT_TIMESTAMP()) < 1 
-        THEN DATEADD(hour, 1, DATEADD(day, -1, DATE_TRUNC('day', CURRENT_TIMESTAMP())))
-        ELSE DATEADD(hour, 1, DATE_TRUNC('day', CURRENT_TIMESTAMP()))
-    END AS "dataIngestionTime",
-
-    -- BSS Voltage Data (NEW)
-    bv.SINGLE_VOL AS "bssSingleVol",
-    bv.CT AS "bssVoltageTimestamp",
-
-    -- Determine telemetry status
-    CASE
-        WHEN lt._PROCESSED_AT IS NULL THEN 'no_data'
-        WHEN DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) > 48 THEN 'stale'
-        ELSE 'current'
-    END AS "telemetryStatus",
-
-    -- Calculate telemetry age
-    CASE
-        WHEN lt._PROCESSED_AT IS NOT NULL
-        THEN DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP())
-        ELSE NULL
-    END AS "telemetryAgeHours",
-
-    -- Determine data source
-    CASE
-        WHEN lt.TBOXID IS NOT NULL AND DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) < 48
-        THEN 'tbox'
-        WHEN bf.CT IS NOT NULL AND DATEDIFF(hour, bf.CT, CURRENT_TIMESTAMP()) < 48
-        THEN 'bss'
-        WHEN lt._PROCESSED_AT IS NOT NULL
-        THEN 'historical'
-        ELSE 'bss'
-    END AS "dataSource",
-
-    -- Status based on location and errors
-    CASE
-        WHEN lt.BATTERY_ERROR IS NOT NULL AND lt.BATTERY_ERROR <> '' THEN 'error'
-        WHEN bf.CT IS NOT NULL AND DATEDIFF(hour, bf.CT, CURRENT_TIMESTAMP()) < 48 THEN 'bss'
-        WHEN lt._PROCESSED_AT IS NOT NULL AND DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) < 24 THEN 'online'
-        ELSE 'offline'
-    END AS "status"
-
-FROM master_bms mb
-LEFT JOIN last_known_telemetry lt
-    ON mb.BMSID = lt.BMSID
-LEFT JOIN distance_metrics dm
-    ON lt.BMSID = dm.BMSID
-   AND lt.TBOXID = dm.TBOXID
-LEFT JOIN bss_fallback bf
-    ON mb.BMSID = bf.BMSID
-LEFT JOIN bss_voltage_latest bv
-    ON mb.BMSID = bv.BMSID
-LEFT JOIN station_lookup sl
-    ON bf.DEVICE_ID = sl.STATION_ID
-
-WHERE mb.BMSID NOT ILIKE '%TEST%'
-  AND (lt.BMSID IS NULL OR lt.BMSID NOT ILIKE '%TEST%')
-
-QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY mb.BMSID
-    ORDER BY 
-        CASE 
-            WHEN lt._PROCESSED_AT IS NOT NULL AND DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) < 24 THEN 1
-            WHEN bf.CT IS NOT NULL AND DATEDIFF(hour, bf.CT, CURRENT_TIMESTAMP()) < 48 THEN 2
-            WHEN lt._PROCESSED_AT IS NOT NULL THEN 3
-            WHEN bf.CT IS NOT NULL THEN 4
-            ELSE 5
-        END,
-        COALESCE(lt._PROCESSED_AT, bf.CT) DESC NULLS LAST
-) = 1`;
 
 // ============================================================================
 // IMPROVED ANOMALY DETECTION WITH BSS/STALE DATA HANDLING
