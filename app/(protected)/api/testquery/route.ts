@@ -3,15 +3,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import snowflake from "snowflake-sdk";
 
-// [connections.my_example_connection]
-// account = "IJJJEQK-OQ82434"
-// user = "USMAAN"
-// authenticator = "externalbrowser"
-// role = "SYSADMIN"
-// warehouse = "COMPUTE_WH"
-// database = "SOURCE_DATA"
-// schema = "DYNAMO_DB"
-
 // -------------------- Snowflake Connection --------------------
 function createConnection() {
   return snowflake.createConnection({
@@ -26,9 +17,23 @@ function createConnection() {
   });
 }
 
+// -------------------- Helper: Execute Single Query --------------------
+async function executeQuery(connection: any, sqlText: string): Promise<any[]> {
+  return new Promise((resolve, reject) => {
+    connection.execute({
+      sqlText,
+      complete: (err: any, _stmt: any, rows: any) => {
+        if (err) return reject(err);
+        resolve(rows || []);
+      },
+    });
+  });
+}
+
 // -------------------- API Handler --------------------
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+  let connection: any = null;
 
   try {
     const { sql } = await req.json();
@@ -38,37 +43,31 @@ export async function POST(req: NextRequest) {
 
     console.log(`🔵 Executing Snowflake query...`);
 
-    const connection = createConnection();
+    connection = createConnection();
 
-    // Connect first
+    // 1. Connect
     await new Promise<void>((resolve, reject) => {
-      connection.connect((err) => {
+      connection.connect((err: any) => {
         if (err) {
           console.error("❌ Unable to connect to Snowflake:", err);
           return reject(err);
         }
+        console.log("✅ Connected to Snowflake");
         resolve();
       });
     });
 
-    // Execute query
-    const rows = await new Promise<any[]>((resolve, reject) => {
-      connection.execute({
-        sqlText: sql,
-        complete: (err, _stmt, rows) => {
-          if (err) {
-            console.error("❌ Query execution failed:", err);
-            return reject(err);
-          }
-          resolve(rows || []);
-        },
-      });
-    });
+    // 2. Set warehouse, database, and schema in single statement (CRITICAL FIX)
+    console.log("🔧 Setting warehouse, database, and schema...");
+    await executeQuery(
+      connection, 
+      "USE WAREHOUSE COMPUTE_WH; USE DATABASE SOURCE_DATA_NEW; USE SCHEMA VEHICLE_DATA;"
+    );
+    console.log("✅ Warehouse, database, and schema configured");
 
-    // Close connection after query
-    connection.destroy((err) => {
-      if (err) console.warn("⚠️ Error closing Snowflake connection:", err);
-    });
+    // 3. Execute main query
+    console.log("🔍 Executing main query...");
+    const rows = await executeQuery(connection, sql);
 
     const duration = Date.now() - startTime;
     console.log(`✅ QUERY COMPLETE - ${rows.length} rows - ${duration}ms`);
@@ -84,8 +83,20 @@ export async function POST(req: NextRequest) {
         "X-Query-Duration": duration.toString(),
       },
     });
+
   } catch (err: any) {
     console.error(`❌ QUERY ERROR - Duration: ${Date.now() - startTime}ms`, err);
-    return NextResponse.json([{ error: "Snowflake query failed" }], { status: 500 });
+    return NextResponse.json(
+      { error: err.message || "Snowflake query failed" }, 
+      { status: 500 }
+    );
+  } finally {
+    // Always close connection
+    if (connection) {
+      connection.destroy((err: any) => {
+        if (err) console.warn("⚠️ Error closing Snowflake connection:", err);
+        else console.log("🔌 Connection closed");
+      });
+    }
   }
 }

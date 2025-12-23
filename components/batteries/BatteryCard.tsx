@@ -437,7 +437,7 @@ const BatteryCard = ({ battery, onClick }: BatteryCardProps) => {
             <div>
               <p className="text-slate-400 text-xs">Avg per Cycle</p>
               <p className="text-slate-200 text-sm font-medium">
-                {battery.avgDistancePerCycle.toFixed(1)} km
+                {(battery.avgDistancePerCycle ?? 0).toFixed(1)} km
               </p>
             </div>
             <div>
