@@ -6,14 +6,14 @@ import snowflake from "snowflake-sdk";
 // -------------------- Snowflake Connection --------------------
 function createConnection() {
   return snowflake.createConnection({
-    account: "LZIJWHS-SRB81930",
+    account: "ADWKJGR-IHB51446",           // ✅ Using the working account
     username: "USMAAN",
+    password: "@Snowflake33340",           // ✅ Using password auth (not JWT)
     warehouse: "COMPUTE_WH",
-    database: "SOURCE_DATA_NEW",
-    schema: "VEHICLE_DATA",
+    database: "SOURCE_DATA",               // ✅ Changed from SOURCE_DATA_NEW (doesn't exist)
+    schema: "DYNAMO_DB",                   // ✅ Changed to match FACT_PAYMENT location
     role: "ACCOUNTADMIN",
-    privateKey: process.env.SNOWFLAKE_PRIVATE_KEY?.replace(/\\n/g, '\n'),  
-    authenticator: 'SNOWFLAKE_JWT',
+    authenticator: "SNOWFLAKE",            // ✅ Using password authenticator
   });
 }
 
@@ -62,20 +62,22 @@ export async function POST(req: NextRequest) {
       });
     });
 
-    // 2. Set warehouse, database, and schema separately (CRITICAL FIX)
+    // 2. Set warehouse (CRITICAL - must be done first)
     console.log("🔧 Setting warehouse...");
     await executeQuery(connection, "USE WAREHOUSE COMPUTE_WH");
     console.log("✅ Warehouse set");
     
+    // 3. Set database
     console.log("🔧 Setting database...");
-    await executeQuery(connection, "USE DATABASE SOURCE_DATA_NEW");
+    await executeQuery(connection, "USE DATABASE SOURCE_DATA");
     console.log("✅ Database set");
     
+    // 4. Set schema
     console.log("🔧 Setting schema...");
-    await executeQuery(connection, "USE SCHEMA VEHICLE_DATA");
+    await executeQuery(connection, "USE SCHEMA DYNAMO_DB");
     console.log("✅ Schema set");
 
-    // 3. Execute main query
+    // 5. Execute main query
     console.log("🔍 Executing main query...");
     const rows = await executeQuery(connection, sql);
 

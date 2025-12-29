@@ -5,6 +5,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +21,7 @@ import {
   Shield,
   Layers,
 } from "lucide-react";
+import Router from "next/router";
 import {
   useBatteryTelemetry,
   BatteryTelemetry,
@@ -69,6 +71,8 @@ const BatteryTelemetryDashboard = () => {
   const handleRefresh = () => {
     refetch(); // Uses cache if < 6 hours old
   };
+
+  const router = useRouter();
 
   const [selectedBattery, setSelectedBattery] =
     useState<BatteryTelemetry | null>(null);
@@ -685,7 +689,7 @@ const BatteryTelemetryDashboard = () => {
                 <BatteryCard
                   key={battery.bmsId}
                   battery={battery}
-                  onClick={() => setSelectedBattery(battery)}
+                  onClick={() => router.push(`/batteries/${battery.bmsId}`)}
                 />
               ))}
             </div>

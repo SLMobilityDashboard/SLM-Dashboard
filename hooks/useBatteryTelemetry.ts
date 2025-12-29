@@ -218,7 +218,7 @@ last_known_telemetry AS (
         BATCYCLECOUNT,
         BATTERY_ERROR,
         _PROCESSED_AT
-    FROM SOURCE_DATA_NEW.VEHICLE_DATA.TBOX_MESSAGE_DATA
+    FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
     WHERE BMSID IS NOT NULL
       AND TRIM(BMSID) <> ''
       AND BMSID NOT ILIKE '%TEST%'
@@ -237,7 +237,7 @@ distance_metrics AS (
         TRIM(BMSID) AS BMSID,
         SUM(DISTANCE_KM) AS total_distance_traveled,
         MAX(GPS_DATE) AS last_gps_date
-    FROM REPORT_DB_NEW.GPS_DASHBOARD.VEHICLE_DAILY_DISTANCE
+    FROM REPORT_DB.GPS_DASHBOARD.VEHICLE_DAILY_DISTANCE
     WHERE GPS_DATE > '2020-01-01'
       AND BMSID IS NOT NULL
       AND TRIM(BMSID) <> ''
@@ -457,19 +457,19 @@ const detectAnomalies = (
     });
   }
 
-  if (telemetryStatus === "stale" && telemetryAgeHours) {
-    const daysOld = Math.floor(telemetryAgeHours / 24);
-    anomalies.push({
-      type: "info",
-      category: "data",
-      message: `Telemetry data is ${daysOld} days old`,
-      impact: 2,
-      recommendation:
-        dataSource === "bss" 
-          ? `Battery currently in BSS. Last vehicle telemetry from ${daysOld} days ago.`
-          : `Using historical data. Battery may be offline or in BSS.`,
-    });
-  }
+  // if (telemetryStatus === "stale" && telemetryAgeHours) {
+  //   const daysOld = Math.floor(telemetryAgeHours / 24);
+  //   anomalies.push({
+  //     type: "info",
+  //     category: "data",
+  //     message: `Telemetry data is ${daysOld} days old`,
+  //     impact: 2,
+  //     recommendation:
+  //       dataSource === "bss" 
+  //         ? `Battery currently in BSS. Last vehicle telemetry from ${daysOld} days ago.`
+  //         : `Using historical data. Battery may be offline or in BSS.`,
+  //   });
+  // }
 
   // ============================================================================
   // CELL VOLTAGE ANOMALIES (NEW)
@@ -876,7 +876,7 @@ export const useBatteryTelemetry = (): UseBatteryTelemetryReturn => {
         console.log(forceRefresh ? "🔄 Force refreshing data..." : "🔵 Fetching fresh data...");
         
         const fetchStartTime = performance.now();
-        const response = await fetch("/api/testquery", {
+        const response = await fetch("/api/testquery2FA", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

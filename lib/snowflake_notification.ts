@@ -48,17 +48,17 @@ class SnowflakeNotificationManager {
   private static cleanupStaleConnections(): void {
     const now = Date.now();
     const connectionsToClean: string[] = [];
-
+    
     for (const [username, state] of this.connections.entries()) {
       const timeSinceLastQuery = now - state.lastQueryTime;
-
+      
       // If connection hasn't been used for CONNECTION_TIMEOUT since last query
       if (timeSinceLastQuery > this.CONNECTION_TIMEOUT) {
         console.log(`[Snowflake-Notification] Marking stale connection for cleanup: ${username} (inactive for ${(timeSinceLastQuery / 1000).toFixed(1)}s)`);
         connectionsToClean.push(username);
       }
     }
-
+    
     // Clean up marked connections
     for (const username of connectionsToClean) {
       // Check if connection still exists before attempting cleanup
@@ -87,7 +87,7 @@ class SnowflakeNotificationManager {
    */
   public static async getConnection(requestedUsername?: string): Promise<snowflake.Connection> {
     this.initializeCleanup();
-
+    
     const snowflakeUsername = this.normalizeUsername(requestedUsername);
     let state = this.connections.get(snowflakeUsername);
 
@@ -197,7 +197,7 @@ class SnowflakeNotificationManager {
         if (err) {
           state!.isConnected = false;
           console.error(`[Snowflake-Notification] ❌ Failed to connect for ${snowflakeUsername}:`, err.message);
-
+          
           // Remove failed connection from pool
           this.connections.delete(snowflakeUsername);
           return reject(err);
@@ -225,7 +225,7 @@ class SnowflakeNotificationManager {
     rowCount: number;
   }> {
     const snowflakeUsername = this.normalizeUsername(requestedUsername);
-
+    
     try {
       await this.connect(requestedUsername);
       const connection = await this.getConnection(requestedUsername);
@@ -252,23 +252,23 @@ class SnowflakeNotificationManager {
 
             if (err) {
               console.error("[Snowflake-Notification] Query execution error:", err.message);
-
+              
               // If connection error, remove from pool
               if (err.code === 405503 || err.message.includes('terminated') || err.message.includes('Cannot connect')) {
                 console.log(`[Snowflake-Notification] Removing terminated connection: ${snowflakeUsername}`);
                 this.connections.delete(snowflakeUsername);
               }
-
+              
               reject(err);
             } else {
               const columns = stmt.getColumns().map((col: any) => col.getName());
               const executionTime = (Date.now() - startTime) / 1000;
-
+              
               console.log(`[Snowflake-Notification] Query completed in ${executionTime}s, returned ${rows.length} rows`);
               if (requestedUsername) {
                 console.log(`[Snowflake-Notification] Executed by app user: ${requestedUsername}`);
               }
-
+              
               resolve({
                 columns,
                 rows,
@@ -321,12 +321,12 @@ class SnowflakeNotificationManager {
   public static async disconnect(requestedUsername?: string): Promise<void> {
     const snowflakeUsername = this.normalizeUsername(requestedUsername);
     const state = this.connections.get(snowflakeUsername);
-
+    
     if (!state) {
       console.log(`[Snowflake-Notification] No connection found for ${snowflakeUsername}`);
       return;
     }
-
+    
     if (state.connection) {
       return new Promise<void>((resolve, reject) => {
         state.connection.destroy((err) => {
@@ -352,7 +352,7 @@ class SnowflakeNotificationManager {
    */
   public static async disconnectAll(): Promise<void> {
     console.log(`[Snowflake-Notification] Disconnecting all ${this.connections.size} connections...`);
-
+    
     const disconnectPromises = Array.from(this.connections.entries()).map(([username, state]) =>
       new Promise<void>((resolve) => {
         if (state.connection) {

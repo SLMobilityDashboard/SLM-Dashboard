@@ -10,6 +10,7 @@ import {
   Battery,
   Zap,
   Layers,
+  Router,
 } from "lucide-react";
 import React from "react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -255,8 +256,9 @@ const CellVoltageDisplay = ({
           <div className="text-xs text-slate-400 mb-2">Problem Cells:</div>
           <div className="space-y-1 max-h-32 overflow-y-auto scrollbar-thin">
             {cellVoltages.map((voltage, index) => {
-              const isCritical = voltage < 2.6 || voltage > 4.25;
-              const isWarning =
+              const isCritical = (voltage: number) =>
+                voltage < 2.6 || voltage > 4.25;
+              const isWarning = (voltage: number) =>
                 (voltage >= 2.6 && voltage < 3.0) ||
                 (voltage > 4.2 && voltage <= 4.25);
 
@@ -512,8 +514,8 @@ const BatteryCard = ({ battery, onClick }: BatteryCardProps) => {
 
         <div className="mt-4 pt-4 border-t border-slate-700/50">
           <button
-            onClick={onClick}
-            className="w-full flex items-center justify-between text-slate-400 hover:text-cyan-400 transition-colors text-sm group"
+            onClick={onClick} // Use the prop instead
+            className="w-full flex items-center justify-between..."
           >
             <span>View Full Details & Recommendations</span>
             <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
