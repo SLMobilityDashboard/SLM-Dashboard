@@ -909,7 +909,7 @@ export default function CapacitySohTab({ BMSID }: { BMSID: string }) {
         console.log("sql", sql);
 
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_BASE_URL}/api/testquery2FA`,
+          `${process.env.NEXT_PUBLIC_BASE_URL}/api/testquery`,
           {
             method: "POST",
             headers: {

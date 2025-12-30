@@ -1,6 +1,7 @@
 // hooks/useBatteryTelemetry.ts
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { calculateHealthScoreWithAnomalies } from "@/utils/batteryHealthScore";
 
 // ============================================================================
 // TYPES
@@ -259,13 +260,13 @@ bss_latest AS (
         ) as rn
     FROM (
         SELECT BID, _CABINET_NO, DEVICE_ID, CT
-        FROM SOURCE_DATA.BSS_ANALYTICS.BSS_CHANGE_STATUS
+        FROM SOURCE_DATA.BSS_DATA.BSS_CHANGE_STATUS
         WHERE BID IS NOT NULL AND BID NOT ILIKE '%TEST%'
         
         UNION ALL
         
         SELECT BID, _CABINET_NO, DEVICE_ID, CT
-        FROM SOURCE_DATA.BSS_ANALYTICS.BSS_CABINET_STATUS
+        FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
         WHERE BID IS NOT NULL AND BID NOT ILIKE '%TEST%'
     )
 ),
@@ -287,7 +288,7 @@ bss_voltage_data AS (
             PARTITION BY TRIM(BID)
             ORDER BY to_timestamp(CT) DESC
         ) as rn
-    FROM SOURCE_DATA.BSS_ANALYTICS.BSS_CABINET_STATUS
+    FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
     WHERE BID IS NOT NULL 
       AND TRIM(BID) <> ''
       AND BID NOT ILIKE '%TEST%'
@@ -813,13 +814,15 @@ const processBatteryData = (rawData: RawBatteryData[]): BatteryTelemetry[] => {
       cellVoltages,
     };
 
+    // Detect anomalies (keep existing anomaly detection)
     const anomalies = detectAnomalies(
       batteryBase,
       timeMetrics.hoursSinceLastPulse,
       timeMetrics.offlineDuration
     );
     
-    const healthScore = calculateHealthScore(anomalies, raw.telemetryStatus);
+    // Use the centralized health score utility
+    const healthScore = calculateHealthScoreWithAnomalies(anomalies, raw.telemetryStatus);
 
     result[i] = {
       ...batteryBase,
@@ -876,7 +879,7 @@ export const useBatteryTelemetry = (): UseBatteryTelemetryReturn => {
         console.log(forceRefresh ? "🔄 Force refreshing data..." : "🔵 Fetching fresh data...");
         
         const fetchStartTime = performance.now();
-        const response = await fetch("/api/testquery2FA", {
+        const response = await fetch("/api/testquery", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
