@@ -24,7 +24,7 @@ import { TabsTrigger, Tabs, TabsContent, TabsList } from "@/components/ui/tabs";
 import OverviewTab from "@/components/battery/OverviewTab";
 import CellAnalysisTab from "@/components/battery/CellAnalysisTab";
 import CapacitySohTab from "@/components/battery/CapacitySohTab";
-import BatteryHistoryByBattery from "@/components/battery/PerformanceTab";
+import BatteryHistoryByBattery from "@/components/battery/BatteryHistoryByBattery";
 import SwapManagementTab from "@/components/battery/SwapManagementTab";
 import { useParams } from "next/navigation";
 
@@ -628,7 +628,7 @@ const BatteryDetailAnalytics = () => {
               className="data-[state=active]:bg-slate-800 data-[state=active]:text-slate-100"
             >
               <PlugZap className="w-4 h-4 mr-2" />
-              Charging
+              Home Charging
             </TabsTrigger>
 
             <TabsTrigger
@@ -636,7 +636,7 @@ const BatteryDetailAnalytics = () => {
               className="data-[state=active]:bg-slate-800 data-[state=active]:text-slate-100"
             >
               <RefreshCw className="w-4 h-4 mr-2" />
-              Patterns
+              Charging
             </TabsTrigger>
 
             <TabsTrigger
@@ -658,7 +658,12 @@ const BatteryDetailAnalytics = () => {
           </TabsContent>
 
           <TabsContent value="cells" className="mt-0">
-            <CellAnalysisTab />
+            <div className="p-8 text-center text-slate-400">
+              <Battery className="h-12 w-12 mx-auto mb-4 text-slate-600" />
+              <p className="text-lg">Cell Analysis is under development.</p>
+              <p className="text-sm">Please check back later.</p>
+            </div>
+            {/* <CellAnalysisTab /> */}
           </TabsContent>
 
           <TabsContent value="sessions" className="mt-0">

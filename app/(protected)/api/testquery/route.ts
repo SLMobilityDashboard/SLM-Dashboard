@@ -63,22 +63,22 @@ export async function POST(req: NextRequest) {
     });
 
     // 2. Set warehouse (CRITICAL - must be done first)
-    console.log("🔧 Setting warehouse...");
+    // console.log("🔧 Setting warehouse...");
     await executeQuery(connection, "USE WAREHOUSE COMPUTE_WH");
-    console.log("✅ Warehouse set");
+    // console.log("✅ Warehouse set");
     
     // 3. Set database
-    console.log("🔧 Setting database...");
+    // console.log("🔧 Setting database...");
     await executeQuery(connection, "USE DATABASE SOURCE_DATA");
-    console.log("✅ Database set");
+    // console.log("✅ Database set");
     
     // 4. Set schema
-    console.log("🔧 Setting schema...");
+    // console.log("🔧 Setting schema...");
     await executeQuery(connection, "USE SCHEMA DYNAMO_DB");
-    console.log("✅ Schema set");
+    // console.log("✅ Schema set");
 
     // 5. Execute main query
-    console.log("🔍 Executing main query...");
+    // console.log("🔍 Executing main query...");
     const rows = await executeQuery(connection, sql);
 
     const duration = Date.now() - startTime;

@@ -473,65 +473,6 @@ const CellAnalysisTab = () => {
           </ResponsiveContainer>
         </CardContent>
       </Card>
-
-      {/* Temperature vs Imbalance Correlation */}
-      <Card className="bg-slate-900/50 border-slate-700/50">
-        <CardHeader>
-          <CardTitle className="text-slate-100 flex items-center gap-2">
-            <ThermometerSun className="h-5 w-5 text-red-400" />
-            Temperature Impact on Cell Balance
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ResponsiveContainer width="100%" height={280}>
-            <ScatterChart>
-              <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
-              <XAxis
-                dataKey="BATTEMP"
-                type="number"
-                name="Temperature"
-                unit="°C"
-                tick={{ fill: "#94a3b8" }}
-                label={{
-                  value: "Temperature (°C)",
-                  position: "insideBottom",
-                  fill: "#94a3b8",
-                  offset: -5,
-                }}
-              />
-              <YAxis
-                dataKey="BATCELLDIFFMAX"
-                type="number"
-                name="Imbalance"
-                unit="mV"
-                tick={{ fill: "#94a3b8" }}
-                label={{
-                  value: "Cell Imbalance (mV)",
-                  angle: -90,
-                  position: "insideLeft",
-                  fill: "#94a3b8",
-                }}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#1e293b",
-                  border: "1px solid #475569",
-                }}
-                cursor={{ strokeDasharray: "3 3" }}
-              />
-              <Scatter data={monthlyData} fill="#3b82f6" name="Daily Records" />
-            </ScatterChart>
-          </ResponsiveContainer>
-          <div className="mt-4 p-3 bg-slate-800/50 rounded">
-            <p className="text-slate-400 text-xs mb-1">Correlation Analysis</p>
-            <p className="text-slate-200 text-sm">
-              {avgTemp > 40
-                ? "Higher temperatures correlating with increased cell imbalance. Improve thermal management."
-                : "Temperature within optimal range. No significant thermal stress detected."}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 };

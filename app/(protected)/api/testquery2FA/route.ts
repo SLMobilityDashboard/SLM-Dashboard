@@ -63,20 +63,20 @@ export async function POST(req: NextRequest) {
     });
 
     // 2. Set warehouse, database, and schema separately (CRITICAL FIX)
-    console.log("🔧 Setting warehouse...");
+    // console.log("🔧 Setting warehouse...");
     await executeQuery(connection, "USE WAREHOUSE COMPUTE_WH");
-    console.log("✅ Warehouse set");
+    // console.log("✅ Warehouse set");
     
     console.log("🔧 Setting database...");
     await executeQuery(connection, "USE DATABASE SOURCE_DATA_NEW");
-    console.log("✅ Database set");
+    // console.log("✅ Database set");
     
-    console.log("🔧 Setting schema...");
+    // console.log("🔧 Setting schema...");
     await executeQuery(connection, "USE SCHEMA VEHICLE_DATA");
-    console.log("✅ Schema set");
+    // console.log("✅ Schema set");
 
     // 3. Execute main query
-    console.log("🔍 Executing main query...");
+    // console.log("🔍 Executing main query...");
     const rows = await executeQuery(connection, sql);
 
     const duration = Date.now() - startTime;

@@ -188,26 +188,40 @@ function useBatteryDataByBMS(
 
   const fetchSnowflakeData = useCallback(async (query: string, queryName?: string) => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/testquery`, {
+      console.log(`Executing ${queryName || 'Query'}:`, query.substring(0, 200) + '...');
+      
+      const response = await fetch("/api/testquery", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sql: query,
-          warehouse: process.env.SNOWFLAKE_WAREHOUSE || "AIDASHBOARD",
-          database: process.env.SNOWFLAKE_DATABASE || "SOURCE_DATA",
-          schema: process.env.SNOWFLAKE_SCHEMA || "VEHICLE_DATA",
         })
       });
 
+      const result = await response.json();
+      
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Snowflake API Error (${response.status}): ${errorText}`);
+        console.error(`${queryName || 'Query'} failed with status ${response.status}:`, result);
+        throw new Error(`Snowflake API Error (${response.status}): ${JSON.stringify(result)}`);
       }
 
-      const result = await response.json();
-      console.log(`${queryName || 'Query'} result:`, result);
+      console.log(`${queryName || 'Query'} success - rows returned:`, 
+        Array.isArray(result) ? result.length : 
+        result.data ? result.data.length : 
+        result.rows ? result.rows.length : 'unknown');
       
-      return result.data || result.rows || result || [];
+      // Handle different response formats
+      const data = result.data || result.rows || result || [];
+      
+      // If no data and this is an important query, log more details
+      if (data.length === 0 && queryName === 'batteryTelemetry') {
+        console.warn('No telemetry data found. Check:');
+        console.warn('1. Does BMSID exist in the database?');
+        console.warn('2. Is the time range correct?');
+        console.warn('3. Are there records in TBOX_MESSAGE_DATA?');
+      }
+      
+      return data;
     } catch (error) {
       console.error(`${queryName || 'Query'} failed:`, error);
       throw error;
@@ -218,12 +232,12 @@ function useBatteryDataByBMS(
   const normalizeUnits = useCallback((data: any[]): TboxData[] => {
     return data.map(row => ({
       ...row,
-      BATTEMP: safeNumber(row.BATTEMP) / 10,        // Convert to actual °C
-      BATVOLT: safeNumber(row.BATVOLT) / 10,        // Convert to actual V
-      BATCELLDIFFMAX: safeNumber(row.BATCELLDIFFMAX) / 10,  // Convert to actual mV
-      BATCURRENT: safeNumber(row.BATCURRENT),       // Already in correct unit (A)
-      BATSOH: safeNumber(row.BATSOH),               // Already in correct unit (%)
-      BATPERCENT: safeNumber(row.BATPERCENT),       // Already in correct unit (%)
+      BATTEMP: safeNumber(row.BATTEMP) / 10,
+      BATVOLT: safeNumber(row.BATVOLT) / 10,
+      BATCELLDIFFMAX: safeNumber(row.BATCELLDIFFMAX) / 10,
+      BATCURRENT: safeNumber(row.BATCURRENT),
+      BATSOH: safeNumber(row.BATSOH),
+      BATPERCENT: safeNumber(row.BATPERCENT),
       BATCYCLECOUNT: safeNumber(row.BATCYCLECOUNT),
       CTIME: safeNumber(row.CTIME),
       MOTORRPM: safeNumber(row.MOTORRPM),
@@ -239,10 +253,10 @@ function useBatteryDataByBMS(
   const normalizeSessionUnits = useCallback((sessions: any[]): VehicleSession[] => {
     return sessions.map(session => ({
       ...session,
-      AVGTEMP: safeNumber(session.AVGTEMP) / 10,      // Convert to actual °C
-      AVGVOLTAGE: safeNumber(session.AVGVOLTAGE) / 10, // Convert to actual V
-      MAXTEMP: safeNumber(session.MAXTEMP) / 10,       // Convert to actual °C
-      MINVOLTAGE: safeNumber(session.MINVOLTAGE) / 10, // Convert to actual V
+      AVGTEMP: safeNumber(session.AVGTEMP) / 10,
+      AVGVOLTAGE: safeNumber(session.AVGVOLTAGE) / 10,
+      MAXTEMP: safeNumber(session.MAXTEMP) / 10,
+      MINVOLTAGE: safeNumber(session.MINVOLTAGE) / 10,
       AVGCURRENT: safeNumber(session.AVGCURRENT),
       AVGSOH: safeNumber(session.AVGSOH),
       STARTCHARGE: safeNumber(session.STARTCHARGE),
@@ -269,11 +283,11 @@ function useBatteryDataByBMS(
     }
 
     if (filters.minBatteryTemp) {
-      conditions.push(`BATTEMP >= ${filters.minBatteryTemp * 10}`); // Convert to raw units for query
+      conditions.push(`BATTEMP >= ${filters.minBatteryTemp * 10}`);
     }
 
     if (filters.maxBatteryTemp) {
-      conditions.push(`BATTEMP <= ${filters.maxBatteryTemp * 10}`); // Convert to raw units for query
+      conditions.push(`BATTEMP <= ${filters.maxBatteryTemp * 10}`);
     }
 
     if (filters.minSOH) {
@@ -295,31 +309,25 @@ function useBatteryDataByBMS(
       .trim()
       .toUpperCase();
     
-    // Debug query to check what BMSID values exist - try both table names
-    const debugQuery = `
-      SELECT DISTINCT 
-        BMSID,
-        TBOXID,
-        COUNT(*) as record_count
-      FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-      WHERE ${filterConditions.join(' AND ')}
-      GROUP BY BMSID, TBOXID
-      ORDER BY record_count DESC
-      LIMIT 20
-    `;
-    
-    console.log('Debug - Looking for BMSID:', cleanedBmsId);
-    console.log('Debug - Filter conditions:', filterConditions);
-    
-    // Updated WHERE clause with better special character handling
     const whereClause = `WHERE UPPER(TRIM(REGEXP_REPLACE(
       COALESCE(BMSID, ''), 
       '[\\x00-\\x1F\\x7F-\\x9F]', '', 1, 0, 'c'
     ))) = '${cleanedBmsId}' AND ${filterConditions.join(' AND ')}`;
 
     return {
-      // Debug query to see what BMSID values exist
-      debugBmsIds: debugQuery,
+      debugBmsIds: `
+        SELECT DISTINCT 
+          BMSID,
+          TBOXID,
+          COUNT(*) as RECORD_COUNT,
+          MIN(CTIME) as FIRST_SEEN,
+          MAX(CTIME) as LAST_SEEN
+        FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+        WHERE ${filterConditions.join(' AND ')}
+        GROUP BY BMSID, TBOXID
+        ORDER BY RECORD_COUNT DESC
+        LIMIT 50
+      `,
       
       batteryTelemetry: `
         SELECT
@@ -350,187 +358,104 @@ function useBatteryDataByBMS(
       `,
 
       vehicleSwapDetection: `
-        WITH cleaned_data AS (
-          SELECT
-            CTIME,
-            TBOXID as current_tbox,
-            BATSOH,
-            BATPERCENT,
-            ROW_NUMBER() OVER (ORDER BY CTIME) as row_num
-          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-          ${whereClause}
-        ),
-        vehicle_changes AS (
-          SELECT
-            CTIME,
-            current_tbox,
-            LAG(current_tbox, 1) OVER (ORDER BY CTIME) as previous_tbox,
-            BATSOH,
-            LAG(BATSOH, 1) OVER (ORDER BY CTIME) as previous_soh,
-            BATPERCENT,
-            LAG(BATPERCENT, 1) OVER (ORDER BY CTIME) as previous_charge,
-            LAG(CTIME, 1) OVER (ORDER BY CTIME) as previous_time
-          FROM cleaned_data
-        ),
-        potential_swaps AS (
-          SELECT
-            CTIME as TIMESTAMP,
-            previous_tbox as OLDTBOXID,
-            current_tbox as NEWTBOXID,
-            COALESCE(previous_soh, 0) as OLDSOH,
-            COALESCE(BATSOH, 0) as NEWSOH,
-            COALESCE((BATPERCENT - previous_charge), 0) as CHARGECHANGE,
-            (CTIME - previous_time) as time_gap
-          FROM vehicle_changes
-          WHERE current_tbox != previous_tbox
-            AND current_tbox IS NOT NULL
-            AND previous_tbox IS NOT NULL
-            AND previous_tbox != ''
-            AND current_tbox != ''
-            AND (CTIME - previous_time) >= 30
-            AND LENGTH(current_tbox) > 3
-            AND LENGTH(previous_tbox) > 3
-        )
         SELECT 
-          TIMESTAMP,
-          OLDTBOXID,
-          NEWTBOXID,
-          OLDSOH,
-          NEWSOH,
-          CHARGECHANGE
-        FROM potential_swaps
-        ORDER BY TIMESTAMP DESC
+          CTIME as TIMESTAMP,
+          LAG(TBOXID) OVER (ORDER BY CTIME) as OLDTBOXID,
+          TBOXID as NEWTBOXID,
+          LAG(BATSOH) OVER (ORDER BY CTIME) as OLDSOH,
+          BATSOH as NEWSOH,
+          (BATPERCENT - LAG(BATPERCENT) OVER (ORDER BY CTIME)) as CHARGECHANGE
+        FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+        ${whereClause}
+        QUALIFY TBOXID != LAG(TBOXID) OVER (ORDER BY CTIME)
+          AND LAG(TBOXID) OVER (ORDER BY CTIME) IS NOT NULL
+          AND TBOXID IS NOT NULL
+          AND LENGTH(TBOXID) > 3
+          AND LENGTH(LAG(TBOXID) OVER (ORDER BY CTIME)) > 3
+          AND (CTIME - LAG(CTIME) OVER (ORDER BY CTIME)) >= 30
+        ORDER BY CTIME DESC
         LIMIT 100
       `,
 
       vehicleSessionAnalysis: `
-        WITH cleaned_base_data AS (
-            SELECT 
-              CTIME,
-              BATSOH,
-              BATTEMP,
-              BATVOLT,
-              BATPERCENT,
-              BATCURRENT,
-              BATCYCLECOUNT,
-              TOTAL_DISTANCE_KM,
-              BATTERY_ERROR,
-              TBOXID as tbox_id
-            FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-            ${whereClause}
-        ),
-        tbox_changes AS (
-            SELECT *,
-            LAG(tbox_id, 1, 'DIFFERENT') OVER (ORDER BY CTIME) as prev_tbox_id
-            FROM cleaned_base_data
-        ),
-        session_groups AS (
-            SELECT *,
-            SUM(CASE WHEN tbox_id != prev_tbox_id THEN 1 ELSE 0 END) 
-                OVER (ORDER BY CTIME) as session_group
-            FROM tbox_changes
-        ),
-        vehicle_sessions AS (
-            SELECT
-            tbox_id,
-            MIN(CTIME) as session_start,
-            MAX(CTIME) as session_end,
-            AVG(BATSOH) as avg_soh,
-            AVG(BATTEMP) as avg_temp,
-            AVG(BATVOLT) as avg_voltage,
-            MIN(BATPERCENT) as min_charge,
-            MAX(BATPERCENT) as max_charge,
-            AVG(ABS(BATCURRENT)) as avg_current,
-            MAX(BATTEMP) as max_temp,
-            MIN(BATVOLT) as min_voltage,
-            MAX(BATCYCLECOUNT) as cycle_count,
-            MIN(TOTAL_DISTANCE_KM) as start_distance,
-            MAX(TOTAL_DISTANCE_KM) as end_distance,
-            SUM(CASE WHEN BATTERY_ERROR IS NOT NULL AND BATTERY_ERROR != '' 
-                THEN 1 ELSE 0 END) as error_events
-            FROM session_groups
-            GROUP BY tbox_id, session_group
-        )
         SELECT
-            tbox_id as TBOXID,
-            session_start as STARTTIME,
-            session_end as ENDTIME,
-            ROUND((session_end - session_start) / 3600.0, 2) as DURATION,
-            ROUND(avg_soh, 1) as AVGSOH,
-            avg_temp as AVGTEMP,
-            avg_voltage as AVGVOLTAGE,
-            ROUND(max_charge, 1) as STARTCHARGE,
-            ROUND(min_charge, 1) as ENDCHARGE,
-            ROUND(max_charge - min_charge, 1) as CHARGECONSUMED,
-            ROUND(COALESCE(end_distance - start_distance, 0), 2) as DISTANCECOVERED,
-            ROUND(avg_current, 1) as AVGCURRENT,
-            max_temp as MAXTEMP,
-            min_voltage as MINVOLTAGE,
-            cycle_count as CYCLECOUNT,
-            error_events as ERROREVENTS
-        FROM vehicle_sessions
-        WHERE (session_end - session_start) > 360
-          AND tbox_id != ''
-          AND LENGTH(tbox_id) > 3
-        ORDER BY session_start DESC
+          TBOXID,
+          MIN(CTIME) as STARTTIME,
+          MAX(CTIME) as ENDTIME,
+          ROUND((MAX(CTIME) - MIN(CTIME)) / 3600.0, 2) as DURATION,
+          ROUND(AVG(BATSOH), 1) as AVGSOH,
+          AVG(BATTEMP) as AVGTEMP,
+          AVG(BATVOLT) as AVGVOLTAGE,
+          ROUND(MAX(BATPERCENT), 1) as STARTCHARGE,
+          ROUND(MIN(BATPERCENT), 1) as ENDCHARGE,
+          ROUND(MAX(BATPERCENT) - MIN(BATPERCENT), 1) as CHARGECONSUMED,
+          ROUND(MAX(TOTAL_DISTANCE_KM) - MIN(TOTAL_DISTANCE_KM), 2) as DISTANCECOVERED,
+          ROUND(AVG(ABS(BATCURRENT)), 1) as AVGCURRENT,
+          MAX(BATTEMP) as MAXTEMP,
+          MIN(BATVOLT) as MINVOLTAGE,
+          MAX(BATCYCLECOUNT) as CYCLECOUNT,
+          SUM(CASE WHEN BATTERY_ERROR IS NOT NULL AND BATTERY_ERROR != '' THEN 1 ELSE 0 END) as ERROREVENTS
+        FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+        ${whereClause}
+        GROUP BY TBOXID
+        HAVING (MAX(CTIME) - MIN(CTIME)) > 360 AND LENGTH(TBOXID) > 3
+        ORDER BY STARTTIME DESC
         LIMIT 100
-        `,
+      `,
 
       systemDiagnostics: `
-        WITH cleaned_vehicle_stats AS (
+        WITH vehicle_stats AS (
           SELECT
-            COUNT(DISTINCT TBOXID) as total_vehicles,
-            AVG(BATSOH) as avg_soh,
-            AVG(BATTEMP) as avg_temp,
-            COUNT(*) as total_readings,
-            SUM(CASE WHEN BATTERY_ERROR IS NOT NULL AND BATTERY_ERROR != '' 
-                     OR BATTEMP > 650
-                THEN 1 ELSE 0 END) as critical_events,
-            SUM(CASE WHEN BATVOLT < 440 OR BATVOLT > 540 THEN 1 ELSE 0 END) as voltage_anomalies,
-            MAX(TOTAL_DISTANCE_KM) - MIN(TOTAL_DISTANCE_KM) as distance_covered,
-            (MAX(BATPERCENT) - MIN(BATPERCENT)) as charge_consumed,
-            COUNT(DISTINCT DATE_TRUNC('day', TO_TIMESTAMP(CTIME))) as active_days
+            COUNT(DISTINCT TBOXID) as TOTAL_VEHICLES,
+            AVG(BATSOH) as AVG_SOH,
+            AVG(BATTEMP) as AVG_TEMP,
+            COUNT(*) as TOTAL_READINGS,
+            SUM(CASE WHEN BATTERY_ERROR IS NOT NULL AND BATTERY_ERROR != '' OR BATTEMP > 650 THEN 1 ELSE 0 END) as CRITICAL_EVENTS,
+            SUM(CASE WHEN BATVOLT < 440 OR BATVOLT > 540 THEN 1 ELSE 0 END) as VOLTAGE_ANOMALIES,
+            MAX(TOTAL_DISTANCE_KM) - MIN(TOTAL_DISTANCE_KM) as DISTANCE_COVERED,
+            MAX(BATPERCENT) - MIN(BATPERCENT) as CHARGE_CONSUMED,
+            COUNT(DISTINCT DATE_TRUNC('day', TO_TIMESTAMP(CTIME))) as ACTIVE_DAYS
           FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
           ${whereClause}
         ),
-        cleaned_vehicle_performance AS (
+        vehicle_performance AS (
           SELECT
-            TBOXID as tbox_id,
-            AVG(BATSOH) as avg_soh,
-            AVG(BATTEMP) as avg_temp,
-            SUM(CASE WHEN BATTERY_ERROR IS NOT NULL AND BATTERY_ERROR != '' THEN 1 ELSE 0 END) as error_count,
-            COUNT(*) as readings_count
+            TBOXID,
+            AVG(BATSOH) as AVG_SOH,
+            AVG(BATTEMP) as AVG_TEMP,
+            SUM(CASE WHEN BATTERY_ERROR IS NOT NULL AND BATTERY_ERROR != '' THEN 1 ELSE 0 END) as ERROR_COUNT,
+            COUNT(*) as READINGS_COUNT
           FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
           ${whereClause}
           GROUP BY TBOXID
-          HAVING COUNT(*) > 10 AND LENGTH(tbox_id) > 3
+          HAVING COUNT(*) > 10 AND LENGTH(TBOXID) > 3
         )
         SELECT
-          vs.total_vehicles as TOTAL_VEHICLES,
-          vs.avg_soh as AVG_SOH,
-          vs.avg_temp as AVG_TEMP,
-          vs.critical_events as CRITICAL_EVENTS,
-          vs.voltage_anomalies as VOLTAGE_ANOMALIES,
-          vs.total_readings as TOTAL_READINGS,
-          vs.distance_covered as DISTANCE_COVERED,
-          vs.charge_consumed as CHARGE_CONSUMED,
-          vs.active_days as ACTIVE_DAYS,
-          CASE WHEN vs.charge_consumed > 0 
-               THEN ROUND(vs.distance_covered / vs.charge_consumed, 2)
+          vs.TOTAL_VEHICLES,
+          vs.AVG_SOH,
+          vs.AVG_TEMP,
+          vs.CRITICAL_EVENTS,
+          vs.VOLTAGE_ANOMALIES,
+          vs.TOTAL_READINGS,
+          vs.DISTANCE_COVERED,
+          vs.CHARGE_CONSUMED,
+          vs.ACTIVE_DAYS,
+          CASE WHEN vs.CHARGE_CONSUMED > 0 
+               THEN ROUND(vs.DISTANCE_COVERED / vs.CHARGE_CONSUMED, 2)
                ELSE 0 END as BATTERY_EFFICIENCY,
           LISTAGG(
-            CASE WHEN vp.avg_soh >= 90 AND (vp.error_count * 100.0 / vp.readings_count) < 5 
-                 THEN vp.tbox_id END, ','
-          ) WITHIN GROUP (ORDER BY vp.avg_soh DESC) as PREFERRED_VEHICLES,
+            CASE WHEN vp.AVG_SOH >= 90 AND (vp.ERROR_COUNT * 100.0 / vp.READINGS_COUNT) < 5 
+                 THEN vp.TBOXID END, ','
+          ) WITHIN GROUP (ORDER BY vp.AVG_SOH DESC) as PREFERRED_VEHICLES,
           LISTAGG(
-            CASE WHEN vp.avg_soh < 85 OR (vp.error_count * 100.0 / vp.readings_count) > 10 OR vp.avg_temp > 450
-                 THEN vp.tbox_id END, ','
-          ) WITHIN GROUP (ORDER BY vp.avg_soh ASC) as PROBLEMATIC_VEHICLES
-        FROM cleaned_vehicle_stats vs
-        CROSS JOIN cleaned_vehicle_performance vp
-        GROUP BY vs.total_vehicles, vs.avg_soh, vs.avg_temp, vs.critical_events, 
-                 vs.voltage_anomalies, vs.total_readings, vs.distance_covered, 
-                 vs.charge_consumed, vs.active_days
+            CASE WHEN vp.AVG_SOH < 85 OR (vp.ERROR_COUNT * 100.0 / vp.READINGS_COUNT) > 10 OR vp.AVG_TEMP > 450
+                 THEN vp.TBOXID END, ','
+          ) WITHIN GROUP (ORDER BY vp.AVG_SOH ASC) as PROBLEMATIC_VEHICLES
+        FROM vehicle_stats vs
+        CROSS JOIN vehicle_performance vp
+        GROUP BY vs.TOTAL_VEHICLES, vs.AVG_SOH, vs.AVG_TEMP, vs.CRITICAL_EVENTS, 
+                 vs.VOLTAGE_ANOMALIES, vs.TOTAL_READINGS, vs.DISTANCE_COVERED, 
+                 vs.CHARGE_CONSUMED, vs.ACTIVE_DAYS
       `
     };
   }, [bmsId, buildFilterConditions]);
@@ -546,110 +471,167 @@ function useBatteryDataByBMS(
     setDebugInfo(null);
     
     try {
-      // First, run debug query to see what BMSID values exist
-      console.log('Running debug query to check available BMSID values...');
+      // First, check table statistics
+      console.log('=== STEP 1: Checking table statistics ===');
+      let tableStats;
+      try {
+        const tableCheckQuery = `
+          SELECT COUNT(*) as TOTAL_RECORDS,
+                 COUNT(DISTINCT BMSID) as UNIQUE_BMS,
+                 COUNT(DISTINCT TBOXID) as UNIQUE_TBOX,
+                 MIN(CTIME) as EARLIEST_TIME,
+                 MAX(CTIME) as LATEST_TIME
+          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+        `;
+        tableStats = await fetchSnowflakeData(tableCheckQuery, "tableCheck");
+        console.log('Table statistics:', tableStats[0]);
+      } catch (tableError) {
+        console.error('Table check failed:', tableError);
+      }
+      
+      // Second, run debug query to see what BMSID values exist
+      console.log('=== STEP 2: Checking available BMSID values in time range ===');
+      console.log('Searching for BMSID:', bmsId);
+      console.log('Filter conditions:', buildFilterConditions());
+      
       try {
         const debugResult = await fetchSnowflakeData(queries.debugBmsIds, "debugBmsIds");
-        console.log('Available BMSID values in database:', debugResult);
+        console.log('Available BMSID/TBOXID combinations:', debugResult);
         
-        setDebugInfo({
+        setDebugInfo(prev => ({
+          ...prev,
+          tableStats: tableStats?.[0],
           availableBmsIds: debugResult,
           searchingFor: bmsId,
-        });
+        }));
+        
+        if (debugResult.length === 0) {
+          throw new Error(`No data found in time range. Table has ${tableStats?.[0]?.TOTAL_RECORDS || 0} total records, but none match the current filters.`);
+        }
       } catch (debugError) {
-        console.warn('Debug query failed, continuing with main query:', debugError);
+        console.warn('Debug query failed:', debugError);
+        setError(`Debug check failed: ${debugError instanceof Error ? debugError.message : String(debugError)}`);
       }
       
       // Fetch and normalize telemetry data
+      console.log('=== STEP 3: Fetching telemetry data ===');
       let telemetryResult;
       try {
         telemetryResult = await fetchSnowflakeData(queries.batteryTelemetry, "batteryTelemetry");
-      } catch (telemetryError: any) {
-        // If the main query fails, try a simpler query without BMSID filtering
-        console.warn('Main telemetry query failed, trying simplified query:', telemetryError);
         
-        const simplifiedQuery = `
-          SELECT
-            BATTEMP, BATVOLT, BATCELLDIFFMAX, BATCYCLECOUNT, BATSOH, BATPERCENT,
-            BATCURRENT, COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR, CTIME,
-            MOTORRPM, TBOXID, COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
-            COALESCE(STATE, 'UNKNOWN') as STATE, THROTTLEPERCENT
-          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-          WHERE ${buildFilterConditions().join(' AND ')}
-          ORDER BY CTIME ASC
-          LIMIT 1000
-        `;
-        
-        telemetryResult = await fetchSnowflakeData(simplifiedQuery, "simplifiedTelemetry");
-        
-        if (telemetryResult && telemetryResult.length > 0) {
-          setError(`Note: BMSID filtering not available. Showing all battery data for the selected time range. Available TBoxes: ${[...new Set(telemetryResult.map((r: any) => r.TBOXID))].join(', ')}`);
+        if (!telemetryResult || telemetryResult.length === 0) {
+          console.warn('No telemetry data returned from main query');
+          console.warn('Trying simplified query without BMSID filter...');
+          
+          const simplifiedQuery = `
+            SELECT
+              BATTEMP, BATVOLT, BATCELLDIFFMAX, BATCYCLECOUNT, BATSOH, BATPERCENT,
+              BATCURRENT, COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR, CTIME,
+              MOTORRPM, TBOXID, BMSID,
+              COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
+              COALESCE(STATE, 'UNKNOWN') as STATE, THROTTLEPERCENT
+            FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+            WHERE ${buildFilterConditions().join(' AND ')}
+            ORDER BY CTIME DESC
+            LIMIT 100
+          `;
+          
+          telemetryResult = await fetchSnowflakeData(simplifiedQuery, "simplifiedTelemetry");
+          
+          if (telemetryResult && telemetryResult.length > 0) {
+            const availableBmsIds = [...new Set(telemetryResult.map((r: any) => r.BMSID).filter(Boolean))];
+            const availableTboxIds = [...new Set(telemetryResult.map((r: any) => r.TBOXID))];
+            
+            setError(`BMSID "${bmsId}" not found. Available BMSID values: ${availableBmsIds.join(', ') || 'None found'}. Available TBoxes: ${availableTboxIds.join(', ')}`);
+            console.log('Sample record structure:', telemetryResult[0]);
+          } else {
+            throw new Error('No data found even without BMSID filter. Check time range and filter conditions.');
+          }
         }
+      } catch (telemetryError: any) {
+        console.error('Telemetry query failed:', telemetryError);
+        throw new Error(`Failed to fetch telemetry data: ${telemetryError.message}`);
       }
       
       const normalizedTelemetry = normalizeUnits(telemetryResult || []);
       setBatteryData(normalizedTelemetry);
       
-      // Fetch and process vehicle swaps
-      const swapResult = await fetchSnowflakeData(queries.vehicleSwapDetection, "vehicleSwapDetection");
-      const rawSwaps = swapResult || [];
-      const consolidatedSwaps = consolidateRapidSwaps(rawSwaps, 10);
-      setVehicleSwaps(consolidatedSwaps);
-      
-      // Fetch and normalize vehicle sessions
-      const sessionResult = await fetchSnowflakeData(queries.vehicleSessionAnalysis, "vehicleSessionAnalysis");
-      const normalizedSessions = normalizeSessionUnits(sessionResult || []);
-      setVehicleSessions(normalizedSessions);
-      
-      // Fetch system diagnostics
-      const diagnosticResult = await fetchSnowflakeData(queries.systemDiagnostics, "systemDiagnostics");
-      const rawDiagnostics = diagnosticResult?.[0];
-      
-      if (rawDiagnostics) {
-        const processedDiagnostics: DiagnosticMetrics = {
-          totalVehicles: safeNumber(rawDiagnostics.TOTAL_VEHICLES),
-          totalSwaps: consolidatedSwaps.length,
-          avgSessionDuration: normalizedSessions.length > 0 ? 
-            normalizedSessions.reduce((sum, s) => sum + safeNumber(s.DURATION), 0) / normalizedSessions.length : 0,
-          preferredVehicles: rawDiagnostics.PREFERRED_VEHICLES ? 
-            rawDiagnostics.PREFERRED_VEHICLES.split(',').filter(Boolean) : [],
-          problematicVehicles: rawDiagnostics.PROBLEMATIC_VEHICLES ? 
-            rawDiagnostics.PROBLEMATIC_VEHICLES.split(',').filter(Boolean) : [],
-          swapFrequency: consolidatedSwaps.length / Math.max(1, safeNumber(rawDiagnostics.ACTIVE_DAYS, 1)),
-          batteryEfficiency: safeNumber(rawDiagnostics.BATTERY_EFFICIENCY),
-          thermalPerformance: (() => {
-            const temp = safeNumber(rawDiagnostics.AVG_TEMP) / 10; // Convert to actual temp
-            return temp < 35 ? "Excellent" : 
-                   temp < 45 ? "Good" : 
-                   temp < 55 ? "Fair" : "Poor";
-          })(),
-          voltageStability: (() => {
-            const anomalies = safeNumber(rawDiagnostics.VOLTAGE_ANOMALIES);
-            const readings = safeNumber(rawDiagnostics.TOTAL_READINGS, 1);
-            return (anomalies / readings) < 0.05 ? "Stable" : "Unstable";
-          })(),
-          overallHealth: (() => {
-            const soh = safeNumber(rawDiagnostics.AVG_SOH);
-            const criticalEvents = safeNumber(rawDiagnostics.CRITICAL_EVENTS);
-            return soh > 90 && criticalEvents < 5 ? "Excellent" :
-                   soh > 80 && criticalEvents < 15 ? "Good" :
-                   soh > 70 ? "Fair" : "Poor";
-          })()
-        };
-        setDiagnostics(processedDiagnostics);
+      // Fetch and process vehicle swaps with error handling
+      let consolidatedSwaps: VehicleSwapEvent[] = [];
+      try {
+        const swapResult = await fetchSnowflakeData(queries.vehicleSwapDetection, "vehicleSwapDetection");
+        const rawSwaps = swapResult || [];
+        consolidatedSwaps = consolidateRapidSwaps(rawSwaps, 10);
+        setVehicleSwaps(consolidatedSwaps);
+      } catch (swapError) {
+        console.warn('Vehicle swap detection failed, continuing without swap data:', swapError);
+        setVehicleSwaps([]);
       }
+      
+      // Fetch and normalize vehicle sessions with error handling
+      let normalizedSessions: VehicleSession[] = [];
+      try {
+        const sessionResult = await fetchSnowflakeData(queries.vehicleSessionAnalysis, "vehicleSessionAnalysis");
+        normalizedSessions = normalizeSessionUnits(sessionResult || []);
+        setVehicleSessions(normalizedSessions);
+      } catch (sessionError) {
+        console.warn('Vehicle session analysis failed, continuing without session data:', sessionError);
+        setVehicleSessions([]);
+      }
+      
+      // Fetch system diagnostics with error handling
+      try {
+        const diagnosticResult = await fetchSnowflakeData(queries.systemDiagnostics, "systemDiagnostics");
+        const rawDiagnostics = diagnosticResult?.[0];
+        
+        if (rawDiagnostics) {
+          const processedDiagnostics: DiagnosticMetrics = {
+            totalVehicles: safeNumber(rawDiagnostics.TOTAL_VEHICLES),
+            totalSwaps: consolidatedSwaps.length,
+            avgSessionDuration: normalizedSessions.length > 0 ? 
+              normalizedSessions.reduce((sum, s) => sum + safeNumber(s.DURATION), 0) / normalizedSessions.length : 0,
+            preferredVehicles: rawDiagnostics.PREFERRED_VEHICLES ? 
+              rawDiagnostics.PREFERRED_VEHICLES.split(',').filter(Boolean) : [],
+            problematicVehicles: rawDiagnostics.PROBLEMATIC_VEHICLES ? 
+              rawDiagnostics.PROBLEMATIC_VEHICLES.split(',').filter(Boolean) : [],
+            swapFrequency: consolidatedSwaps.length / Math.max(1, safeNumber(rawDiagnostics.ACTIVE_DAYS, 1)),
+            batteryEfficiency: safeNumber(rawDiagnostics.BATTERY_EFFICIENCY),
+            thermalPerformance: (() => {
+              const temp = safeNumber(rawDiagnostics.AVG_TEMP) / 10;
+              return temp < 35 ? "Excellent" : 
+                     temp < 45 ? "Good" : 
+                     temp < 55 ? "Fair" : "Poor";
+            })(),
+            voltageStability: (() => {
+              const anomalies = safeNumber(rawDiagnostics.VOLTAGE_ANOMALIES);
+              const readings = safeNumber(rawDiagnostics.TOTAL_READINGS, 1);
+              return (anomalies / readings) < 0.05 ? "Stable" : "Unstable";
+            })(),
+            overallHealth: (() => {
+              const soh = safeNumber(rawDiagnostics.AVG_SOH);
+              const criticalEvents = safeNumber(rawDiagnostics.CRITICAL_EVENTS);
+              return soh > 90 && criticalEvents < 5 ? "Excellent" :
+                     soh > 80 && criticalEvents < 15 ? "Good" :
+                     soh > 70 ? "Fair" : "Poor";
+            })()
+          };
+          setDiagnostics(processedDiagnostics);
+        }
+      } catch (diagnosticError) {
+        console.warn('System diagnostics failed, continuing without diagnostic data:', diagnosticError);
+        setDiagnostics(null);
+      }
+      
+    
       
       setDebugInfo({
         telemetryCount: normalizedTelemetry.length,
-        rawSwapCount: rawSwaps.length,
         consolidatedSwapCount: consolidatedSwaps.length,
         sessionCount: normalizedSessions.length,
-        diagnosticsFound: !!rawDiagnostics,
         timeRange: filters.timeRange,
         startTimestamp: filters.startTimestamp,
         endTimestamp: filters.endTimestamp,
         uniqueVehicles: [...new Set(normalizedTelemetry.map(d => d.TBOXID))].length,
-        swapsConsolidated: rawSwaps.length - consolidatedSwaps.length,
         dataDateRange: filters.startTimestamp && filters.endTimestamp ? {
           from: new Date(filters.startTimestamp * 1000).toISOString(),
           to: new Date(filters.endTimestamp * 1000).toISOString()

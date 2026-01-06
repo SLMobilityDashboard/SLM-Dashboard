@@ -76,44 +76,33 @@ const geocodeStation = (
   stationName: string
 ): { lat: number; lng: number } => {
   const knownLocations: Record<string, { lat: number; lng: number }> = {
-    // Major cities
+    // Stations from database - using station names as keys
+    miriswaththa: { lat: 7.123456, lng: 80.123456 },
+    seeduwa: { lat: 7.148497, lng: 79.873276 },
+    minuwangoda: { lat: 7.182689, lng: 79.961171 },
+    divulapitiya: { lat: 7.222404, lng: 80.017613 },
+    katunayake: { lat: 7.222445, lng: 80.017625 },
+    udugampola: { lat: 7.120498, lng: 79.983923 },
+    kadawatha: { lat: 7.006685, lng: 79.958184 },
+    kochchikade: { lat: 7.274298, lng: 79.862597 },
+    paliyagoda: { lat: 6.960975, lng: 79.880949 },
+    boralesgamuwa: { lat: 6.837024, lng: 79.903572 },
+    thalawathugoda: { lat: 6.877865, lng: 79.939505 },
+    moratuwa: { lat: 6.787022, lng: 79.884759 },
+    borella: { lat: 6.915059, lng: 79.881394 },
+    padukka: { lat: 6.847305, lng: 80.102153 },
+    beruwala: { lat: 7.222348, lng: 80.017553 },
+    bandaragama: { lat: 6.714853, lng: 79.989208 },
+    maggona: { lat: 7.222444, lng: 80.017606 },
+    panadura: { lat: 6.713372, lng: 79.906452 },
+    soysapura: { lat: 6.805538, lng: 79.885157 },
+
+    // Additional district centers (keep these as fallbacks)
     colombo: { lat: 6.9271, lng: 79.8612 },
     gampaha: { lat: 7.0873, lng: 79.999 },
     kalutara: { lat: 6.5854, lng: 79.9607 },
     kandy: { lat: 7.2906, lng: 80.6337 },
-    matale: { lat: 7.4675, lng: 80.6234 },
-    "nuwara eliya": { lat: 6.9497, lng: 80.7891 },
     galle: { lat: 6.0535, lng: 80.221 },
-    matara: { lat: 5.9549, lng: 80.555 },
-    hambantota: { lat: 6.1429, lng: 81.1212 },
-    jaffna: { lat: 9.6615, lng: 80.0255 },
-    trincomalee: { lat: 8.5874, lng: 81.2152 },
-    batticaloa: { lat: 7.731, lng: 81.6747 },
-    anuradhapura: { lat: 8.3114, lng: 80.4037 },
-    polonnaruwa: { lat: 7.9403, lng: 81.0188 },
-    kurunegala: { lat: 7.4818, lng: 80.3609 },
-    puttalam: { lat: 8.0362, lng: 79.8283 },
-    ratnapura: { lat: 6.7056, lng: 80.3847 },
-    badulla: { lat: 6.9934, lng: 81.055 },
-
-    // Colombo suburbs & areas
-    "mount lavinia": { lat: 6.8412, lng: 79.8638 },
-    dehiwala: { lat: 6.8562, lng: 79.8742 },
-    nugegoda: { lat: 6.8649, lng: 79.8997 },
-    maharagama: { lat: 6.8484, lng: 79.9265 },
-    kotte: { lat: 6.8905, lng: 79.9018 },
-    battaramulla: { lat: 6.8989, lng: 79.9181 },
-    rajagiriya: { lat: 6.9089, lng: 79.8913 },
-    moratuwa: { lat: 6.773, lng: 79.8816 },
-    panadura: { lat: 6.7133, lng: 79.9026 },
-    negombo: { lat: 7.2008, lng: 79.8358 },
-    kelaniya: { lat: 6.9553, lng: 79.922 },
-    kaduwela: { lat: 6.9333, lng: 79.9833 },
-    homagama: { lat: 6.8444, lng: 80.0022 },
-    piliyandala: { lat: 6.8011, lng: 79.9222 },
-    kadawatha: { lat: 7.0083, lng: 79.9533 },
-    "ja-ela": { lat: 7.0742, lng: 79.8917 },
-    wattala: { lat: 6.9889, lng: 79.8917 },
   };
 
   const normalizedLocation = locationName.toLowerCase().trim();

@@ -367,10 +367,9 @@ SELECT
         ELSE 'current'
     END AS "telemetryStatus",
 
-    -- Calculate telemetry age
     CASE
         WHEN lt._PROCESSED_AT IS NOT NULL
-        THEN DATEDIFF(hour, lt._PROCESSED_AT, CURRENT_TIMESTAMP())
+        THEN ROUND(DATEDIFF(minute, lt._PROCESSED_AT, CURRENT_TIMESTAMP()) / 60.0, 2)
         ELSE NULL
     END AS "telemetryAgeHours",
 

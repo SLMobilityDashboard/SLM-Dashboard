@@ -930,7 +930,7 @@ export default function SwapManagementTab({ BMSID }: { BMSID: string }) {
                     </p>
                     <p className="text-xs text-slate-500">Out</p>
                   </div>
-                  <TrendingUp className="h-5 w-5 text-emerald-400" />
+                  {/* <TrendingUp className="h-5 w-5 text-emerald-400" /> */}
                   <div>
                     <p className="text-2xl font-bold text-emerald-400">
                       {analytics.metrics.avgBatteryHealthIn.toFixed(1)}%
