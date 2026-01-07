@@ -46,6 +46,35 @@ interface VehicleSession {
   ERROREVENTS: number;
 }
 
+interface BSSChargeData {
+  DEVICE_ID: string;
+  CABINET_NO: number;
+  SLOT_NO: number;
+  CTIME: number;
+  CHARGE_LEVEL: number;
+  TEMP: number;
+  VOLTAGE: number;
+    CURRENT_VALUE: number;  // Changed from CURRENT
+  CHARGER_STATUS: string;
+}
+
+interface BSSChargingSession {
+  DEVICE_ID: string;
+  CABINET_NO: number;
+  SLOT_NO: number;
+  STARTTIME: number;
+  ENDTIME: number;
+  DURATION: number;
+  STARTCHARGE: number;
+  ENDCHARGE: number;
+  CHARGE_GAINED: number;
+  AVGTEMP: number;
+  AVGVOLTAGE: number;
+  AVGCURRENT: number;
+  MAXTEMP: number;
+  CHARGER_STATUS: string;
+}
+
 interface DiagnosticMetrics {
   totalVehicles: number;
   totalSwaps: number;
@@ -57,6 +86,9 @@ interface DiagnosticMetrics {
   thermalPerformance: string;
   voltageStability: string;
   overallHealth: string;
+  totalChargingSessions?: number;
+  avgChargingDuration?: number;
+  totalChargeGained?: number;
 }
 
 interface BatteryFilters {
@@ -176,11 +208,13 @@ function consolidateRapidSwaps(swaps: VehicleSwapEvent[], timeWindowMinutes: num
 
 function useBatteryDataByBMS(
   bmsId: string,
-  filters: BatteryFilters = { timeRange: 168 }
+  filters: BatteryFilters = { timeRange: 50 }
 ) {
   const [batteryData, setBatteryData] = useState<TboxData[]>([]);
   const [vehicleSwaps, setVehicleSwaps] = useState<VehicleSwapEvent[]>([]);
   const [vehicleSessions, setVehicleSessions] = useState<VehicleSession[]>([]);
+  const [bssChargeData, setBssChargeData] = useState<BSSChargeData[]>([]);
+  const [bssChargingSessions, setBssChargingSessions] = useState<BSSChargingSession[]>([]);
   const [diagnostics, setDiagnostics] = useState<DiagnosticMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -188,7 +222,6 @@ function useBatteryDataByBMS(
 
   const fetchSnowflakeData = useCallback(async (query: string, queryName?: string) => {
     try {
-      console.log(`Executing ${queryName || 'Query'}:`, query.substring(0, 200) + '...');
       
       const response = await fetch("/api/testquery", {
         method: "POST",
@@ -201,25 +234,13 @@ function useBatteryDataByBMS(
       const result = await response.json();
       
       if (!response.ok) {
-        console.error(`${queryName || 'Query'} failed with status ${response.status}:`, result);
         throw new Error(`Snowflake API Error (${response.status}): ${JSON.stringify(result)}`);
       }
 
-      console.log(`${queryName || 'Query'} success - rows returned:`, 
-        Array.isArray(result) ? result.length : 
-        result.data ? result.data.length : 
-        result.rows ? result.rows.length : 'unknown');
-      
-      // Handle different response formats
+    
       const data = result.data || result.rows || result || [];
       
-      // If no data and this is an important query, log more details
-      if (data.length === 0 && queryName === 'batteryTelemetry') {
-        console.warn('No telemetry data found. Check:');
-        console.warn('1. Does BMSID exist in the database?');
-        console.warn('2. Is the time range correct?');
-        console.warn('3. Are there records in TBOX_MESSAGE_DATA?');
-      }
+     
       
       return data;
     } catch (error) {
@@ -228,7 +249,6 @@ function useBatteryDataByBMS(
     }
   }, []);
 
-  // Unit normalization function - converts raw sensor values to proper units
   const normalizeUnits = useCallback((data: any[]): TboxData[] => {
     return data.map(row => ({
       ...row,
@@ -249,7 +269,6 @@ function useBatteryDataByBMS(
     }));
   }, []);
 
-  // Normalize session data units
   const normalizeSessionUnits = useCallback((sessions: any[]): VehicleSession[] => {
     return sessions.map(session => ({
       ...session,
@@ -279,7 +298,9 @@ function useBatteryDataByBMS(
       conditions.push(`CTIME >= ${filters.startTimestamp}`);
       conditions.push(`CTIME <= ${filters.endTimestamp}`);
     } else if (filters.timeRange) {
-      conditions.push(`CTIME >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '${filters.timeRange} HOURS')`);
+      // Calculate timestamp in JavaScript to avoid Snowflake EXTRACT(EPOCH) syntax issues
+      const hoursAgo = Math.floor(Date.now() / 1000) - (filters.timeRange * 3600);
+      conditions.push(`CTIME >= ${hoursAgo}`);
     }
 
     if (filters.minBatteryTemp) {
@@ -301,8 +322,24 @@ function useBatteryDataByBMS(
     return conditions;
   }, [filters]);
 
+  const buildBSSFilterConditions = useCallback(() => {
+    const conditions: string[] = [];
+
+    if (filters.startTimestamp && filters.endTimestamp) {
+      conditions.push(`CT >= ${filters.startTimestamp}`);
+      conditions.push(`CT <= ${filters.endTimestamp}`);
+    } else if (filters.timeRange) {
+      // Calculate timestamp in JavaScript to avoid Snowflake EXTRACT(EPOCH) syntax issues
+      const hoursAgo = Math.floor(Date.now() / 1000) - (filters.timeRange * 3600);
+      conditions.push(`CT >= ${hoursAgo}`);
+    }
+
+    return conditions;
+  }, [filters]);
+
   const queries = useMemo(() => {
     const filterConditions = buildFilterConditions();
+    const bssFilterConditions = buildBSSFilterConditions();
     
     const cleanedBmsId = bmsId
       .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
@@ -313,6 +350,11 @@ function useBatteryDataByBMS(
       COALESCE(BMSID, ''), 
       '[\\x00-\\x1F\\x7F-\\x9F]', '', 1, 0, 'c'
     ))) = '${cleanedBmsId}' AND ${filterConditions.join(' AND ')}`;
+
+    const bssWhereClause = `WHERE UPPER(TRIM(REGEXP_REPLACE(
+      COALESCE(BID, ''), 
+      '[\\x00-\\x1F\\x7F-\\x9F]', '', 1, 0, 'c'
+    ))) = '${cleanedBmsId}' AND ${bssFilterConditions.join(' AND ')}`;
 
     return {
       debugBmsIds: `
@@ -355,6 +397,117 @@ function useBatteryDataByBMS(
         FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
         ${whereClause}
         ORDER BY CTIME ASC
+      `,
+
+      bssChargeData: `
+        SELECT 
+          DEVICE_ID,
+          _CABINET_NO as CABINET_NO,
+          NO as SLOT_NO,
+          CT as CTIME,
+          COALESCE(KWH, BATTERY) as CHARGE_LEVEL,
+          CELL_TEMP as TEMP,
+          V as VOLTAGE,
+          I as CURRENT_VALUE,  -- Changed from CURRENT to CURRENT_VALUE
+          S as CHARGER_STATUS
+        FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
+        ${bssWhereClause}
+          AND IS_BATTERY = '1'
+          AND (KWH IS NOT NULL OR BATTERY IS NOT NULL)
+        ORDER BY CT ASC
+      `,
+
+      bssChargingSessions: `
+        WITH charging_sessions AS (
+          SELECT 
+            DEVICE_ID,
+            BID,
+            _CABINET_NO as CABINET_NO,
+            NO as SLOT_NO,
+            CT,
+            COALESCE(KWH, BATTERY) as CHARGE_LEVEL,
+            CELL_TEMP as TEMP,
+            V as VOLTAGE,
+            I as CURRENT_VALUE,  -- Changed from CURRENT to CURRENT_VALUE
+            S as CHARGER_STATUS,
+            LAG(CT) OVER (PARTITION BY DEVICE_ID, _CABINET_NO, NO ORDER BY CT) as PREV_CT,
+            LAG(COALESCE(KWH, BATTERY)) OVER (PARTITION BY DEVICE_ID, _CABINET_NO, NO ORDER BY CT) as PREV_CHARGE,
+            LAG(S) OVER (PARTITION BY DEVICE_ID, _CABINET_NO, NO ORDER BY CT) as PREV_STATUS
+          FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
+          ${bssWhereClause}
+            AND IS_BATTERY = '1'
+            AND (KWH IS NOT NULL OR BATTERY IS NOT NULL)
+        ),
+        session_boundaries AS (
+          SELECT
+            *,
+            CASE 
+              WHEN PREV_CT IS NULL OR (CT - PREV_CT) > 3600 THEN 1
+              WHEN (CHARGER_STATUS IN ('charging', 'charged')) AND 
+                  (PREV_STATUS NOT IN ('charging', 'charged') OR PREV_STATUS IS NULL) THEN 1
+              WHEN CHARGE_LEVEL > PREV_CHARGE + 5 THEN 1
+              ELSE 0
+            END as IS_SESSION_START
+          FROM charging_sessions
+        ),
+        sessions_with_id AS (
+          SELECT
+            *,
+            SUM(IS_SESSION_START) OVER (PARTITION BY DEVICE_ID, CABINET_NO, SLOT_NO ORDER BY CT) as SESSION_ID
+          FROM session_boundaries
+        )
+        SELECT
+          DEVICE_ID,
+          CABINET_NO,
+          SLOT_NO,
+          MIN(CT) as STARTTIME,
+          MAX(CT) as ENDTIME,
+          ROUND((MAX(CT) - MIN(CT)) / 3600.0, 2) as DURATION,
+          MIN(CHARGE_LEVEL) as STARTCHARGE,
+          MAX(CHARGE_LEVEL) as ENDCHARGE,
+          (MAX(CHARGE_LEVEL) - MIN(CHARGE_LEVEL)) as CHARGE_GAINED,
+          ROUND(AVG(NULLIF(TEMP, 0)), 1) as AVGTEMP,
+          ROUND(AVG(NULLIF(VOLTAGE, 0)), 1) as AVGVOLTAGE,
+          ROUND(AVG(ABS(NULLIF(CURRENT_VALUE, 0))), 1) as AVGCURRENT,  -- Updated here too
+          ROUND(MAX(NULLIF(TEMP, 0)), 1) as MAXTEMP,
+          MAX(CHARGER_STATUS) as CHARGER_STATUS,
+          MAX(BID) as BID
+        FROM sessions_with_id
+        GROUP BY DEVICE_ID, CABINET_NO, SLOT_NO, SESSION_ID
+        HAVING (MAX(CT) - MIN(CT)) >= 300
+          AND (MAX(CHARGE_LEVEL) - MIN(CHARGE_LEVEL)) > 1
+        ORDER BY STARTTIME DESC
+        LIMIT 100
+      `,
+            
+      bssDebugQuery: `
+        SELECT 
+          COUNT(*) as TOTAL_BSS_RECORDS,
+          COUNT(DISTINCT BID) as UNIQUE_BIDS,
+          COUNT(DISTINCT DEVICE_ID) as UNIQUE_DEVICES,
+          COUNT(CASE WHEN IS_BATTERY = 'Y' THEN 1 END) as BATTERY_PRESENT_RECORDS,
+          COUNT(CASE WHEN KWH IS NOT NULL THEN 1 END) as KWH_NOT_NULL,
+          COUNT(CASE WHEN BATTERY IS NOT NULL THEN 1 END) as BATTERY_NOT_NULL,
+          MIN(CT) as EARLIEST_TIME,
+          MAX(CT) as LATEST_TIME
+        FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
+        WHERE ${bssFilterConditions.join(' AND ')}
+      `,
+      
+      bssSampleBIDs: `
+        SELECT DISTINCT 
+          BID,
+          DEVICE_ID,
+          COUNT(*) as RECORD_COUNT,
+          MIN(CT) as FIRST_SEEN,
+          MAX(CT) as LAST_SEEN
+        FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
+        WHERE ${bssFilterConditions.join(' AND ')}
+          AND BID IS NOT NULL
+          AND IS_BATTERY = 'Y'
+        GROUP BY BID, DEVICE_ID
+        ORDER BY RECORD_COUNT DESC
+        LIMIT 20
       `,
 
       vehicleSwapDetection: `
@@ -458,8 +611,8 @@ function useBatteryDataByBMS(
                  vs.CHARGE_CONSUMED, vs.ACTIVE_DAYS
       `
     };
-  }, [bmsId, buildFilterConditions]);
-
+  }, [bmsId, buildFilterConditions, buildBSSFilterConditions]);
+  
   const loadData = useCallback(async () => {
     if (!bmsId) {
       setLoading(false);
@@ -471,8 +624,6 @@ function useBatteryDataByBMS(
     setDebugInfo(null);
     
     try {
-      // First, check table statistics
-      console.log('=== STEP 1: Checking table statistics ===');
       let tableStats;
       try {
         const tableCheckQuery = `
@@ -484,19 +635,13 @@ function useBatteryDataByBMS(
           FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
         `;
         tableStats = await fetchSnowflakeData(tableCheckQuery, "tableCheck");
-        console.log('Table statistics:', tableStats[0]);
       } catch (tableError) {
         console.error('Table check failed:', tableError);
       }
       
-      // Second, run debug query to see what BMSID values exist
-      console.log('=== STEP 2: Checking available BMSID values in time range ===');
-      console.log('Searching for BMSID:', bmsId);
-      console.log('Filter conditions:', buildFilterConditions());
       
       try {
         const debugResult = await fetchSnowflakeData(queries.debugBmsIds, "debugBmsIds");
-        console.log('Available BMSID/TBOXID combinations:', debugResult);
         
         setDebugInfo(prev => ({
           ...prev,
@@ -509,19 +654,15 @@ function useBatteryDataByBMS(
           throw new Error(`No data found in time range. Table has ${tableStats?.[0]?.TOTAL_RECORDS || 0} total records, but none match the current filters.`);
         }
       } catch (debugError) {
-        console.warn('Debug query failed:', debugError);
         setError(`Debug check failed: ${debugError instanceof Error ? debugError.message : String(debugError)}`);
       }
       
-      // Fetch and normalize telemetry data
-      console.log('=== STEP 3: Fetching telemetry data ===');
       let telemetryResult;
       try {
         telemetryResult = await fetchSnowflakeData(queries.batteryTelemetry, "batteryTelemetry");
         
         if (!telemetryResult || telemetryResult.length === 0) {
-          console.warn('No telemetry data returned from main query');
-          console.warn('Trying simplified query without BMSID filter...');
+    
           
           const simplifiedQuery = `
             SELECT
@@ -543,20 +684,68 @@ function useBatteryDataByBMS(
             const availableTboxIds = [...new Set(telemetryResult.map((r: any) => r.TBOXID))];
             
             setError(`BMSID "${bmsId}" not found. Available BMSID values: ${availableBmsIds.join(', ') || 'None found'}. Available TBoxes: ${availableTboxIds.join(', ')}`);
-            console.log('Sample record structure:', telemetryResult[0]);
           } else {
             throw new Error('No data found even without BMSID filter. Check time range and filter conditions.');
           }
         }
       } catch (telemetryError: any) {
-        console.error('Telemetry query failed:', telemetryError);
         throw new Error(`Failed to fetch telemetry data: ${telemetryError.message}`);
       }
       
       const normalizedTelemetry = normalizeUnits(telemetryResult || []);
       setBatteryData(normalizedTelemetry);
       
-      // Fetch and process vehicle swaps with error handling
+      // Fetch BSS charge data
+      let bssData: BSSChargeData[] = [];
+      try {
+        console.log('Fetching BSS charge data...', queries.bssChargeData);
+        const bssResult = await fetchSnowflakeData(queries.bssChargeData, "bssChargeData");
+        bssData = (bssResult || []).map((entry: any) => ({
+          DEVICE_ID: entry.DEVICE_ID,
+          CABINET_NO: safeNumber(entry.CABINET_NO),
+          SLOT_NO: safeNumber(entry.SLOT_NO),
+          CTIME: safeNumber(entry.CTIME),
+          CHARGE_LEVEL: safeNumber(entry.CHARGE_LEVEL),
+          TEMP: safeNumber(entry.TEMP),
+          VOLTAGE: safeNumber(entry.VOLTAGE),
+          CURRENT_VALUE: safeNumber(entry.CURRENT_VALUE),
+          CHARGER_STATUS: entry.CHARGER_STATUS || 'unknown',
+        }));
+        setBssChargeData(bssData);
+      } catch (bssError) {
+        console.warn('BSS charge data query failed, continuing without BSS data:', bssError);
+        setBssChargeData([]);
+      } 
+      
+      // Fetch BSS charging sessions
+      let chargingSessions: BSSChargingSession[] = [];
+      try {
+        console.log('Fetching BSS charging sessions...', queries.bssChargingSessions);
+        const bssResult = await fetchSnowflakeData(queries.bssChargingSessions, "bssChargingSessions");
+        chargingSessions = (bssResult || []).map((session: any) => ({
+          DEVICE_ID: session.DEVICE_ID,
+          CABINET_NO: safeNumber(session.CABINET_NO),
+          SLOT_NO: safeNumber(session.SLOT_NO),
+          STARTTIME: safeNumber(session.STARTTIME),
+          ENDTIME: safeNumber(session.ENDTIME),
+          DURATION: safeNumber(session.DURATION),
+          STARTCHARGE: safeNumber(session.STARTCHARGE),
+          ENDCHARGE: safeNumber(session.ENDCHARGE),
+          CHARGE_GAINED: safeNumber(session.CHARGE_GAINED),
+          AVGTEMP: safeNumber(session.AVGTEMP),
+          AVGVOLTAGE: safeNumber(session.AVGVOLTAGE),
+          AVGCURRENT: safeNumber(session.AVGCURRENT),
+          MAXTEMP: safeNumber(session.MAXTEMP),
+          CHARGER_STATUS: session.CHARGER_STATUS || 'unknown',
+        }));
+
+        
+        setBssChargingSessions(chargingSessions);
+      } catch (bssError) {
+        console.warn('BSS charging session query failed, continuing without BSS data:', bssError);
+        setBssChargingSessions([]);
+      }
+      
       let consolidatedSwaps: VehicleSwapEvent[] = [];
       try {
         const swapResult = await fetchSnowflakeData(queries.vehicleSwapDetection, "vehicleSwapDetection");
@@ -564,22 +753,18 @@ function useBatteryDataByBMS(
         consolidatedSwaps = consolidateRapidSwaps(rawSwaps, 10);
         setVehicleSwaps(consolidatedSwaps);
       } catch (swapError) {
-        console.warn('Vehicle swap detection failed, continuing without swap data:', swapError);
         setVehicleSwaps([]);
       }
       
-      // Fetch and normalize vehicle sessions with error handling
       let normalizedSessions: VehicleSession[] = [];
       try {
         const sessionResult = await fetchSnowflakeData(queries.vehicleSessionAnalysis, "vehicleSessionAnalysis");
         normalizedSessions = normalizeSessionUnits(sessionResult || []);
         setVehicleSessions(normalizedSessions);
       } catch (sessionError) {
-        console.warn('Vehicle session analysis failed, continuing without session data:', sessionError);
         setVehicleSessions([]);
       }
       
-      // Fetch system diagnostics with error handling
       try {
         const diagnosticResult = await fetchSnowflakeData(queries.systemDiagnostics, "systemDiagnostics");
         const rawDiagnostics = diagnosticResult?.[0];
@@ -613,21 +798,23 @@ function useBatteryDataByBMS(
               return soh > 90 && criticalEvents < 5 ? "Excellent" :
                      soh > 80 && criticalEvents < 15 ? "Good" :
                      soh > 70 ? "Fair" : "Poor";
-            })()
+            })(),
+            totalChargingSessions: chargingSessions.length,
+            avgChargingDuration: chargingSessions.length > 0 ?
+              chargingSessions.reduce((sum, s) => sum + s.DURATION, 0) / chargingSessions.length : 0,
+            totalChargeGained: chargingSessions.reduce((sum, s) => sum + s.CHARGE_GAINED, 0),
           };
           setDiagnostics(processedDiagnostics);
         }
       } catch (diagnosticError) {
-        console.warn('System diagnostics failed, continuing without diagnostic data:', diagnosticError);
         setDiagnostics(null);
       }
-      
-    
       
       setDebugInfo({
         telemetryCount: normalizedTelemetry.length,
         consolidatedSwapCount: consolidatedSwaps.length,
         sessionCount: normalizedSessions.length,
+        chargingSessionCount: chargingSessions.length,
         timeRange: filters.timeRange,
         startTimestamp: filters.startTimestamp,
         endTimestamp: filters.endTimestamp,
@@ -636,21 +823,21 @@ function useBatteryDataByBMS(
           from: new Date(filters.startTimestamp * 1000).toISOString(),
           to: new Date(filters.endTimestamp * 1000).toISOString()
         } : null,
-        sampleData: normalizedTelemetry[0] // For debugging unit conversion
+        sampleData: normalizedTelemetry[0]
       });
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to load battery data";
-      console.error("Battery data loading error:", error);
       setError(errorMessage);
       setBatteryData([]);
       setVehicleSwaps([]);
       setVehicleSessions([]);
+      setBssChargingSessions([]);
       setDiagnostics(null);
     } finally {
       setLoading(false);
     }
-  }, [queries, fetchSnowflakeData, filters, bmsId, normalizeUnits, normalizeSessionUnits]);
+  }, [queries, fetchSnowflakeData, filters, bmsId, normalizeUnits, normalizeSessionUnits, buildFilterConditions]);
 
   useEffect(() => {
     if (bmsId) {
@@ -660,6 +847,7 @@ function useBatteryDataByBMS(
       setBatteryData([]);
       setVehicleSwaps([]);
       setVehicleSessions([]);
+      setBssChargingSessions([]);
       setDiagnostics(null);
       setError(null);
       setDebugInfo(null);
@@ -670,6 +858,8 @@ function useBatteryDataByBMS(
     batteryData,
     vehicleSwaps,
     vehicleSessions,
+    bssChargeData,
+    bssChargingSessions,
     diagnostics,
     loading,
     error,
@@ -682,6 +872,8 @@ export type {
   TboxData,
   VehicleSwapEvent,
   VehicleSession,
+  BSSChargeData,
+  BSSChargingSession,
   DiagnosticMetrics,
   BatteryFilters
 };

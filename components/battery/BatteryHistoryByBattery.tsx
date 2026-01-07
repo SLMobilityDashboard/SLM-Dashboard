@@ -11,6 +11,8 @@ import {
   AreaChart,
   Area,
   ComposedChart,
+  Scatter,
+  Brush,
 } from "recharts";
 import {
   Battery,
@@ -33,12 +35,15 @@ import {
   Calendar,
   X,
   Truck,
+  BatteryCharging,
 } from "lucide-react";
 
 // Import the optimized hook and types
 import useBatteryDataByBMS, {
   TboxData,
   BatteryFilters,
+  BSSChargingSession,
+  BSSChargeData,
 } from "@/hooks/useBatteryDataByBMS";
 
 interface ProcessedDataPoint extends TboxData {
@@ -47,6 +52,13 @@ interface ProcessedDataPoint extends TboxData {
   continuousCurrent?: number;
   continuousCellDiff?: number;
   swapTransition?: boolean;
+  // BSS data fields
+  isBSS?: boolean;
+  bssDeviceId?: string;
+  bssChargeLevel?: number;
+  bssTemp?: number;
+  bssVoltage?: number;
+  bssCurrent?: number;
 }
 
 // Helper function to safely convert values to numbers
@@ -54,6 +66,59 @@ const safeNumber = (value: any, defaultValue: number = 0): number => {
   if (value === null || value === undefined) return defaultValue;
   const num = Number(value);
   return isNaN(num) ? defaultValue : num;
+};
+
+// Function to sample BSS data when charge is high
+const sampleBSSData = (
+  bssData: BSSChargeData[],
+  threshold: number = 90,
+  maxPoints: number = 10
+): BSSChargeData[] => {
+  if (bssData.length <= maxPoints) return bssData;
+
+  const result: BSSChargeData[] = [];
+  let lastCharge = -1;
+  let pointsAboveThreshold = 0;
+  let samplingInterval = Math.ceil(bssData.length / maxPoints);
+
+  for (let i = 0; i < bssData.length; i++) {
+    const point = bssData[i];
+    const charge = safeNumber(point.CHARGE_LEVEL);
+
+    if (charge >= threshold) {
+      pointsAboveThreshold++;
+      // When above threshold, only add points when charge changes significantly
+      if (lastCharge === -1 || Math.abs(charge - lastCharge) >= 1) {
+        result.push(point);
+        lastCharge = charge;
+      } else if (i % samplingInterval === 0) {
+        // Sample every nth point
+        result.push(point);
+      }
+    } else {
+      // Below threshold, add all points
+      result.push(point);
+    }
+  }
+
+  // If we still have too many points, do simple sampling
+  if (result.length > maxPoints * 3) {
+    const finalSamplingInterval = Math.ceil(result.length / maxPoints);
+    return result.filter((_, index) => index % finalSamplingInterval === 0);
+  }
+
+  return result;
+};
+
+// Function to sample TBox data for better performance
+const sampleTBoxData = (
+  tboxData: ProcessedDataPoint[],
+  maxPoints: number = 500
+): ProcessedDataPoint[] => {
+  if (tboxData.length <= maxPoints) return tboxData;
+
+  const samplingInterval = Math.ceil(tboxData.length / maxPoints);
+  return tboxData.filter((_, index) => index % samplingInterval === 0);
 };
 
 // Function to create continuous data with smooth vehicle swap transitions
@@ -108,6 +173,81 @@ const createContinuousData = (data: TboxData[]): ProcessedDataPoint[] => {
   return processedData;
 };
 
+// Function to merge TBox and BSS data for combined timeline
+const mergeTBoxAndBSSData = (
+  tboxData: ProcessedDataPoint[],
+  bssData: BSSChargeData[]
+): ProcessedDataPoint[] => {
+  if (tboxData.length === 0 && bssData.length === 0) return [];
+
+  // Sample BSS data when charge is high
+  const sampledBSSData = sampleBSSData(bssData, 90, 100);
+
+  // Create a map to hold all data points by timestamp
+  const timestampMap = new Map<number, ProcessedDataPoint>();
+
+  // Add TBox data points
+  tboxData.forEach((point) => {
+    const time = safeNumber(point.CTIME);
+    timestampMap.set(time, {
+      ...point,
+      isBSS: false,
+    });
+  });
+
+  // Add sampled BSS data points
+  sampledBSSData.forEach((point) => {
+    const time = safeNumber(point.CTIME);
+    const existingPoint = timestampMap.get(time);
+
+    if (existingPoint) {
+      // Merge BSS data with existing TBox point
+      timestampMap.set(time, {
+        ...existingPoint,
+        bssDeviceId: point.DEVICE_ID,
+        bssChargeLevel: safeNumber(point.CHARGE_LEVEL),
+        bssTemp: safeNumber(point.TEMP),
+        bssVoltage: safeNumber(point.VOLTAGE),
+        bssCurrent: safeNumber(point.CURRENT_VALUE),
+      });
+    } else {
+      // Create new point for BSS-only data
+      timestampMap.set(time, {
+        CTIME: time,
+        BATTEMP: 0,
+        BATVOLT: 0,
+        BATCELLDIFFMAX: 0,
+        BATCYCLECOUNT: 0,
+        BATSOH: 0,
+        BATPERCENT: safeNumber(point.CHARGE_LEVEL),
+        BATCURRENT: 0,
+        BATTERY_ERROR: "",
+        MOTORRPM: 0,
+        TBOXID: "BSS",
+        TOTAL_DISTANCE_KM: 0,
+        STATE: "CHARGING",
+        THROTTLEPERCENT: 0,
+        isBSS: true,
+        bssDeviceId: point.DEVICE_ID,
+        bssChargeLevel: safeNumber(point.CHARGE_LEVEL),
+        bssTemp: safeNumber(point.TEMP),
+        bssVoltage: safeNumber(point.VOLTAGE),
+        bssCurrent: safeNumber(point.CURRENT_VALUE),
+        continuousTemp: 0,
+        continuousVoltage: 0,
+        continuousCurrent: 0,
+        continuousCellDiff: 0,
+        swapTransition: false,
+      });
+    }
+  });
+
+  // Convert back to array and sort by time
+  return Array.from(timestampMap.values()).sort(
+    (a, b) => safeNumber(a.CTIME) - safeNumber(b.CTIME)
+  );
+};
+
 // Function to create TBox-segmented data for area charts
 const createTBoxSegmentedData = (
   data: ProcessedDataPoint[],
@@ -115,11 +255,13 @@ const createTBoxSegmentedData = (
 ) => {
   if (!data.length) return [];
 
-  const uniqueTBoxIds = [...new Set(data.map((d) => d.TBOXID))];
+  const uniqueTBoxIds = [
+    ...new Set(data.map((d) => d.TBOXID).filter((id) => id !== "BSS")),
+  ];
   const segmentedData = [];
 
   for (let i = 0; i < data.length; i++) {
-    const dataPoint = { ...data[i] };
+    const dataPoint = { ...data[i] } as any;
 
     uniqueTBoxIds.forEach((tboxId) => {
       const key = `${metric}_${tboxId}`;
@@ -159,16 +301,39 @@ const createTBoxSegmentedData = (
       }
     });
 
+    // Add BSS data fields for charts
+    if (data[i].isBSS) {
+      const bssKey = `${metric}_BSS`;
+      switch (metric) {
+        case "temp":
+          dataPoint[bssKey] = safeNumber(data[i].bssTemp);
+          break;
+        case "voltage":
+          dataPoint[bssKey] = safeNumber(data[i].bssVoltage);
+          break;
+        case "current":
+          dataPoint[bssKey] = safeNumber(data[i].bssCurrent);
+          break;
+        case "charge":
+          dataPoint[bssKey] = safeNumber(data[i].bssChargeLevel);
+          break;
+        default:
+          dataPoint[bssKey] = null;
+      }
+    }
+
     segmentedData.push(dataPoint);
   }
 
   return segmentedData;
 };
 
-// Enhanced tooltip
+// Enhanced tooltip to show both TBox and BSS data
 const BatteryTooltip: React.FC<any> = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload as ProcessedDataPoint;
+    const isBSS = data.isBSS;
+    const deviceType = isBSS ? "BSS Charging Station" : "Vehicle";
 
     return (
       <div className="rounded-lg border border-slate-700 shadow-xl bg-slate-900 p-4 max-w-xs">
@@ -176,11 +341,18 @@ const BatteryTooltip: React.FC<any> = ({ active, payload, label }) => {
           {new Date(safeNumber(data.CTIME) * 1000).toLocaleString()}
         </div>
         <div className="text-xs text-slate-300 mb-2 flex items-center gap-2 flex-wrap">
-          <span className="text-green-400 font-mono flex items-center gap-1">
-            <Truck className="w-3 h-3" />
-            {data.TBOXID}
-          </span>
-          {data.swapTransition && (
+          {isBSS ? (
+            <span className="text-yellow-400 font-mono flex items-center gap-1">
+              <BatteryCharging className="w-3 h-3" />
+              BSS: {data.bssDeviceId}
+            </span>
+          ) : (
+            <span className="text-green-400 font-mono flex items-center gap-1">
+              <Truck className="w-3 h-3" />
+              TBox: {data.TBOXID}
+            </span>
+          )}
+          {data.swapTransition && !isBSS && (
             <>
               <span>|</span>
               <span className="text-purple-400 font-semibold">
@@ -188,24 +360,83 @@ const BatteryTooltip: React.FC<any> = ({ active, payload, label }) => {
               </span>
             </>
           )}
+          {!isBSS && (
+            <>
+              <span>|</span>
+              <span className="text-blue-400">
+                {safeNumber(data.TOTAL_DISTANCE_KM).toFixed(1)}km
+              </span>
+            </>
+          )}
           <span>|</span>
-          <span className="text-blue-400">
-            {safeNumber(data.TOTAL_DISTANCE_KM).toFixed(1)}km
-          </span>
+          <span className="text-slate-400">{deviceType}</span>
         </div>
-        <div className="grid gap-1 text-xs max-h-32 overflow-y-auto">
-          {payload.map(
-            (entry: any, index: number) =>
-              entry.value !== null && (
-                <div key={index} className="flex justify-between">
-                  <span style={{ color: entry.color }}>{entry.name}:</span>
-                  <span className="font-medium text-slate-200">
-                    {typeof entry.value === "number"
-                      ? entry.value.toFixed(2)
-                      : entry.value}
-                  </span>
-                </div>
-              )
+
+        {/* Charge Level (Common for both) */}
+        <div className="grid gap-2 text-xs max-h-40 overflow-y-auto">
+          <div className="flex justify-between items-center">
+            <span className={isBSS ? "text-yellow-400" : "text-green-400"}>
+              {isBSS ? "BSS" : "Vehicle"} Charge Level:
+            </span>
+            <span className="font-medium text-slate-200">
+              {(isBSS
+                ? safeNumber(data.bssChargeLevel)
+                : safeNumber(data.BATPERCENT)
+              ).toFixed(1)}
+              %
+            </span>
+          </div>
+
+          {!isBSS && (
+            <>
+              <div className="flex justify-between">
+                <span className="text-orange-400">Battery Temp:</span>
+                <span className="font-medium text-slate-200">
+                  {safeNumber(data.BATTEMP).toFixed(1)}°C
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-blue-400">Battery Voltage:</span>
+                <span className="font-medium text-slate-200">
+                  {safeNumber(data.BATVOLT).toFixed(1)}V
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-cyan-400">Current:</span>
+                <span className="font-medium text-slate-200">
+                  {safeNumber(data.BATCURRENT).toFixed(1)}A
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-purple-400">Battery Health:</span>
+                <span className="font-medium text-slate-200">
+                  {safeNumber(data.BATSOH).toFixed(1)}%
+                </span>
+              </div>
+            </>
+          )}
+
+          {isBSS && data.bssTemp && data.bssTemp > 0 && (
+            <>
+              <div className="flex justify-between">
+                <span className="text-orange-400">BSS Temp:</span>
+                <span className="font-medium text-slate-200">
+                  {safeNumber(data.bssTemp).toFixed(1)}°C
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-blue-400">BSS Voltage:</span>
+                <span className="font-medium text-slate-200">
+                  {safeNumber(data.bssVoltage).toFixed(1)}V
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-cyan-400">BSS Current:</span>
+                <span className="font-medium text-slate-200">
+                  {safeNumber(data.bssCurrent).toFixed(1)}A
+                </span>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -341,7 +572,7 @@ const FiltersPanel: React.FC<{
     const endTime = new Date(defaultEnd + "T23:59:59").getTime() / 1000;
 
     setPendingFilters({
-      timeRange: 350,
+      timeRange: 168,
       startTimestamp: startTime,
       endTimestamp: endTime,
       includeIdleData: false,
@@ -494,16 +725,19 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
   const [selectedBmsId, setSelectedBmsId] = useState<string>(BMSID || "");
   const [inputBmsId, setInputBmsId] = useState<string>("");
   const [filters, setFilters] = useState<BatteryFilters>({
-    timeRange: 350, // 7 days default
+    timeRange: 168, // 7 days default
     includeIdleData: false,
   });
   const [showFilters, setShowFilters] = useState(false);
+  const [showBSSPatterns, setShowBSSPatterns] = useState(true);
 
   // Use the optimized hook for battery-centered data
   const {
     batteryData,
     vehicleSwaps,
     vehicleSessions,
+    bssChargeData,
+    bssChargingSessions,
     diagnostics,
     loading,
     error,
@@ -513,12 +747,20 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
 
   // Process the data for continuous charts
   const processedData = useMemo(() => {
-    return createContinuousData(batteryData);
+    const data = createContinuousData(batteryData);
+    return sampleTBoxData(data, 500);
   }, [batteryData]);
 
-  // Color mapping for different TBox IDs
+  // Merge TBox and BSS data
+  const mergedData = useMemo(() => {
+    return mergeTBoxAndBSSData(processedData, bssChargeData);
+  }, [processedData, bssChargeData]);
+
+  // Color mapping for different TBox IDs and BSS
   const tboxColors = useMemo(() => {
-    const uniqueTboxIds = [...new Set(batteryData.map((d) => d.TBOXID))];
+    const uniqueTboxIds = [
+      ...new Set(batteryData.map((d) => d.TBOXID).filter((id) => id)),
+    ];
     const colors = [
       "#10b981", // green
       "#3b82f6", // blue
@@ -531,27 +773,35 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
       "#ec4899", // pink
       "#6366f1", // indigo
     ];
-    return uniqueTboxIds.reduce((acc, tboxId, index) => {
-      acc[tboxId] = colors[index % colors.length];
-      return acc;
-    }, {} as Record<string, string>);
+
+    const colorMap: Record<string, string> = {};
+
+    // Assign colors to TBoxes
+    uniqueTboxIds.forEach((tboxId, index) => {
+      colorMap[tboxId] = colors[index % colors.length];
+    });
+
+    // Assign a distinct color for BSS
+    colorMap["BSS"] = "#FFD700"; // Gold color for BSS
+
+    return colorMap;
   }, [batteryData]);
 
   // Create segmented data for each metric
   const temperatureData = useMemo(
-    () => createTBoxSegmentedData(processedData, "temp"),
-    [processedData]
+    () => createTBoxSegmentedData(mergedData, "temp"),
+    [mergedData]
   );
   const voltageData = useMemo(
-    () => createTBoxSegmentedData(processedData, "voltage"),
-    [processedData]
+    () => createTBoxSegmentedData(mergedData, "voltage"),
+    [mergedData]
   );
   const currentData = useMemo(
-    () => createTBoxSegmentedData(processedData, "current"),
-    [processedData]
+    () => createTBoxSegmentedData(mergedData, "current"),
+    [mergedData]
   );
   const cellDiffData = useMemo(() => {
-    const data = createTBoxSegmentedData(processedData, "cellDiff");
+    const data = createTBoxSegmentedData(mergedData, "cellDiff");
     const hasData = data.some((d: any) => {
       return Object.keys(d).some(
         (key) => key.startsWith("cellDiff_") && d[key] !== null && d[key] !== 0
@@ -562,9 +812,16 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
       console.log("Sample data point:", processedData[0]);
     }
     return data;
-  }, [processedData]);
+  }, [mergedData, processedData]);
 
-  const uniqueTBoxIds = [...new Set(batteryData.map((d) => d.TBOXID))];
+  // Get unique TBox IDs (excluding BSS)
+  const uniqueTBoxIds = [
+    ...new Set(
+      batteryData.map((d) => d.TBOXID).filter((id) => id && id !== "BSS")
+    ),
+  ];
+  const hasBSSData = bssChargeData.length > 0;
+  const bssDataPoints = mergedData.filter((d) => d.isBSS).length;
 
   // Handle BMS ID submission
   const handleBmsSubmit = () => {
@@ -678,7 +935,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
   }
 
   // No data available - only show after loading completes
-  if (!loading && batteryData.length === 0) {
+  if (!loading && batteryData.length === 0 && bssChargeData.length === 0) {
     return (
       <div className="min-h-screen text-slate-100 flex items-center justify-center">
         <div className="text-center max-w-lg">
@@ -748,13 +1005,32 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                   </span>
                   <span>•</span>
                   <span>{vehicleSwaps.length} vehicle swaps detected</span>
+                  <span>•</span>
+                  <span>{bssChargingSessions.length} charging sessions</span>
+                  {hasBSSData && <span>•</span>}
+                  {hasBSSData && (
+                    <span>{bssDataPoints} BSS points (sampled)</span>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
           {/* RIGHT SIDE (Filters) */}
-          <div className="flex justify-start lg:justify-end">
+          <div className="flex justify-start lg:justify-end items-center gap-3">
+            {hasBSSData && (
+              <button
+                onClick={() => setShowBSSPatterns(!showBSSPatterns)}
+                className={`px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${
+                  showBSSPatterns
+                    ? "bg-yellow-600 hover:bg-yellow-700 text-white"
+                    : "bg-slate-700 hover:bg-slate-600 text-slate-200"
+                }`}
+              >
+                <BatteryCharging className="w-4 h-4" />
+                {showBSSPatterns ? "Hide BSS" : "Show BSS"}
+              </button>
+            )}
             <FiltersPanel
               filters={filters}
               onFiltersChange={setFilters}
@@ -784,7 +1060,9 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
               </h2>
               <div className="text-sm text-slate-400">
                 {safeNumber(diagnostics.totalVehicles)} vehicles used |{" "}
-                {safeNumber(diagnostics.totalSwaps)} vehicle swaps
+                {safeNumber(diagnostics.totalSwaps)} vehicle swaps |{" "}
+                {safeNumber(diagnostics.totalChargingSessions)} charging
+                sessions
               </div>
             </div>
 
@@ -802,10 +1080,10 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                 <div className="text-slate-400 text-sm">Vehicle Swaps</div>
               </div>
               <div className="text-center">
-                <div className="text-2xl font-bold text-green-400">
-                  {safeNumber(diagnostics.swapFrequency).toFixed(1)}
+                <div className="text-2xl font-bold text-white">
+                  {safeNumber(diagnostics.totalChargingSessions)}
                 </div>
-                <div className="text-slate-400 text-sm">Swaps/Day</div>
+                <div className="text-slate-400 text-sm">BSS Sessions</div>
               </div>
               <div className="text-center">
                 <div className="text-2xl font-bold text-orange-400">
@@ -829,27 +1107,65 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
           </div>
         )}
 
-        {/* Battery Usage Timeline by Vehicle */}
+        {/* Battery Usage Timeline by Vehicle + BSS Charging */}
         <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
             <Activity className="w-5 h-5 text-purple-400" />
-            Battery Usage Timeline by Vehicle
+            Battery Charge Pattern (Vehicle + BSS Charging)
           </h3>
 
-          {/* Vehicle Legend */}
-          <div className="flex flex-wrap gap-3 mb-4 p-3 bg-slate-800/50 rounded-lg">
-            {Object.entries(tboxColors).map(([tboxId, color]) => (
-              <div key={tboxId} className="flex items-center gap-2">
-                <Truck className="w-4 h-4" style={{ color }} />
-                <span className="text-sm text-slate-300 font-mono">
-                  TBox {tboxId}
-                </span>
-              </div>
-            ))}
+          {/* Legend */}
+          <div className="flex flex-wrap gap-4 mb-4 p-3 bg-slate-800/50 rounded-lg items-center">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-slate-400 font-semibold">
+                Vehicles:
+              </span>
+            </div>
+            {Object.entries(tboxColors)
+              .filter(([id]) => id !== "BSS")
+              .slice(0, 5)
+              .map(([tboxId, color]) => (
+                <div key={tboxId} className="flex items-center gap-2">
+                  <Truck className="w-4 h-4" style={{ color }} />
+                  <span className="text-sm text-slate-300 font-mono">
+                    TBox {tboxId}
+                  </span>
+                </div>
+              ))}
+            {Object.entries(tboxColors).filter(([id]) => id !== "BSS").length >
+              5 && (
+              <span className="text-xs text-slate-500">
+                +
+                {Object.entries(tboxColors).filter(([id]) => id !== "BSS")
+                  .length - 5}{" "}
+                more
+              </span>
+            )}
+            {hasBSSData && (
+              <>
+                <div className="h-4 w-px bg-slate-700 mx-2" />
+                <div className="flex items-center gap-2">
+                  <BatteryCharging
+                    className="w-4 h-4"
+                    style={{ color: "#FFD700" }}
+                  />
+                  <span className="text-sm text-slate-300">BSS Charging</span>
+                </div>
+              </>
+            )}
+            {bssChargingSessions.length > 0 && (
+              <>
+                <div className="h-4 w-px bg-slate-700 mx-2" />
+                <div className="flex items-center gap-2">
+                  <Battery className="w-4 h-4 text-white" />
+                  <span className="text-sm text-slate-300">BSS Session</span>
+                </div>
+              </>
+            )}
           </div>
 
-          <ResponsiveContainer width="100%" height={400}>
-            <ComposedChart data={processedData}>
+          <ResponsiveContainer width="100%" height={450}>
+            <ComposedChart data={mergedData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
               <XAxis
                 dataKey="CTIME"
@@ -865,7 +1181,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
               <YAxis
                 yAxisId="percent"
                 tick={{ fontSize: 12, fill: "#94a3b8" }}
-                domain={[0, 100]}
+                domain={[-15, 100]}
                 label={{
                   value: "Charge %",
                   angle: -90,
@@ -886,28 +1202,65 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                 }}
               />
               <Tooltip content={<BatteryTooltip />} />
+              <Brush dataKey="CTIME" height={30} stroke="#475569" />
 
+              {/* TBox Charge Pattern (Line) */}
+              <Line
+                yAxisId="percent"
+                type="monotone"
+                dataKey={(data: ProcessedDataPoint) =>
+                  !data.isBSS ? safeNumber(data.BATPERCENT) : null
+                }
+                stroke="#10b981"
+                strokeWidth={2}
+                dot={false}
+                name="Vehicle Charge (%)"
+                connectNulls={true}
+                activeDot={{ r: 4, strokeWidth: 0 }}
+              />
+
+              {/* TBox Charge Level Area */}
               <Area
                 yAxisId="percent"
                 type="monotone"
                 dataKey={(data: ProcessedDataPoint) =>
-                  safeNumber(data.BATPERCENT)
+                  !data.isBSS ? safeNumber(data.BATPERCENT) : null
                 }
                 fill="#10b981"
-                fillOpacity={0.3}
-                stroke="#10b981"
-                strokeWidth={2}
-                name="Charge Level (%)"
+                fillOpacity={0.1}
+                stroke="none"
+                name="Vehicle Charge Area"
+                connectNulls={true}
               />
 
+              {/* BSS Charge Pattern (Gold line) */}
+              {showBSSPatterns && hasBSSData && (
+                <Line
+                  yAxisId="percent"
+                  type="monotone"
+                  dataKey={(data: ProcessedDataPoint) =>
+                    data.isBSS ? safeNumber(data.bssChargeLevel) : null
+                  }
+                  stroke="#FFD700"
+                  strokeWidth={2}
+                  dot={false}
+                  name="BSS Charge (%)"
+                  connectNulls={true}
+                  strokeDasharray="3 3"
+                />
+              )}
+
+              {/* SOH Line */}
               <Line
                 yAxisId="soh"
                 type="monotone"
-                dataKey={(data: ProcessedDataPoint) => safeNumber(data.BATSOH)}
+                dataKey={(data: ProcessedDataPoint) =>
+                  !data.isBSS ? safeNumber(data.BATSOH) : null
+                }
                 stroke="#8b5cf6"
-                strokeWidth={3}
+                strokeWidth={1.5}
                 dot={false}
-                name="Battery Health (%)"
+                name="Battery Health (SOH) %"
               />
 
               {/* Vehicle indicator line at the bottom */}
@@ -917,33 +1270,85 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                   yAxisId="percent"
                   type="stepAfter"
                   dataKey={(data: ProcessedDataPoint) =>
-                    data.TBOXID === tboxId ? -5 : null
+                    !data.isBSS && data.TBOXID === tboxId ? -5 : null
                   }
                   stroke={tboxColors[tboxId]}
-                  strokeWidth={6}
+                  strokeWidth={3}
                   dot={false}
                   connectNulls={false}
                   name={`TBox ${tboxId} Active`}
                 />
               ))}
 
+              {/* BSS Charging Sessions indicator */}
+              {bssChargingSessions.map((session, idx) => (
+                <ReferenceLine
+                  key={`bss_${idx}`}
+                  segment={[
+                    { x: session.STARTTIME, y: -10 },
+                    { x: session.ENDTIME, y: -10 },
+                  ]}
+                  stroke="#ffffff"
+                  strokeWidth={2}
+                  yAxisId="percent"
+                  ifOverflow="extendDomain"
+                  label={{
+                    value: `⚡${session.CHARGE_GAINED.toFixed(0)}%`,
+                    position: "center",
+                    fontSize: 8,
+                    fill: "#ffffff",
+                    fontWeight: "bold",
+                  }}
+                />
+              ))}
+
               {vehicleSwaps.map((swap, idx) => (
                 <ReferenceLine
-                  key={idx}
+                  key={`swap_${idx}`}
                   x={safeNumber(swap.TIMESTAMP)}
                   stroke="#a855f7"
                   strokeDasharray="2 2"
-                  strokeWidth={2}
+                  strokeWidth={1}
                   label={{
                     value: "SWAP",
                     position: "top",
-                    fontSize: 10,
+                    fontSize: 8,
                     fill: "#a855f7",
                   }}
                 />
               ))}
             </ComposedChart>
           </ResponsiveContainer>
+
+          <div className="mt-4 flex justify-center">
+            <div className="text-xs text-slate-400 flex items-center gap-4">
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded-full bg-green-400"></div>
+                <span>Vehicle Charge Pattern</span>
+              </div>
+              {hasBSSData && (
+                <div className="flex items-center gap-1">
+                  <div
+                    className="w-3 h-3 rounded-full"
+                    style={{ backgroundColor: "#FFD700" }}
+                  ></div>
+                  <span>BSS Charge Pattern</span>
+                </div>
+              )}
+              <div className="flex items-center gap-1">
+                <div className="w-3 h-3 rounded-full bg-purple-500"></div>
+                <span>Battery Health (SOH)</span>
+              </div>
+            </div>
+          </div>
+
+          {hasBSSData && (
+            <div className="mt-2 text-center text-xs text-yellow-400">
+              BSS data sampled: {bssChargeData.length} → {bssDataPoints} points
+              (reduced by{" "}
+              {Math.round((1 - bssDataPoints / bssChargeData.length) * 100)}%)
+            </div>
+          )}
         </div>
 
         {/* Main Analytics Grid */}
@@ -952,7 +1357,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
               <Thermometer className="w-5 h-5 text-orange-400" />
-              Battery Temperature by Vehicle
+              Battery Temperature (Vehicle + BSS)
             </h3>
             <ResponsiveContainer width="100%" height={320}>
               <AreaChart data={temperatureData}>
@@ -994,6 +1399,19 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                   />
                 ))}
 
+                {/* BSS Temperature */}
+                {hasBSSData && (
+                  <Area
+                    type="monotone"
+                    dataKey="temp_BSS"
+                    stroke="#FFD700"
+                    fill="#FFD700"
+                    fillOpacity={0.4}
+                    name="BSS Temp (°C)"
+                    connectNulls={false}
+                  />
+                )}
+
                 <ReferenceLine
                   y={45}
                   stroke="#f59e0b"
@@ -1021,7 +1439,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                 {vehicleSwaps.map((swap, idx) => (
                   <ReferenceLine
                     key={idx}
-                    x={safeNumber(swap.TIMESTAMP)}
+                    x={safeNumber(swap.timestamp)}
                     stroke="#a855f7"
                     strokeDasharray="1 1"
                     strokeWidth={1}
@@ -1036,7 +1454,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
               <Zap className="w-5 h-5 text-blue-400" />
-              Battery Voltage by Vehicle
+              Battery Voltage (Vehicle + BSS)
             </h3>
             <ResponsiveContainer width="100%" height={320}>
               <AreaChart data={voltageData}>
@@ -1079,6 +1497,19 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                   />
                 ))}
 
+                {/* BSS Voltage */}
+                {hasBSSData && (
+                  <Area
+                    type="monotone"
+                    dataKey="voltage_BSS"
+                    stroke="#FFD700"
+                    fill="#FFD700"
+                    fillOpacity={0.4}
+                    name="BSS Voltage (V)"
+                    connectNulls={false}
+                  />
+                )}
+
                 <ReferenceLine
                   y={44}
                   stroke="#ef4444"
@@ -1106,7 +1537,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                 {vehicleSwaps.map((swap, idx) => (
                   <ReferenceLine
                     key={idx}
-                    x={safeNumber(swap.TIMESTAMP)}
+                    x={safeNumber(swap.timestamp)}
                     stroke="#a855f7"
                     strokeDasharray="1 1"
                     strokeWidth={1}
@@ -1196,7 +1627,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                   {vehicleSwaps.map((swap, idx) => (
                     <ReferenceLine
                       key={idx}
-                      x={safeNumber(swap.TIMESTAMP)}
+                      x={safeNumber(swap.timestamp)}
                       stroke="#a855f7"
                       strokeDasharray="1 1"
                       strokeWidth={1}
@@ -1225,7 +1656,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
               <Gauge className="w-5 h-5 text-green-400" />
-              Battery Current by Vehicle
+              Battery Current (Vehicle + BSS)
             </h3>
             <ResponsiveContainer width="100%" height={320}>
               <AreaChart data={currentData}>
@@ -1267,6 +1698,19 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                   />
                 ))}
 
+                {/* BSS Current */}
+                {hasBSSData && (
+                  <Area
+                    type="monotone"
+                    dataKey="current_BSS"
+                    stroke="#FFD700"
+                    fill="#FFD700"
+                    fillOpacity={0.4}
+                    name="BSS Current (A)"
+                    connectNulls={false}
+                  />
+                )}
+
                 <ReferenceLine
                   y={0}
                   stroke="#64748b"
@@ -1305,7 +1749,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                 {vehicleSwaps.map((swap, idx) => (
                   <ReferenceLine
                     key={idx}
-                    x={safeNumber(swap.TIMESTAMP)}
+                    x={safeNumber(swap.timestamp)}
                     stroke="#a855f7"
                     strokeDasharray="1 1"
                     strokeWidth={1}
@@ -1418,6 +1862,94 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
             </div>
           </div>
 
+          {/* BSS Charging Sessions Table */}
+          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
+            <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
+              <Battery className="w-5 h-5 text-white" />
+              BSS Charging Sessions
+            </h3>
+            {bssChargingSessions.length > 0 ? (
+              <div className="overflow-x-auto">
+                <div className="max-h-96 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600 hover:scrollbar-thumb-slate-500">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-800/50 sticky top-0">
+                      <tr>
+                        <th className="text-left p-3 text-slate-300 font-medium">
+                          Station
+                        </th>
+                        <th className="text-right p-3 text-slate-300 font-medium">
+                          Duration
+                        </th>
+                        <th className="text-right p-3 text-slate-300 font-medium">
+                          Charge Gain
+                        </th>
+                        <th className="text-right p-3 text-slate-300 font-medium">
+                          Avg Temp
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bssChargingSessions.slice(0, 20).map((session, idx) => (
+                        <tr
+                          key={idx}
+                          className="border-t border-slate-700/50 hover:bg-slate-800/30 transition-colors"
+                        >
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <Battery className="w-3 h-3 text-white" />
+                              <span className="font-mono text-white text-xs">
+                                {session.DEVICE_ID} ({session.CABINET_NO}-
+                                {session.SLOT_NO})
+                              </span>
+                            </div>
+                          </td>
+                          <td className="p-3 text-right text-slate-300">
+                            {safeNumber(session.DURATION).toFixed(1)}h
+                          </td>
+                          <td className="p-3 text-right">
+                            <span className="font-semibold text-green-400">
+                              +{safeNumber(session.CHARGE_GAINED).toFixed(1)}%
+                            </span>
+                          </td>
+                          <td className="p-3 text-right">
+                            <span
+                              className={`${
+                                safeNumber(session.MAXTEMP) > 60
+                                  ? "text-red-400"
+                                  : safeNumber(session.MAXTEMP) > 45
+                                  ? "text-yellow-400"
+                                  : "text-slate-300"
+                              }`}
+                            >
+                              {safeNumber(session.AVGTEMP).toFixed(1)}°C
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {bssChargingSessions.length > 20 && (
+                    <div className="text-center text-slate-400 text-xs py-2">
+                      Showing first 20 of {bssChargingSessions.length} sessions
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center text-slate-400 py-8">
+                  <Battery className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>No BSS charging sessions found</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    No charging data available for this time range
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6">
           {/* Vehicle Swap Events */}
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
@@ -1498,11 +2030,13 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
           <div className="flex justify-center items-center gap-6 text-xs">
             <span>Battery: {selectedBmsId}</span>
             <span>•</span>
-            <span>Data Points: {batteryData.length}</span>
+            <span>Data Points: {mergedData.length}</span>
             <span>•</span>
             <span>Time Range: {filters.timeRange}h</span>
             <span>•</span>
             <span>Vehicles Used: {safeNumber(diagnostics?.totalVehicles)}</span>
+            <span>•</span>
+            <span>BSS Sessions: {bssChargingSessions.length}</span>
             {diagnostics && (
               <>
                 <span>•</span>
