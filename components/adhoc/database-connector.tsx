@@ -227,12 +227,12 @@ export function DatabaseConnector({
     tables: [],
     config: {
       account:
-        process.env.NEXT_PUBLIC_SNOWFLAKE_ACCOUNT ||
+        process.env.ADHOC_SNOWFLAKE_ACCOUNT ||
         "default-account.snowflakecomputing.com",
-      warehouse: "ADHOC",
-      database: "ADHOC",
-      schema: "PUBLIC",
-      role: "SYSADMIN",
+      warehouse: process.env.ADHOC_SNOWFLAKE_WAREHOUSE || "ADHOC",
+      database: process.env.ADHOC_SNOWFLAKE_DATABASE || "ADHOC",
+      schema: process.env.ADHOC_SNOWFLAKE_SCHEMA || "PUBLIC",
+      role: process.env.ADHOC_SNOWFLAKE_ROLE || "SYSADMIN",
     },
   };
 

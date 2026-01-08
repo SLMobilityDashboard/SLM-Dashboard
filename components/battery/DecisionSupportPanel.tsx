@@ -97,7 +97,7 @@ const DecisionSupportPanel = ({
                     decisionMetrics.replacementUrgency
                   )} text-sm px-3 py-1`}
                 >
-                  {decisionMetrics.replacementUrgency.toUpperCase()}
+                  {decisionMetrics.replacementUrgency?.toUpperCase() ?? "N/A"}
                 </Badge>
               </div>
             </div>
@@ -134,7 +134,8 @@ const DecisionSupportPanel = ({
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-300">Delayed Replacement:</span>
                   <span className="text-orange-400 font-medium">
-                    ${decisionMetrics.costOfDelayedReplacement.toFixed(2)}
+                    $
+                    {(decisionMetrics.costOfDelayedReplacement ?? 0).toFixed(2)}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm pt-1 border-t border-slate-700">
@@ -142,8 +143,8 @@ const DecisionSupportPanel = ({
                   <span className="text-red-400 font-bold">
                     $
                     {(
-                      decisionMetrics.costOfDelayedReplacement -
-                      decisionMetrics.costOfReplacement
+                      (decisionMetrics.costOfDelayedReplacement ?? 0) -
+                      (decisionMetrics.costOfReplacement ?? 0)
                     ).toFixed(2)}
                   </span>
                 </div>
@@ -182,7 +183,8 @@ const DecisionSupportPanel = ({
         <div className="pt-4 border-t border-slate-700">
           <h3 className="text-slate-200 font-medium mb-3 flex items-center gap-2">
             <FileText className="h-4 w-4 text-blue-400" />
-            Recommended Actions ({decisionMetrics.recommendedActions.length})
+            Recommended Actions (
+            {decisionMetrics.recommendedActions?.length ?? 0})
           </h3>
           <div className="space-y-2">
             {decisionMetrics.recommendedActions.map((action, index) => (

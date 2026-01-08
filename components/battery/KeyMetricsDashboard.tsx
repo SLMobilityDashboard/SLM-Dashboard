@@ -55,8 +55,9 @@ const KeyMetricsDashboard = ({ battery }: KeyMetricsDashboardProps) => {
             <p className="text-slate-400 text-xs">Capacity</p>
           </div>
           <p className="text-2xl font-bold text-slate-100">
-            {battery.currentCapacity.toFixed(1)}
+            {(battery.currentCapacity ?? 0).toFixed(1)}Ah
           </p>
+
           <p className="text-slate-500 text-xs mt-1">
             of {battery.nominalCapacity}Ah
           </p>
@@ -102,14 +103,14 @@ const KeyMetricsDashboard = ({ battery }: KeyMetricsDashboardProps) => {
             <p className="text-slate-400 text-xs">Temperature</p>
           </div>
           <p className="text-2xl font-bold text-slate-100">
-            {battery.batTemp.toFixed(1)}°C
+            {(battery.batTemp ?? 0).toFixed(1)}°C
           </p>
           <p
             className={`text-xs mt-1 ${
-              battery.batTemp > 40 ? "text-red-400" : "text-slate-500"
+              (battery.batTemp ?? 0) > 40 ? "text-red-400" : "text-slate-500"
             }`}
           >
-            {battery.batTemp > 40 ? "High temp" : "Normal"}
+            {(battery.batTemp ?? 0) > 40 ? "High temp" : "Normal"}
           </p>
         </CardContent>
       </Card>

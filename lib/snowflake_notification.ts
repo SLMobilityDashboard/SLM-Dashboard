@@ -114,12 +114,12 @@ class SnowflakeNotificationManager {
 
       const connection = snowflake.createConnection({
         account: process.env.SNOWFLAKE_ACCOUNT,
-        username: snowflakeUsername,
+        username: 'SYSNOTIFICATION',
         privateKey: privateKey,
-        warehouse: 'ADHOC',
+        warehouse: 'LOG_WH',
         database: 'ADHOC',
         schema: 'PUBLIC',
-        role: 'SYSADMIN',
+        role: 'ACCOUNTADMIN',
         authenticator: 'SNOWFLAKE_JWT',
       });
 
