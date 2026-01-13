@@ -61,6 +61,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { hasMenuAccess } from "@/lib/auth/roles";
+import path from "path";
 
 export function MainSidebar() {
   const pathname = usePathname();
@@ -189,6 +190,11 @@ export function MainSidebar() {
           label: "Battery 360",
           icon: <Battery className="h-4 w-4" />,
         },
+        {
+          path: "/bss",
+          label: "BSS 360",
+          icon: <Building2 className="h-4 w-4" />,
+        }
       ],
     },
     {
