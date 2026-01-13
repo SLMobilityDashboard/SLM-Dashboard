@@ -42,7 +42,6 @@ import {
 import useBatteryDataByBMS, {
   TboxData,
   BatteryFilters,
-  BSSChargingSession,
   BSSChargeData,
 } from "@/hooks/useBatteryDataByBMS";
 
@@ -1204,63 +1203,64 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
               <Tooltip content={<BatteryTooltip />} />
               <Brush dataKey="CTIME" height={30} stroke="#475569" />
 
-              {/* TBox Charge Pattern (Line) */}
+              {/* TBox Charge Pattern (Line) - Only show for TBox data */}
               <Line
                 yAxisId="percent"
                 type="monotone"
                 dataKey={(data: ProcessedDataPoint) =>
-                  !data.isBSS ? safeNumber(data.BATPERCENT) : null
+                  !data.isBSS ? safeNumber(data.BATPERCENT) : undefined
                 }
                 stroke="#10b981"
                 strokeWidth={2}
                 dot={false}
                 name="Vehicle Charge (%)"
-                connectNulls={true}
+                connectNulls={false} // Changed from true to false
                 activeDot={{ r: 4, strokeWidth: 0 }}
               />
 
-              {/* TBox Charge Level Area */}
+              {/* TBox Charge Level Area - Only show for TBox data */}
               <Area
                 yAxisId="percent"
                 type="monotone"
                 dataKey={(data: ProcessedDataPoint) =>
-                  !data.isBSS ? safeNumber(data.BATPERCENT) : null
+                  !data.isBSS ? safeNumber(data.BATPERCENT) : undefined
                 }
                 fill="#10b981"
                 fillOpacity={0.1}
                 stroke="none"
                 name="Vehicle Charge Area"
-                connectNulls={true}
+                connectNulls={false} // Changed from true to false
               />
 
-              {/* BSS Charge Pattern (Gold line) */}
+              {/* BSS Charge Pattern (Separate lines for each BSS station) */}
               {showBSSPatterns && hasBSSData && (
                 <Line
                   yAxisId="percent"
                   type="monotone"
                   dataKey={(data: ProcessedDataPoint) =>
-                    data.isBSS ? safeNumber(data.bssChargeLevel) : null
+                    data.isBSS ? safeNumber(data.bssChargeLevel) : undefined
                   }
                   stroke="#FFD700"
                   strokeWidth={2}
                   dot={false}
                   name="BSS Charge (%)"
-                  connectNulls={true}
+                  connectNulls={false} // Changed from true to false
                   strokeDasharray="3 3"
                 />
               )}
 
-              {/* SOH Line */}
+              {/* SOH Line - Only for TBox data */}
               <Line
                 yAxisId="soh"
                 type="monotone"
                 dataKey={(data: ProcessedDataPoint) =>
-                  !data.isBSS ? safeNumber(data.BATSOH) : null
+                  !data.isBSS ? safeNumber(data.BATSOH) : undefined
                 }
                 stroke="#8b5cf6"
                 strokeWidth={1.5}
                 dot={false}
                 name="Battery Health (SOH) %"
+                connectNulls={false} // Added this to prevent connections
               />
 
               {/* Vehicle indicator line at the bottom */}
@@ -1270,7 +1270,7 @@ const BatteryHistoryByBattery: React.FC<{ BMSID: string }> = ({ BMSID }) => {
                   yAxisId="percent"
                   type="stepAfter"
                   dataKey={(data: ProcessedDataPoint) =>
-                    !data.isBSS && data.TBOXID === tboxId ? -5 : null
+                    !data.isBSS && data.TBOXID === tboxId ? -5 : undefined
                   }
                   stroke={tboxColors[tboxId]}
                   strokeWidth={3}

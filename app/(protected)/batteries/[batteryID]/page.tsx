@@ -26,6 +26,7 @@ import CellAnalysisTab from "@/components/battery/CellAnalysisTab";
 import CapacitySohTab from "@/components/battery/CapacitySohTab";
 import BatteryHistoryByBattery from "@/components/battery/BatteryHistoryByBattery";
 import SwapManagementTab from "@/components/battery/SwapManagementTab";
+import BatteryHomeChargingHistory from "@/components/battery/BatteryHomeChargingHistory";
 import { useParams } from "next/navigation";
 
 // Import health score utilities
@@ -601,7 +602,12 @@ const BatteryDetailAnalytics = () => {
 
             <TabsTrigger
               value="cells"
-              className="data-[state=active]:bg-slate-800 data-[state=active]:text-slate-100"
+                disabled
+                className="
+                  data-[state=active]:bg-slate-800
+                  data-[state=active]:text-slate-100
+                  disabled:opacity-50
+                  disabled:cursor-not-allowed"
             >
               <Battery className="w-4 h-4 mr-2" />
               Cell & Cycle
@@ -625,7 +631,12 @@ const BatteryDetailAnalytics = () => {
 
             <TabsTrigger
               value="charging"
-              className="data-[state=active]:bg-slate-800 data-[state=active]:text-slate-100"
+                disabled
+                className="
+                  data-[state=active]:bg-slate-800
+                  data-[state=active]:text-slate-100
+                  disabled:opacity-50
+                  disabled:cursor-not-allowed"
             >
               <PlugZap className="w-4 h-4 mr-2" />
               Home Charging
@@ -641,7 +652,12 @@ const BatteryDetailAnalytics = () => {
 
             <TabsTrigger
               value="maintenance"
-              className="data-[state=active]:bg-slate-800 data-[state=active]:text-slate-100"
+                disabled
+                className="
+                  data-[state=active]:bg-slate-800
+                  data-[state=active]:text-slate-100
+                  disabled:opacity-50
+                  disabled:cursor-not-allowed"
             >
               <Wrench className="w-4 h-4 mr-2" />
               Maintenance
@@ -680,6 +696,7 @@ const BatteryDetailAnalytics = () => {
               <p className="text-lg">Home Charging is under development.</p>
               <p className="text-sm">Please check back later.</p>
             </div>
+            {/* <BatteryHomeChargingHistory BMSID={bmsId} /> */}
           </TabsContent>
 
           <TabsContent value="charge" className="mt-0">
