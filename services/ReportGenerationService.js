@@ -1,20 +1,21 @@
 import fetch from "node-fetch";
 
-// Array of API keys from environment variables
-const GROQ_API_KEYS = [
-  process.env.GROQ_API_KEY1,
-  process.env.GROQ_API_KEY2,
-  process.env.GROQ_API_KEY3,
-  process.env.GROQ_API_KEY4,
-  process.env.GROQ_API_KEY5,
-  process.env.GROQ_API_KEY6,
-].filter((key) => key); // Remove any undefined keys
+// Read the number of API keys from environment
+const API_KEY_COUNT = parseInt(process.env.GROQ_API_KEY_COUNT || "1", 10);
+
+// Dynamically build array of API keys based on the count
+const GROQ_API_KEYS = Array.from({ length: API_KEY_COUNT }, (_, i) => {
+  const keyName = `GROQ_API_KEY${i + 1}`;
+  return process.env[keyName];
+}).filter((key) => key); // Remove any undefined keys
 
 if (GROQ_API_KEYS.length === 0) {
   throw new Error(
-    "No GROQ API keys found. Please set GROQ_API_KEY1, GROQ_API_KEY2, etc."
+    `No GROQ API keys found. Please set GROQ_API_KEY_COUNT and GROQ_API_KEY1, GROQ_API_KEY2, etc.`
   );
 }
+
+console.log(`Loaded ${GROQ_API_KEYS.length} API key(s) out of ${API_KEY_COUNT} configured`);
 
 // Track current key index and rate limit status
 let currentKeyIndex = 0;
