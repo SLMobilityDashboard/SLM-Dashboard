@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       snowflakeUser: status.username
     });
   } catch (error: any) {
-    console.error("[RunSQLQuery] Query execution failed:", error);
+    console.error(`[RunSQLQuery] Query execution failed for user ${finalUsername}:`, error);
     
     // Handle authentication errors specifically
     if (error.message?.includes('Authentication required')) {

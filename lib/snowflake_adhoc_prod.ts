@@ -110,9 +110,9 @@ class SnowflakeConnectionManager {
       }
 
       const connection = snowflake.createConnection({
-        account: process.env.ADHOC_SNOWFLAKE_ACCOUNT,
-        username: process.env.ADHOC_SNOWFLAKE_USERNAME,
-        password: process.env.ADHOC_SNOWFLAKE_PASSWORD,
+        account: process.env.SNOWFLAKE_ACCOUNT,
+        username: process.env.SNOWFLAKE_USERNAME,
+        privateKey: privateKey,
         warehouse: 'ADHOC',
         database: 'ADHOC',
         schema: 'PUBLIC',
