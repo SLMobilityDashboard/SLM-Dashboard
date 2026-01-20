@@ -1,4 +1,4 @@
-// lib/snowflake_adhoc.ts
+// lib/snowflake_adhoc_prod.ts
 import snowflake from 'snowflake-sdk';
 
 interface ConnectionState {
@@ -49,16 +49,13 @@ class SnowflakeConnectionManager {
     for (const [username, state] of this.connections.entries()) {
       const timeSinceLastQuery = now - state.lastQueryTime;
       
-      // If connection hasn't been used for CONNECTION_TIMEOUT since last query
       if (timeSinceLastQuery > this.CONNECTION_TIMEOUT) {
         console.log(`[Snowflake] Marking stale connection for cleanup: ${username} (inactive for ${(timeSinceLastQuery / 1000).toFixed(1)}s)`);
         connectionsToClean.push(username);
       }
     }
     
-    // Clean up marked connections
     for (const username of connectionsToClean) {
-      // Check if connection still exists before attempting cleanup
       if (this.connections.has(username)) {
         this.disconnect(username).catch(err => {
           console.error(`[Snowflake] Error cleaning up stale connection for ${username}:`, err.message);
@@ -88,7 +85,7 @@ class SnowflakeConnectionManager {
     const snowflakeUsername = this.normalizeUsername(requestedUsername);
     let state = this.connections.get(snowflakeUsername);
 
-    // Check if connection exists but is terminated - if so, remove it
+    // Check if connection exists but is terminated
     if (state && this.isConnectionTerminated(state.connection)) {
       console.log(`[Snowflake] Connection terminated for ${snowflakeUsername}, will create new one`);
       this.connections.delete(snowflakeUsername);
@@ -101,22 +98,47 @@ class SnowflakeConnectionManager {
         console.log(`[Snowflake] Requested by app user: ${requestedUsername}`);
       }
 
-      const privateKey = process.env.SNOWFLAKE_PRIVATE_KEY?.replace(/\\n/g, '\n');
-      if (!privateKey) {
-        throw new Error('SNOWFLAKE_PRIVATE_KEY environment variable is not set');
-      }
-      if (!process.env.SNOWFLAKE_ACCOUNT) {
+      // Validate environment variables
+      const account = process.env.SNOWFLAKE_ACCOUNT;
+      const username = process.env.SNOWFLAKE_USERNAME;
+      const privateKeyRaw = process.env.SNOWFLAKE_PRIVATE_KEY;
+      const warehouse = 'ADHOC';
+      const database = 'ADHOC';
+      const schema = 'PUBLIC';
+
+      if (!account) {
         throw new Error('SNOWFLAKE_ACCOUNT environment variable is not set');
       }
+      if (!username) {
+        throw new Error('SNOWFLAKE_USERNAME environment variable is not set');
+      }
+      if (!privateKeyRaw) {
+        throw new Error('SNOWFLAKE_PRIVATE_KEY environment variable is not set');
+      }
+
+      // Process private key - handle both \n and actual newlines
+      const privateKey = privateKeyRaw.replace(/\\n/g, '\n');
+
+      console.log(`[Snowflake] Creating connection with:`, {
+        account,
+        username,
+        warehouse,
+        database,
+        schema,
+        hasPrivateKey: !!privateKey,
+        privateKeyLength: privateKey.length
+      });
 
       const connection = snowflake.createConnection({
-        account: process.env.SNOWFLAKE_ACCOUNT,
-        username: process.env.SNOWFLAKE_USERNAME,
+        account: account,
+        username: username,
         privateKey: privateKey,
-        warehouse: 'ADHOC',
-        database: 'ADHOC',
-        schema: 'PUBLIC',
-        role: 'ACCOUNTADMIN',
+        warehouse: warehouse,
+        database: database,
+        schema: schema,
+        application: 'SLM_Dashboard',
+        clientSessionKeepAlive: true,
+        clientSessionKeepAliveHeartbeatFrequency: 3600,
       });
 
       state = {
@@ -138,7 +160,7 @@ class SnowflakeConnectionManager {
   }
 
   /**
-   * Connect to Snowflake with automatic reconnection for terminated connections
+   * Connect to Snowflake with automatic reconnection
    */
   public static async connect(requestedUsername?: string): Promise<void> {
     const snowflakeUsername = this.normalizeUsername(requestedUsername);
@@ -151,7 +173,7 @@ class SnowflakeConnectionManager {
       state = undefined;
     }
 
-    // Get fresh connection (will create new one if needed)
+    // Get fresh connection
     const connection = await this.getConnection(requestedUsername);
     state = this.connections.get(snowflakeUsername)!;
 
@@ -193,6 +215,11 @@ class SnowflakeConnectionManager {
         if (err) {
           state!.isConnected = false;
           console.error(`[Snowflake] ❌ Failed to connect for ${snowflakeUsername}:`, err.message);
+          console.error(`[Snowflake] Error details:`, {
+            code: err.code,
+            sqlState: err.sqlState,
+            message: err.message
+          });
           
           // Remove failed connection from pool
           this.connections.delete(snowflakeUsername);
@@ -312,7 +339,7 @@ class SnowflakeConnectionManager {
   }
 
   /**
-   * Disconnect a specific Snowflake connection
+   * Disconnect a specific connection
    */
   public static async disconnect(requestedUsername?: string): Promise<void> {
     const snowflakeUsername = this.normalizeUsername(requestedUsername);
@@ -337,7 +364,6 @@ class SnowflakeConnectionManager {
         });
       });
     } else {
-      // No connection object, just remove from map
       this.connections.delete(snowflakeUsername);
       console.log(`[Snowflake] Removed connection entry for ${snowflakeUsername}`);
     }
@@ -404,7 +430,7 @@ class SnowflakeConnectionManager {
   }
 
   /**
-   * Manually trigger cleanup (useful for testing)
+   * Manually trigger cleanup
    */
   public static manualCleanup(): void {
     console.log('[Snowflake] Manual cleanup triggered');
