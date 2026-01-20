@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import StationSelector from "@/components/bss-360/station-selector";
+import StationSelector from "@/components/bss/station-selector";
 import { Card } from "@/components/ui/card";
-import DateRangeFilter from "@/components/bss-360/date-range-filter";
-import AggregatedMetrics from "@/components/bss-360/aggregated-metrics";
+import DateRangeFilter from "@/components/bss/date-range-filter";
+import AggregatedMetrics from "@/components/bss/aggregated-metrics";
 
 export default function BSS360Page() {
   const [selectedStation, setSelectedStation] = useState<string>("BSS-001");
