@@ -1,0 +1,61 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main  # Change to your default branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Build Docker image
+        run: |
+          docker build -t nextjs-app:latest .
+      
+      - name: Save Docker image
+        run: |
+          docker save nextjs-app:latest | gzip > nextjs-app.tar.gz
+      
+      - name: Copy Docker image to EC2
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "nextjs-app.tar.gz"
+          target: "/home/${{ secrets.EC2_USERNAME }}/"
+      
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # Load the Docker image
+            docker load < /home/${{ secrets.EC2_USERNAME }}/nextjs-app.tar.gz
+            
+            # Stop and remove existing container
+            docker stop nextjs-container || true
+            docker rm nextjs-container || true
+            
+            # Run new container
+            docker run -d \
+              --name nextjs-container \
+              -p 80:3000 \
+              --restart unless-stopped \
+              nextjs-app:latest
+            
+            # Clean up
+            rm /home/${{ secrets.EC2_USERNAME }}/nextjs-app.tar.gz
+            
+            # Remove old images
+            docker image prune -af
