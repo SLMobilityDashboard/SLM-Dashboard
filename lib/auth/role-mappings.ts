@@ -21,7 +21,7 @@ export const ROLE_MAPPINGS: Record<string, Role[]> = {
   'nayanakabuddhi@gmail.com': ['FactoryManager'],// Nayanaka
   'mafaz@slmobility.com': ['FactoryManager'],    // Mafaz
   'zaid@slmobility.com': ['Admin'],              // Zaid
-  'udara@slmobility.com': ['FactoryManager'],    // Udara
+  'udara@slmobility.com': ['Admin'],             // Udara
   'janaka@ascensionit.com': ['Admin'],           // Janaka
   'dinusha@slmobility.com': ['FactoryManager'],  // Dinusha
   'rifkhan@slmobility.com': ['Admin'],           // Rifkhan
