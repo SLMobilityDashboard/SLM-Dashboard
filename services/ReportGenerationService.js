@@ -78,7 +78,7 @@ function isRateLimited(response) {
  * Make API call with a specific key
  * @param {string} prompt - The prompt to send
  * @param {string} apiKey - API key to use
- * @returns {Promise<string>} - API response content
+ * @returns {Promise<Response>} - Fetch response object
  */
 async function makeApiCall(prompt, apiKey) {
   const requestBody = {
@@ -144,30 +144,50 @@ export async function ReportGenerationService(prompt, maxRetries = 6) {
       }
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`API Error Response: ${errorText}`);
         throw new Error(
-          `Groq API request failed with status ${response.status}: ${response.statusText}`
+          `Groq API request failed with status ${response.status}: ${response.statusText}. Response: ${errorText}`
         );
       }
 
+      // Get response text first
       let rawText = await response.text();
+      
+      // Check if response is empty
+      if (!rawText || rawText.trim().length === 0) {
+        throw new Error("Groq API returned an empty response");
+      }
 
-      // Remove any code fences like ``` or ```json
-      rawText = rawText.replace(/```json\n?|```/g, "").trim();
+      console.log(`Raw API Response: ${rawText.substring(0, 200)}...`);
 
-      // Parse the outer JSON response from Groq API
-      const data = JSON.parse(rawText);
+      // Remove any code fences like ``` or ```json from the response content
+      // But first, parse the JSON to get the actual content
+      let data;
+      try {
+        data = JSON.parse(rawText);
+      } catch (parseError) {
+        console.error(`Failed to parse JSON response: ${rawText}`);
+        throw new Error(`Invalid JSON response from Groq API: ${parseError.message}`);
+      }
 
       if (!data.choices || !data.choices[0]?.message?.content) {
+        console.error(`Unexpected API response structure:`, data);
         throw new Error("Groq API response missing choices or content");
       }
+
+      let content = data.choices[0].message.content.trim();
+      
+      // Now remove code fences from the actual content
+      content = content.replace(/```sql\n?|```json\n?|```\n?/g, "").trim();
 
       console.log(`Request successful with API key ${currentKeyIndex + 1}`);
 
       // Move to next key for load balancing
       currentKeyIndex = (currentKeyIndex + 1) % GROQ_API_KEYS.length;
 
-      // Return raw SQL text (string) from LLM response
-      return data.choices[0].message.content.trim();
+      // Return the cleaned content
+      return content;
     } catch (error) {
       lastError = error;
       console.error(
