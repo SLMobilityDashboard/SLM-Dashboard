@@ -5,55 +5,46 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import SnowflakeConnectionManager from "@/lib/snowflake_adhoc_prod";
 
 export async function POST(request: NextRequest) {
-  let finalUsername: string = "system";
+  let finalUsername: string = "unknown";
   
   try {
-    // Parse request body with error handling
-    let requestBody;
+    // Add error handling for JSON parsing
+    let sql: string;
+    let requestedUsername: string | undefined;
+    
     try {
-      requestBody = await request.json();
+      const body = await request.json();
+      sql = body.sql;
+      requestedUsername = body.username;
     } catch (parseError) {
-      console.error("[RunSQLQuery] Failed to parse request body:", parseError);
+      console.error('[RunSQLQuery] Failed to parse request body:', parseError);
       return NextResponse.json(
-        { error: "Invalid JSON in request body" },
+        { error: "Invalid request body", details: "Failed to parse JSON" },
         { status: 400 }
       );
     }
 
-    const { sql, username: requestedUsername } = requestBody;
-
-    // Validate SQL query
-    if (!sql || typeof sql !== 'string' || sql.trim().length === 0) {
+    if (!sql) {
       return NextResponse.json(
-        { error: "SQL query is required and must be a non-empty string" },
+        { error: "SQL query is required" },
         { status: 400 }
       );
     }
 
-    // Get username with fallbacks
+    // Get username with fallbacks: requested username -> session user -> environment default -> "system"
     if (requestedUsername) {
+      // Use the username passed from frontend
       finalUsername = requestedUsername;
     } else {
-      try {
-        const session = await getServerSession(authOptions);
-        finalUsername = session?.user?.email || session?.user?.name || process.env.SNOWFLAKE_USERNAME || "system";
-      } catch (sessionError) {
-        console.warn("[RunSQLQuery] Failed to get session, using fallback username:", sessionError);
-        finalUsername = process.env.SNOWFLAKE_USERNAME || "system";
-      }
+      // Try to get from session
+      const session = await getServerSession(authOptions);
+      finalUsername = session?.user?.email || session?.user?.name || process.env.SNOWFLAKE_USERNAME || "system";
     }
     
     console.log(`[RunSQLQuery] User ${finalUsername} executing SQL query`);
-    console.log(`[RunSQLQuery] SQL: ${sql.substring(0, 100)}...`);
 
-    // Execute the query with timeout
-    const result = await Promise.race([
-      SnowflakeConnectionManager.executeQuery(sql, finalUsername),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Query execution timeout')), 120000) // 2 minute timeout
-      )
-    ]);
-    
+    // Execute the query with the determined username
+    const result = await SnowflakeConnectionManager.executeQuery(sql, finalUsername);
     const status = await SnowflakeConnectionManager.getConnectionStatus();
 
     return NextResponse.json({ 
@@ -61,52 +52,24 @@ export async function POST(request: NextRequest) {
       result,
       executedBy: finalUsername,
       snowflakeUser: status.username
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-      }
     });
-    
   } catch (error: any) {
-    console.error(`[RunSQLQuery] Query execution failed:`, {
-      user: finalUsername,
-      error: error.message,
-      stack: error.stack
-    });
+    console.error(`[RunSQLQuery] Query execution failed for user ${finalUsername}:`, error);
     
-    // Determine error type and appropriate status code
-    let statusCode = 500;
-    let errorMessage = "Query execution failed";
-    let errorDetails = error.message || error.toString();
-
-    // Handle specific error types
+    // Handle authentication errors specifically
     if (error.message?.includes('Authentication required')) {
-      statusCode = 401;
-      errorMessage = "Authentication required";
-    } else if (error.message?.includes('timeout')) {
-      statusCode = 504;
-      errorMessage = "Query execution timeout";
-    } else if (error.message?.includes('syntax') || error.message?.includes('SQL')) {
-      statusCode = 400;
-      errorMessage = "Invalid SQL query";
-    } else if (error.message?.includes('permission') || error.message?.includes('access')) {
-      statusCode = 403;
-      errorMessage = "Permission denied";
+      return NextResponse.json(
+        { error: "Authentication required", details: error.message },
+        { status: 401 }
+      );
     }
 
     return NextResponse.json(
       { 
-        success: false,
-        error: errorMessage, 
-        details: errorDetails,
-        executedBy: finalUsername
+        error: "Query execution failed", 
+        details: error.message || error.toString() 
       },
-      { 
-        status: statusCode,
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      }
+      { status: 500 }
     );
   }
 }
