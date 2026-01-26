@@ -5,24 +5,8 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import SnowflakeConnectionManager from "@/lib/snowflake_adhoc_prod";
 
 export async function POST(request: NextRequest) {
-  let finalUsername: string = "unknown";
-  
   try {
-    // Add error handling for JSON parsing
-    let sql: string;
-    let requestedUsername: string | undefined;
-    
-    try {
-      const body = await request.json();
-      sql = body.sql;
-      requestedUsername = body.username;
-    } catch (parseError) {
-      console.error('[RunSQLQuery] Failed to parse request body:', parseError);
-      return NextResponse.json(
-        { error: "Invalid request body", details: "Failed to parse JSON" },
-        { status: 400 }
-      );
-    }
+    const { sql, username: requestedUsername } = await request.json();
 
     if (!sql) {
       return NextResponse.json(
@@ -32,6 +16,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Get username with fallbacks: requested username -> session user -> environment default -> "system"
+    let finalUsername: string;
+    
     if (requestedUsername) {
       // Use the username passed from frontend
       finalUsername = requestedUsername;
