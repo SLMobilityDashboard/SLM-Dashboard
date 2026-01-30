@@ -3,6 +3,9 @@ import SnowflakeConnectionManager from "@/lib/snowflake";
 import crypto from "crypto";
 import { getRedis } from "@/lib/redis";
 
+export const runtime = 'nodejs'; // This is critical!
+export const dynamic = 'force-dynamic';
+
 // -------------------- Cache Helpers --------------------
 // Include date in key to automatically expire daily
 function generateQueryHash(sql: string, userId?: string): string {

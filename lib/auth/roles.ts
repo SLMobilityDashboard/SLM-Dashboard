@@ -62,6 +62,9 @@ export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
 
   // Vehicles
   '/vehicles': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
+
+  // Home Charging 360
+  '/home-charging': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
   
   // Sales Management
   '/sales': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
