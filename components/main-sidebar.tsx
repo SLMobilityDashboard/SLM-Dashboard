@@ -194,6 +194,11 @@ export function MainSidebar() {
           path: "/bss",
           label: "BSS 360",
           icon: <Building2 className="h-4 w-4" />,
+        },
+        {
+          path: "home-charging",
+          label: "Home Charging 360",
+          icon: <Home className="h-4 w-4" />,
         }
       ],
     },

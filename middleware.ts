@@ -25,7 +25,8 @@ export default withAuth(
                                 req.nextUrl.pathname.startsWith('/realtime') ||
                                 req.nextUrl.pathname.startsWith('/revenue') ||
                                 req.nextUrl.pathname.startsWith('/sales') ||
-                                req.nextUrl.pathname.startsWith('/vehicles');
+                                req.nextUrl.pathname.startsWith('/vehicles') ||
+                                req.nextUrl.pathname.startsWith('/home-charging');
         
         // Allow access to auth pages and API routes
         if (req.nextUrl.pathname.startsWith('/auth') || 

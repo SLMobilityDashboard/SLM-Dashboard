@@ -41,7 +41,7 @@ import useBatteryData, {
   BatterySession,
   DiagnosticMetrics,
   BatteryFilters,
-} from "@/hooks/useBatteryData";
+} from "@/hooks/useHomeCharging";
 
 interface ProcessedDataPoint extends TboxData {
   continuousTemp?: number;
