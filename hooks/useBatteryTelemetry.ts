@@ -878,7 +878,7 @@ export const useBatteryTelemetry = (): UseBatteryTelemetryReturn => {
         console.log(forceRefresh ? "🔄 Force refreshing data..." : "🔵 Fetching fresh data...");
         
         const fetchStartTime = performance.now();
-        const response = await fetch("/api/testquery", {
+        const response = await fetch("/api/query", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

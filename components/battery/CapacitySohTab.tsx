@@ -1323,12 +1323,12 @@ export default function CapacitySohTab({ BMSID }: { BMSID: string }) {
             LIMIT 1000`;
 
         const [tboxResponse, bssResponse] = await Promise.all([
-          fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/testquery`, {
+          fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/query`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sql: tboxSql }),
           }),
-          fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/testquery`, {
+          fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/query`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sql: bssSql }),
