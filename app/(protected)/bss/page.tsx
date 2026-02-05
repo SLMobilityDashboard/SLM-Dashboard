@@ -867,7 +867,7 @@ const BSSOverviewPage: React.FC = () => {
     try {
       console.log("Fetching comprehensive BSS data with single query...");
 
-      const response = await fetch("/api/testquery", {
+      const response = await fetch("/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 

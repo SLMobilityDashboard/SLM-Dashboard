@@ -223,7 +223,7 @@ function useBatteryDataByBMS(
   const fetchSnowflakeData = useCallback(async (query: string, queryName?: string) => {
     try {
       
-      const response = await fetch("/api/testquery", {
+      const response = await fetch("/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

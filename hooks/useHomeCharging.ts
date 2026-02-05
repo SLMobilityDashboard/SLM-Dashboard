@@ -182,7 +182,7 @@ function useHomeCharging(
 
   const fetchSnowflakeData = useCallback(async (query: string, queryName?: string) => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/testquery`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

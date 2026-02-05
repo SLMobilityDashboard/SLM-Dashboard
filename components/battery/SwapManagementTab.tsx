@@ -614,7 +614,7 @@ export default function SwapManagementTab({ BMSID }: { BMSID: string }) {
       setError(null);
 
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_BASE_URL}/api/testquery`,
+        `${process.env.NEXT_PUBLIC_BASE_URL}/api/query`,
         {
           method: "POST",
           headers: {
