@@ -20,6 +20,13 @@ const BSSCard: React.FC<BSSCardProps> = ({ station }) => {
     router.push(`/bss/${station.STATION_ID}`);
   };
 
+  // Helper function to safely format coordinates
+  const formatCoordinate = (coord: number | string | null | undefined): string => {
+    if (coord === null || coord === undefined) return 'N/A';
+    const num = typeof coord === 'string' ? parseFloat(coord) : coord;
+    return isNaN(num) ? 'N/A' : num.toFixed(6);
+  };
+
   const statusColors = {
     ACTIVE: "bg-green-500/10 border-green-500/20 text-green-400",
     INACTIVE: "bg-red-500/10 border-red-500/20 text-red-400",
@@ -111,15 +118,13 @@ const BSSCard: React.FC<BSSCardProps> = ({ station }) => {
                   <div className="flex items-center gap-2 text-xs pt-2 border-t border-slate-700/50">
                     <Navigation className="w-3 h-3 text-slate-400 flex-shrink-0" />
                     <span className="text-slate-400 font-mono text-xs truncate">
-                      {station.LATITUDE?.toFixed(6)}, {station.LONGITUDE?.toFixed(6)}
+                      {formatCoordinate(station.LATITUDE)}, {formatCoordinate(station.LONGITUDE)}
                     </span>
                   </div>
                 )}
               </div>
             </div>
           )}
-
-         
 
           {/* Swap Statistics */}
           {(station.TOTAL_SWAPS !== undefined && station.TOTAL_SWAPS > 0) && (
@@ -132,7 +137,7 @@ const BSSCard: React.FC<BSSCardProps> = ({ station }) => {
           {/* Vendor Details Section */}
           <VendorInfoCard station={station} />
 
-           {station.SERIAL_NO && (
+          {station.SERIAL_NO && (
             <div className="space-y-1">
               <p className="text-xs text-slate-500">Serial Number</p>
               <p className="text-sm text-slate-300 font-mono truncate">{station.SERIAL_NO}</p>
