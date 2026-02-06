@@ -245,7 +245,7 @@ function useHomeCharging(
     const effectiveTboxId = filters.selectedVehicleImei || tboxId;
     
     const filterConditions = buildFilterConditions();
-    const whereClause = `WHERE TBOX_ID = '${effectiveTboxId}' AND ${filterConditions.join(' AND ')}`;
+    const whereClause = `WHERE TBOXID = '${effectiveTboxId}' AND ${filterConditions.join(' AND ')}`;
     // console.log("Generated WHERE clause:", whereClause);
 
     return {

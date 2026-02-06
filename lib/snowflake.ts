@@ -8,19 +8,24 @@ interface QueryResult {
 }
 
 /**
- * SnowflakeConnectionManager - Pool-based connection manager with per-user authentication
+ * SnowflakeConnectionManager - Pool-based connection manager
  * 
- * OPTION 1: Connection Pool (Recommended)
- * Creates separate connections for each user to properly track query attribution
+ * KEY FEATURES:
+ * ✅ Increased timeouts (10min query, 3min connection)
+ * ✅ Automatic idle connection cleanup (closes after 5min idle)
+ * ✅ Connection reuse for performance
+ * ✅ Per-user authentication tracking
  */
 class SnowflakeConnectionManager {
   private static connectionPool: Map<string, Connection> = new Map();
   private static connectingUsers: Set<string> = new Set();
   private static connectedUsers: Set<string> = new Set();
   
-  // Connection timeout settings
-  private static readonly CONNECTION_TIMEOUT_MS = 30000; // 30 seconds
-  private static readonly MAX_IDLE_TIME_MS = 300000; // 5 minutes
+  // ✅ INCREASED TIMEOUT SETTINGS
+  private static readonly CONNECTION_TIMEOUT_MS = 180000; // 3 minutes (was 30s)
+  private static readonly REQUEST_TIMEOUT_MS = 600000; // 10 minutes for query execution (was 30s)
+  private static readonly LOGIN_TIMEOUT_MS = 120000; // 2 minutes for login
+  private static readonly MAX_IDLE_TIME_MS = 300000; // 5 minutes - auto-close idle connections
   private static lastUsedTime: Map<string, number> = new Map();
 
   /**
@@ -67,7 +72,6 @@ class SnowflakeConnectionManager {
       'rifkhan@slmobility.com': 'RIFKHAN',
       'authenticated-user': process.env.SNOWFLAKE_USERNAME || 'DEFAULT_USER',
       'authenticated user': process.env.SNOWFLAKE_USERNAME || 'DEFAULT_USER',
-      // Add other user mappings as needed
     };
 
     const normalizedUsername = appUsername.toLowerCase();
@@ -80,7 +84,7 @@ class SnowflakeConnectionManager {
   }
 
   /**
-   * Create connection for specific user
+   * Create connection with INCREASED TIMEOUTS
    */
   private static createConnection(username?: string): Connection {
     const snowflakeUsername = this.mapToSnowflakeUsername(username);
@@ -89,7 +93,8 @@ class SnowflakeConnectionManager {
     if (!privateKey) throw new Error('SNOWFLAKE_PRIVATE_KEY not set');
     if (!process.env.SNOWFLAKE_ACCOUNT) throw new Error('SNOWFLAKE_ACCOUNT not set');
 
-    console.log(`🔌 Creating Snowflake connection for user: ${snowflakeUsername}`);
+    console.log(`🔌 Creating connection for: ${snowflakeUsername}`);
+    console.log(`⏱️  Timeouts: Connection=3min, Query=10min, Warehouse=1hour`);
 
     return snowflake.createConnection({
       account: process.env.SNOWFLAKE_ACCOUNT,
@@ -100,30 +105,44 @@ class SnowflakeConnectionManager {
       schema: 'PUBLIC',
       role: 'SYSADMIN',
       authenticator: 'SNOWFLAKE_JWT',
+      
+      // ✅ SDK timeouts
       timeout: this.CONNECTION_TIMEOUT_MS,
+      loginTimeout: this.LOGIN_TIMEOUT_MS,
+      requestTimeout: this.REQUEST_TIMEOUT_MS,
+      
+      // ✅ Keep alive
+      clientSessionKeepAlive: true,
+      clientSessionKeepAliveHeartbeatFrequency: 3600,
+      
+      // ✅ CRITICAL: Set Snowflake warehouse timeout in session
+      sessionParameters: {
+        STATEMENT_TIMEOUT_IN_SECONDS: 3600,  // 1 hour (overrides warehouse default)
+        STATEMENT_QUEUED_TIMEOUT_IN_SECONDS: 0,  // No queue timeout
+      }
     });
   }
 
   /**
-   * Get or create connection for specific user
+   * Get or create connection
    */
   private static async getConnection(username?: string): Promise<Connection> {
     const snowflakeUsername = this.mapToSnowflakeUsername(username);
     const connectionKey = snowflakeUsername;
 
-    // Clean up idle connections periodically
+    // ✅ Clean up idle connections
     this.cleanupIdleConnections();
 
-    // Check if connection exists and is valid
+    // Reuse existing connection
     if (this.connectionPool.has(connectionKey) && this.connectedUsers.has(connectionKey)) {
-      console.log(`♻️  Reusing connection for user: ${snowflakeUsername}`);
+      console.log(`♻️  Reusing connection for: ${snowflakeUsername}`);
       this.lastUsedTime.set(connectionKey, Date.now());
       return this.connectionPool.get(connectionKey)!;
     }
 
-    // Wait if connection is in progress
+    // Wait if connecting
     if (this.connectingUsers.has(connectionKey)) {
-      console.log(`⏳ Waiting for existing connection attempt: ${snowflakeUsername}`);
+      console.log(`⏳ Waiting for connection: ${snowflakeUsername}`);
       await this.waitForConnection(connectionKey);
       return this.connectionPool.get(connectionKey)!;
     }
@@ -135,7 +154,7 @@ class SnowflakeConnectionManager {
     try {
       await new Promise<void>((resolve, reject) => {
         const timeoutId = setTimeout(() => {
-          reject(new Error(`Connection timeout for user: ${snowflakeUsername}`));
+          reject(new Error(`Connection timeout (3min) for: ${snowflakeUsername}`));
         }, this.CONNECTION_TIMEOUT_MS);
 
         connection.connect((err) => {
@@ -143,14 +162,14 @@ class SnowflakeConnectionManager {
           this.connectingUsers.delete(connectionKey);
 
           if (err) {
-            console.error(`❌ Failed to connect for user ${snowflakeUsername}:`, err.message);
+            console.error(`❌ Connection failed for ${snowflakeUsername}:`, err.message, `(code: ${err.code})`);
             return reject(err);
           }
 
           this.connectedUsers.add(connectionKey);
           this.connectionPool.set(connectionKey, connection);
           this.lastUsedTime.set(connectionKey, Date.now());
-          console.log(`✅ Connection established for user: ${snowflakeUsername}`);
+          console.log(`✅ Connected: ${snowflakeUsername}`);
           resolve();
         });
       });
@@ -165,14 +184,13 @@ class SnowflakeConnectionManager {
   }
 
   /**
-   * Wait for an in-progress connection
+   * Wait for in-progress connection
    */
   private static async waitForConnection(connectionKey: string): Promise<void> {
-    const maxWaitTime = this.CONNECTION_TIMEOUT_MS;
     const startTime = Date.now();
 
     while (this.connectingUsers.has(connectionKey)) {
-      if (Date.now() - startTime > maxWaitTime) {
+      if (Date.now() - startTime > this.CONNECTION_TIMEOUT_MS) {
         throw new Error(`Timeout waiting for connection: ${connectionKey}`);
       }
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -184,28 +202,30 @@ class SnowflakeConnectionManager {
   }
 
   /**
-   * Clean up idle connections
+   * ✅ AUTO-CLEANUP: Close connections idle for 5+ minutes
    */
   private static cleanupIdleConnections(): void {
     const now = Date.now();
     const connectionsToRemove: string[] = [];
 
     for (const [key, lastUsed] of this.lastUsedTime.entries()) {
-      if (now - lastUsed > this.MAX_IDLE_TIME_MS) {
+      const idleTime = now - lastUsed;
+      if (idleTime > this.MAX_IDLE_TIME_MS) {
+        console.log(`🧹 Closing idle connection (${Math.round(idleTime / 1000)}s idle): ${key}`);
         connectionsToRemove.push(key);
       }
     }
 
     for (const key of connectionsToRemove) {
-      console.log(`🧹 Cleaning up idle connection: ${key}`);
       const connection = this.connectionPool.get(key);
       if (connection) {
         try {
           connection.destroy((err) => {
-            if (err) console.error(`Error destroying connection ${key}:`, err);
+            if (err) console.error(`Error destroying ${key}:`, err);
+            else console.log(`✅ Closed: ${key}`);
           });
         } catch (error) {
-          console.error(`Error destroying connection ${key}:`, error);
+          console.error(`Error destroying ${key}:`, error);
         }
       }
       this.connectionPool.delete(key);
@@ -215,7 +235,7 @@ class SnowflakeConnectionManager {
   }
 
   /**
-   * Execute a SQL query with username context
+   * Execute query with 10-minute timeout
    */
   public static async executeQuery(
     sql: string,
@@ -224,11 +244,12 @@ class SnowflakeConnectionManager {
   ): Promise<QueryResult> {
     const snowflakeUsername = this.mapToSnowflakeUsername(requestedUsername);
     const auditComment = addAuditComment 
-      ? `-- Executed by: ${requestedUsername || 'anonymous'} (Snowflake user: ${snowflakeUsername})\n`
+      ? `-- Executed by: ${requestedUsername || 'anonymous'} (SF user: ${snowflakeUsername})\n`
       : '';
     const finalSql = `${auditComment}${sql}`;
     
-    console.log(`📊 Executing query for: ${requestedUsername || 'anonymous'} → ${snowflakeUsername}`);
+    console.log(`📊 Executing query for: ${requestedUsername || 'anon'} → ${snowflakeUsername}`);
+    console.log(`⏱️  Max query time: 10 minutes`);
     
     const connection = await this.getConnection(requestedUsername);
 
@@ -237,16 +258,23 @@ class SnowflakeConnectionManager {
 
       connection.execute({
         sqlText: finalSql,
+        timeout: this.REQUEST_TIMEOUT_MS, // ✅ 10 minute query timeout
         complete: (execErr: any, stmt: Statement, rows: any[]) => {
+          const duration = Date.now() - startTime;
+          
           if (execErr) {
-            console.error(`❌ Query execution failed for ${snowflakeUsername}:`, execErr.message);
+            console.error(`❌ Query failed for ${snowflakeUsername}:`, execErr.message);
+            console.error(`Code: ${execErr.code}, Duration: ${duration}ms`);
             return reject(execErr);
           }
 
           const columns = stmt.getColumns()?.map((col) => col.getName()) || [];
-          const executionTime = (Date.now() - startTime) / 1000;
+          const executionTime = duration / 1000;
 
-          console.log(`✅ Query completed for ${snowflakeUsername}: ${rows.length} rows in ${executionTime.toFixed(2)}s`);
+          console.log(`✅ Query complete for ${snowflakeUsername}: ${rows.length} rows in ${executionTime.toFixed(2)}s`);
+          
+          // ✅ Update last used time (keeps connection alive)
+          this.lastUsedTime.set(snowflakeUsername, Date.now());
           
           resolve({
             columns,
@@ -260,22 +288,30 @@ class SnowflakeConnectionManager {
   }
 
   /**
-   * Get connection pool stats for monitoring
+   * Get pool stats
    */
   public static getPoolStats(): {
     activeConnections: number;
     connectingUsers: number;
     pooledUsers: string[];
+    idleConnections: { user: string; idleSeconds: number }[];
   } {
+    const now = Date.now();
+    const idleConnections = Array.from(this.lastUsedTime.entries()).map(([user, lastUsed]) => ({
+      user,
+      idleSeconds: Math.round((now - lastUsed) / 1000)
+    }));
+
     return {
       activeConnections: this.connectedUsers.size,
       connectingUsers: this.connectingUsers.size,
       pooledUsers: Array.from(this.connectedUsers),
+      idleConnections,
     };
   }
 
   /**
-   * Close all connections (useful for cleanup/shutdown)
+   * Close all connections (shutdown)
    */
   public static async closeAllConnections(): Promise<void> {
     console.log('🛑 Closing all connections...');
@@ -283,7 +319,8 @@ class SnowflakeConnectionManager {
     const closePromises = Array.from(this.connectionPool.entries()).map(([key, connection]) => {
       return new Promise<void>((resolve) => {
         connection.destroy((err) => {
-          if (err) console.error(`Error closing connection ${key}:`, err);
+          if (err) console.error(`Error closing ${key}:`, err);
+          else console.log(`✅ Closed: ${key}`);
           resolve();
         });
       });
