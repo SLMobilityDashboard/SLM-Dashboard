@@ -1351,7 +1351,7 @@ export default function CapacitySohTab({ BMSID }: { BMSID: string }) {
         setBssData(bssData);
 
         const processed = processCombinedSessionData(tboxData, bssData);
-        setProcessedData(processed);
+        setProcessedData([...processed].reverse());
         setLoading(false);
       } catch (err) {
         setError(

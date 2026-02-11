@@ -44,6 +44,7 @@ import {
   ChatSkeleton,
   PivotSkeleton,
 } from "@/components/revenue/skeletons";
+import { SwapDetailsSection } from "@/components/revenue/swap-details-section";
 
 export default function RevenueAnalyticsPage() {
   const [filters, setFilters] = useState<RevenueFiltersType>({
@@ -55,7 +56,7 @@ export default function RevenueAnalyticsPage() {
     aggregation: "monthly",
   });
 
-  const [activeTab, setActiveTab] = useState("trends");
+  const [activeTab, setActiveTab] = useState("swaps");
 
   const handleFiltersChange = (newFilters: RevenueFiltersType) => {
     // Check if filters are the same
@@ -132,9 +133,9 @@ export default function RevenueAnalyticsPage() {
         onValueChange={(val) => setActiveTab(val)}
       >
         <div className="flex items-center justify-between">
-          <TabsList className="grid w-full max-w-4xl grid-cols-4">
+          <TabsList className="grid w-full max-w-4xl grid-cols-5">
             <TabsTrigger value="trends">Swaps</TabsTrigger>
-            {/* <TabsTrigger value="home_charging">Home Charging</TabsTrigger> */}
+            {/* <TabsTrigger value="swap_details">Swap Details</TabsTrigger> */}
             <TabsTrigger disabled value="expenses">
               Expenses
             </TabsTrigger>
@@ -153,13 +154,6 @@ export default function RevenueAnalyticsPage() {
             <TrendSection filters={filters} />
           </TabsContent>
         )}
-
-        {/* Home Charging */}
-        {/* {activeTab === "home_charging" && (
-          <TabsContent value="home_charging" className="space-y-6">
-            <HomeChargingSection filters={filters} />
-          </TabsContent>
-        )} */}
 
         {/* Expenses */}
         {activeTab === "expenses" && (

@@ -222,15 +222,20 @@ export function MainSidebar() {
           icon: <TrendingUp className="h-4 w-4" />,
         },
         {
-          path: "/revenue/patterns",
-          label: "Patterns",
-          icon: <Users className="h-4 w-4" />,
-        },
-        {
-          path: "/revenue/package",
-          label: "Packages",
-          icon: <Package className="h-4 w-4" />,
-        },
+          path: "/revenue/swap-analytics",
+          label: "Swap Analytics",
+          icon: <ShoppingCart className="h-4 w-4" />,
+        }
+        // {
+        //   path: "/revenue/patterns",
+        //   label: "Patterns",
+        //   icon: <Users className="h-4 w-4" />,
+        // },
+        // {
+        //   path: "/revenue/package",
+        //   label: "Packages",
+        //   icon: <Package className="h-4 w-4" />,
+        // },
       ],
     },
   ];
