@@ -102,14 +102,14 @@ export function HourlyPaymentsChart({ filters }: HourlyPaymentsChartProps) {
 
         const hourlyQuery = `
           SELECT 
-            HOUR(TO_TIMESTAMP_NTZ(fp.CREATED_EPOCH / 1000)) as HOUR,
-            COUNT(*) as PAYMENT_COUNT,
-            SUM(fp.AMOUNT) as TOTAL_AMOUNT,
-            COUNT(DISTINCT fp.CUSTOMER_ID) as UNIQUE_CUSTOMERS,
-            COUNT(DISTINCT fp.STATION_NAME) as ACTIVE_STATIONS,
-            COUNT(CASE WHEN fp.PAYMENT_STATUS = 'PAID' THEN 1 END) as PAID_PAYMENTS,
-            COUNT(CASE WHEN fp.PAYMENT_STATUS = 'VOIDED' THEN 1 END) as VOIDED_PAYMENTS,
-            AVG(fp.AMOUNT) as AVG_AMOUNT
+            HOUR(TO_TIMESTAMP_NTZ((FP.CREATED_EPOCH + 19800000) / 1000)) AS HOUR,
+            COUNT(*) AS PAYMENT_COUNT,
+            SUM(fp.AMOUNT) AS TOTAL_AMOUNT,
+            COUNT(DISTINCT fp.CUSTOMER_ID) AS UNIQUE_CUSTOMERS,
+            COUNT(DISTINCT fp.STATION_NAME) AS ACTIVE_STATIONS,
+            COUNT(CASE WHEN fp.PAYMENT_STATUS = 'PAID' THEN 1 END) AS PAID_PAYMENTS,
+            COUNT(CASE WHEN fp.PAYMENT_STATUS = 'VOIDED' THEN 1 END) AS VOIDED_PAYMENTS,
+            AVG(fp.AMOUNT) AS AVG_AMOUNT
           FROM SOURCE_DATA.DYNAMO_DB.FACT_PAYMENT fp
           LEFT JOIN SOURCE_DATA.MASTER_DATA.AREA_DISTRICT_PROVICE_LOOKUP adp 
             ON fp.LOCATION_NAME = adp.AREA_NAME
@@ -119,8 +119,8 @@ export function HourlyPaymentsChart({ filters }: HourlyPaymentsChartProps) {
             AND fp.PAYMENT_TYPE = 'BATTERY_SWAP'
             AND fp.PAYMENT_STATUS != 'CANCELLED'
             ${geographicFilters}
-          GROUP BY HOUR(TO_TIMESTAMP_NTZ(fp.CREATED_EPOCH / 1000))
-          ORDER BY HOUR(TO_TIMESTAMP_NTZ(fp.CREATED_EPOCH / 1000))
+          GROUP BY HOUR
+          ORDER BY HOUR;
         `;
 
         console.log("Hourly Payments Query:", hourlyQuery);
