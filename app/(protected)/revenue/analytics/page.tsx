@@ -56,7 +56,7 @@ export default function RevenueAnalyticsPage() {
     aggregation: "monthly",
   });
 
-  const [activeTab, setActiveTab] = useState("swaps");
+  const [activeTab, setActiveTab] = useState("trends");
 
   const handleFiltersChange = (newFilters: RevenueFiltersType) => {
     // Check if filters are the same

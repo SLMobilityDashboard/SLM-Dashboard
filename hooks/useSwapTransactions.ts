@@ -8,11 +8,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 export interface SwapFilters {
   dateRange?: { from?: Date; to?: Date };
-  selectedProvinces: string[];
-  selectedDistricts: string[];
   selectedAreas: string[];
   selectedStations: string[];
-  customerId: string;
+  selectedCustomers: string[];  // ✅ Changed from customerId
   paymentMethods: string[];
 }
 
@@ -20,6 +18,7 @@ export interface SwapTransaction {
   MODEL: string;
   STATUS: string;
   CUSTOMER_ID: string;
+  CUSTOMER_NAME: string;
   PAYMENT_ID: string;
   PAYMENT_METHOD: string;
   PAYMENT_TYPE: string;
@@ -59,6 +58,7 @@ interface RawSwapRow {
   MODEL?: string | null;
   STATUS?: string | null;
   CUSTOMER_ID?: string | null;
+  CUSTOMER_NAME?: string | null;
   PAYMENT_ID?: string | null;
   PAYMENT_METHOD?: string | null;
   PAYMENT_TYPE?: string | null;
@@ -133,15 +133,14 @@ const PAGE_SIZE = 200;
 function buildWhere(filters: SwapFilters): string {
   const p: string[] = [
     "1=1",
-    // ✅ DATA QUALITY FILTERS - Filter out invalid/incomplete records
-    "AMOUNT > 0",
-    "STATION_NAME IS NOT NULL AND STATION_NAME != ''",
-    "LOCATION_NAME IS NOT NULL AND LOCATION_NAME != ''",
-    "(OLDCABINET_BID IS NOT NULL AND OLDCABINET_BID != '') OR (NEWCABINET_BID IS NOT NULL AND NEWCABINET_BID != '')",
-    // ✅ TIMESTAMP VALIDATION - Only records from year 2000 onwards (Unix timestamp > 946684800000)
-    "TRANSACTION_TIME > 946684800000",
+    // Data quality filters
+    // "AMOUNT > 0",
+    // "STATION_NAME IS NOT NULL AND STATION_NAME != ''",
+    // "LOCATION_NAME IS NOT NULL AND LOCATION_NAME != ''",
+    // "TRANSACTION_TIME > 946684800000",
   ];
 
+  // Date range
   if (filters.dateRange?.from instanceof Date) {
     p.push(`TRANSACTION_TIME >= ${filters.dateRange.from.getTime()}`);
   }
@@ -152,30 +151,36 @@ function buildWhere(filters: SwapFilters): string {
     p.push(`TRANSACTION_TIME <= ${end.getTime()}`);
   }
 
-  // ✅ FIX: Add customer ID filter
-  if (filters.customerId && filters.customerId.trim()) {
-    p.push(`CUSTOMER_ID = '${filters.customerId.replace(/'/g, "''")}'`);
-  }
-
-  if (filters.selectedStations?.length) {
-    const q = filters.selectedStations
-      .map((s) => `'${s.replace(/'/g, "''")}'`)
-      .join(",");
-    p.push(`STATION_NAME IN (${q})`);
-  }
-
+  // Area filter (partial match)
   if (filters.selectedAreas?.length) {
-    const q = filters.selectedAreas
-      .map((a) => `'${a.replace(/'/g, "''")}'`)
-      .join(",");
-    p.push(`LOCATION_NAME IN (${q})`);
+    const areas = filters.selectedAreas
+      .map((a) => `LOCATION_NAME LIKE '%${a.replace(/'/g, "''")}%'`)
+      .join(" OR ");
+    p.push(`(${areas})`);
   }
 
+  // Station filter (partial match)
+  if (filters.selectedStations?.length) {
+    const stations = filters.selectedStations
+      .map((s) => `STATION_NAME LIKE '%${s.replace(/'/g, "''")}%'`)
+      .join(" OR ");
+    p.push(`(${stations})`);
+  }
+
+  // Payment method filter
   if (filters.paymentMethods?.length) {
-    const q = filters.paymentMethods
+    const methods = filters.paymentMethods
       .map((m) => `'${m.replace(/'/g, "''")}'`)
       .join(",");
-    p.push(`PAYMENT_METHOD IN (${q})`);
+    p.push(`PAYMENT_METHOD IN (${methods})`);
+  }
+
+  // ✅ FIXED: Customer Names/IDs filter (handles both CUSTOMER_NAME and CUSTOMER_ID)
+  if (filters.selectedCustomers?.length) {
+    const customers = filters.selectedCustomers
+      .map((c) => `COALESCE(NULLIF(CUSTOMER_NAME, ''), CUSTOMER_ID) = '${c.replace(/'/g, "''")}'`)
+      .join(" OR ");
+    p.push(`(${customers})`);
   }
 
   return p.join("\n AND ");
@@ -187,6 +192,7 @@ SELECT
   MODEL,
   STATUS,
   CUSTOMER_ID,
+  CUSTOMER_NAME, 
   PAYMENT_ID,
   PAYMENT_METHOD,
   PAYMENT_TYPE,
@@ -301,39 +307,13 @@ function toStr(v: string | null | undefined, fb = ""): string {
   return v ?? fb;
 }
 
-/**
- * ✅ ENHANCED: Validates and normalizes a raw database row
- * Returns null for invalid records that don't meet minimum data quality standards
- */
 function normaliseRow(raw: RawSwapRow): SwapTransaction | null {
-  // ✅ Validate critical fields before normalizing
   const amount = toNum(raw.AMOUNT);
   const stationName = toStr(raw.STATION_NAME);
   const locationName = toStr(raw.LOCATION_NAME);
   const transactionTime = toNum(raw.TRANSACTION_TIME);
 
-  // Skip invalid records
-  if (amount <= 0) {
-    console.warn("⚠️ Skipping row: AMOUNT <= 0", raw);
-    return null;
-  }
-
-  if (!stationName) {
-    console.warn("⚠️ Skipping row: Missing STATION_NAME", raw);
-    return null;
-  }
-
-  if (!locationName) {
-    console.warn("⚠️ Skipping row: Missing LOCATION_NAME", raw);
-    return null;
-  }
-
-  // Validate timestamp is after year 2000 (946684800000 = Jan 1, 2000)
-  if (transactionTime < 946684800000) {
-    console.warn("⚠️ Skipping row: Invalid TRANSACTION_TIME", {
-      raw: transactionTime,
-      date: new Date(transactionTime).toISOString(),
-    });
+  if (amount <= 0 || !stationName || !locationName || transactionTime < 946684800000) {
     return null;
   }
 
@@ -341,6 +321,7 @@ function normaliseRow(raw: RawSwapRow): SwapTransaction | null {
     MODEL: toStr(raw.MODEL),
     STATUS: toStr(raw.STATUS),
     CUSTOMER_ID: toStr(raw.CUSTOMER_ID),
+    CUSTOMER_NAME: toStr(raw.CUSTOMER_NAME),
     PAYMENT_ID: toStr(raw.PAYMENT_ID),
     PAYMENT_METHOD: toStr(raw.PAYMENT_METHOD),
     PAYMENT_TYPE: toStr(raw.PAYMENT_TYPE),
@@ -387,10 +368,8 @@ function filtersKey(f: SwapFilters): string {
     to: f.dateRange?.to instanceof Date ? f.dateRange.to.getTime() : null,
     stations: [...(f.selectedStations ?? [])].sort(),
     areas: [...(f.selectedAreas ?? [])].sort(),
+    customers: [...(f.selectedCustomers ?? [])].sort(),  // ✅ Changed
     methods: [...(f.paymentMethods ?? [])].sort(),
-    provinces: [...(f.selectedProvinces ?? [])].sort(),
-    districts: [...(f.selectedDistricts ?? [])].sort(),
-    customerId: f.customerId || "",
   });
 }
 
@@ -399,31 +378,23 @@ function filtersKey(f: SwapFilters): string {
 // ============================================================================
 
 export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsReturn {
-  // ── Cards state ──────────────────────────────────────────────────────────
   const [swaps, setSwaps] = useState<SwapTransaction[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  // ✅ FIX #1: Start with true so skeleton shows on initial mount
   const [swapsLoading, setSwapsLoading] = useState(true);
   const [swapsError, setSwapsError] = useState<string | null>(null);
 
-  // ── KPI state ────────────────────────────────────────────────────────────
   const [kpi, setKpi] = useState<SwapKpiMetrics | null>(null);
-  // ✅ FIX #1: Start with true so skeleton shows on initial mount
   const [kpiLoading, setKpiLoading] = useState(true);
   const [kpiError, setKpiError] = useState<string | null>(null);
 
-  // ── Pagination ───────────────────────────────────────────────────────────
   const [currentPage, setCurrentPage] = useState(1);
 
-  // ── Abort refs ───────────────────────────────────────────────────────────
   const cardsAbortRef = useRef<AbortController | null>(null);
   const kpiAbortRef = useRef<AbortController | null>(null);
 
-  // ── Track what was last fetched so page-change effect knows what to skip ─
-  const lastFetchedFilterKey = useRef("");
+  const lastFetchedFilterKey = useRef<string | null>(null);
   const lastFetchedPage = useRef(0);
 
-  // ── Fetch helpers ────────────────────────────────────────────────────────
   const fetchCards = useCallback(async (page: number, f: SwapFilters) => {
     console.log(`🔄 [fetchCards] Starting fetch for page ${page}`);
 
@@ -436,8 +407,6 @@ export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsRe
 
     try {
       const t0 = performance.now();
-      console.log(`🔍 [fetchCards] Running queries...`);
-
       const sql = buildCardsSQL(f, page);
       console.log(`📋 [SQL Query]:\n${sql}`);
 
@@ -446,9 +415,6 @@ export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsRe
         runQuery<{ TOTAL: number | string }>(buildCountSQL(f), ctrl.signal),
       ]);
 
-      console.log(`📊 [Raw rows received]: ${rows.length}`);
-
-      // ✅ Filter out null results from validation
       const normalised = rows
         .map(normaliseRow)
         .filter((row): row is SwapTransaction => row !== null);
@@ -456,27 +422,14 @@ export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsRe
       const total = toNum(countRows[0]?.TOTAL ?? 0);
 
       console.log(
-        `📄 Cards p${page}: ${normalised.length} valid rows (${rows.length} total) / ${total} in DB (${(
+        `📄 Cards p${page}: ${normalised.length} valid rows / ${total} total (${(
           performance.now() - t0
         ).toFixed(0)}ms)`
       );
 
-      // ✅ Log sample data for debugging
-      if (normalised.length > 0) {
-        console.log(`✅ Sample valid record:`, {
-          STATION_NAME: normalised[0].STATION_NAME,
-          LOCATION_NAME: normalised[0].LOCATION_NAME,
-          AMOUNT: normalised[0].AMOUNT,
-          TRANSACTION_TIME: normalised[0].TRANSACTION_TIME,
-          DATE: new Date(normalised[0].TRANSACTION_TIME).toISOString(),
-        });
-      }
-
       setSwaps(normalised);
       setTotalCount(total);
       lastFetchedPage.current = page;
-
-      console.log(`✅ [fetchCards] Success - lastFetchedPage set to ${page}`);
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "AbortError") {
         console.log(`⏸️ [fetchCards] Aborted`);
@@ -550,19 +503,16 @@ export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsRe
     }
   }, []);
 
-  // ── Stable filter key for comparison ─────────────────────────────────────
   const currentFilterKey = filtersKey(filters);
 
-  // ── Effect: filter changed → reset to p1, fetch both ────────────────────
   useEffect(() => {
     console.log(`🎯 [Filter Effect] Triggered`);
-    console.log(`   Current key: ${currentFilterKey.substring(0, 100)}...`);
-    console.log(`   Last key: ${lastFetchedFilterKey.current.substring(0, 100)}...`);
 
-    if (currentFilterKey === lastFetchedFilterKey.current) {
-      console.log(`⏭️ [Filter Effect] Keys match, skipping`);
-      return;
-    }
+  if (lastFetchedFilterKey.current !== null &&
+      currentFilterKey === lastFetchedFilterKey.current) {
+    console.log(`⏭️ [Filter Effect] Keys match, skipping`);
+    return;
+  }
 
     console.log(`🔄 [Filter Effect] Keys differ, updating`);
     lastFetchedFilterKey.current = currentFilterKey;
@@ -574,7 +524,6 @@ export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsRe
       setKpi(null);
       setCurrentPage(1);
       lastFetchedPage.current = 0;
-      // ✅ FIX #2: Set loading to false when no date range
       setSwapsLoading(false);
       setKpiLoading(false);
       return;
@@ -582,25 +531,22 @@ export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsRe
 
     console.log(`🚀 [Filter Effect] Fetching page 1 + KPI`);
     setCurrentPage(1);
-    lastFetchedPage.current = 0; // will be set to 1 after fetchCards resolves
+    lastFetchedPage.current = 0;
 
     fetchCards(1, filters);
     fetchKpi(filters);
   }, [currentFilterKey, filters, fetchCards, fetchKpi]);
 
-  // ── Effect: page changed (filter is the same) → fetch cards only ────────
   useEffect(() => {
     console.log(
       `📄 [Page Effect] Triggered - page=${currentPage}, lastFetched=${lastFetchedPage.current}`
     );
 
-    // Skip if this page was already fetched (e.g. the filters effect just set p=1)
     if (currentPage === lastFetchedPage.current) {
       console.log(`⏭️ [Page Effect] Page already fetched, skipping`);
       return;
     }
 
-    // Skip if filters haven't been set yet
     if (!lastFetchedFilterKey.current) {
       console.log(`⏭️ [Page Effect] No filter key yet, skipping`);
       return;
@@ -615,7 +561,6 @@ export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsRe
     fetchCards(currentPage, filters);
   }, [currentPage, filters, fetchCards]);
 
-  // ── Cleanup ──────────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       console.log(`🧹 [Cleanup] Aborting pending requests`);
@@ -624,7 +569,6 @@ export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsRe
     };
   }, []);
 
-  // ── Derived / exposed ────────────────────────────────────────────────────
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const goToPage = useCallback(
@@ -644,7 +588,6 @@ export function useSwapTransactions(filters: SwapFilters): UseSwapTransactionsRe
       return;
     }
 
-    // Invalidate the cached key so filter-change effect fires
     lastFetchedFilterKey.current = "";
     lastFetchedPage.current = 0;
     setCurrentPage(1);

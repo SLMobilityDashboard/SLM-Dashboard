@@ -26,7 +26,6 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
 import type { DateRange } from "react-day-picker";
 
@@ -36,11 +35,9 @@ interface SwapFiltersProps {
 
 export interface SwapFilters {
   dateRange?: DateRange;
-  selectedProvinces: string[];
-  selectedDistricts: string[];
   selectedAreas: string[];
   selectedStations: string[];
-  customerId: string;
+  selectedCustomers: string[];  // ✅ Changed from customerId
   paymentMethods: string[];
 }
 
@@ -49,23 +46,19 @@ interface StationData {
   STATION: string;
 }
 
-interface PaymentAreaData {
-  AREA: string;
-  DISTRICT: string;
-  PROVINCE: string;
-}
-
-// Custom hook that fetches geographic hierarchy from swap data
-const useGeographicHierarchy = () => {
-  const [completeHierarchy, setCompleteHierarchy] = useState<PaymentAreaData[]>([]);
+// ✅ Fixed hook that fetches customer names
+const useSwapFilterData = () => {
+  const [areaData, setAreaData] = useState<string[]>([]);
   const [stationData, setStationData] = useState<StationData[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
+  const [customerNames, setCustomerNames] = useState<string[]>([]);  // ✅ Added
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasFetchedRef = useRef(false);
 
   useEffect(() => {
     if (hasFetchedRef.current) {
-      console.log("Already fetched geographic data, skipping");
+      console.log("Already fetched filter data, skipping");
       return;
     }
 
@@ -75,55 +68,102 @@ const useGeographicHierarchy = () => {
 
     const fetchData = async () => {
       try {
-        const hierarchyRes = await fetch("/api/testquery", {
+        console.log("🔄 Starting to fetch filter data...");
+
+        // ✅ Fetch customer names (with fallback to CUSTOMER_ID if name is empty)
+        const customerNamesRes = await fetch("/api/testquery", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             sql: `SELECT DISTINCT 
-                    so.LOCATION_NAME AS AREA,
-                    adp.DISTRICT_NAME AS DISTRICT,
-                    adp.PROVINCE_NAME AS PROVINCE
-                  FROM DB_DUMP.PUBLIC.SWAP_OVERALL so
-                  JOIN SOURCE_DATA.MASTER_DATA.AREA_DISTRICT_PROVICE_LOOKUP adp 
-                    ON so.LOCATION_NAME = adp.AREA_NAME
-                  WHERE so.AMOUNT > 0
-                    AND so.STATION_NAME IS NOT NULL AND so.STATION_NAME != ''
-                    AND so.LOCATION_NAME IS NOT NULL AND so.LOCATION_NAME != ''
-                    AND so.TRANSACTION_TIME > 946684800000
-                  ORDER BY PROVINCE, DISTRICT, AREA`,
+                    COALESCE(NULLIF(CUSTOMER_NAME, ''), CUSTOMER_ID) AS CUSTOMER_NAME
+                  FROM DB_DUMP.PUBLIC.SWAP_OVERALL
+                  WHERE CUSTOMER_ID IS NOT NULL 
+                    AND CUSTOMER_ID != ''
+                  ORDER BY CUSTOMER_NAME
+                  LIMIT 1000`,
           }),
         });
 
+        // Fetch distinct areas
+        const areasRes = await fetch("/api/testquery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sql: `SELECT DISTINCT LOCATION_NAME
+                  FROM DB_DUMP.PUBLIC.SWAP_OVERALL
+                  WHERE LOCATION_NAME IS NOT NULL 
+                    AND LOCATION_NAME != ''
+                  ORDER BY LOCATION_NAME`,
+          }),
+        });
+
+        // Fetch stations per area
         const stationsRes = await fetch("/api/testquery", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             sql: `SELECT DISTINCT 
-                    so.LOCATION_NAME AS AREA, 
-                    so.STATION_NAME AS STATION 
-                  FROM DB_DUMP.PUBLIC.SWAP_OVERALL so
-                  WHERE so.AMOUNT > 0
-                    AND so.STATION_NAME IS NOT NULL AND so.STATION_NAME != ''
-                    AND so.LOCATION_NAME IS NOT NULL AND so.LOCATION_NAME != ''
-                    AND so.TRANSACTION_TIME > 946684800000
-                  ORDER BY AREA, STATION`,
+                    LOCATION_NAME AS AREA, 
+                    STATION_NAME AS STATION 
+                  FROM DB_DUMP.PUBLIC.SWAP_OVERALL
+                  WHERE LOCATION_NAME IS NOT NULL 
+                    AND LOCATION_NAME != ''
+                    AND STATION_NAME IS NOT NULL 
+                    AND STATION_NAME != ''
+                  ORDER BY LOCATION_NAME, STATION_NAME`,
           }),
         });
 
-        if (!hierarchyRes.ok || !stationsRes.ok) {
-          throw new Error("Failed to fetch geographic data");
+        // Fetch distinct payment methods
+        const paymentMethodsRes = await fetch("/api/testquery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sql: `SELECT DISTINCT PAYMENT_METHOD
+                  FROM DB_DUMP.PUBLIC.SWAP_OVERALL
+                  WHERE PAYMENT_METHOD IS NOT NULL 
+                    AND PAYMENT_METHOD != ''
+                  ORDER BY PAYMENT_METHOD`,
+          }),
+        });
+
+        // ✅ Check all responses
+        if (!customerNamesRes.ok || !areasRes.ok || !stationsRes.ok || !paymentMethodsRes.ok) {
+          const errorText = !customerNamesRes.ok 
+            ? await customerNamesRes.text()
+            : !areasRes.ok 
+            ? await areasRes.text() 
+            : !stationsRes.ok 
+            ? await stationsRes.text() 
+            : await paymentMethodsRes.text();
+          throw new Error(`API Error: ${errorText}`);
         }
 
-        const hierarchyData: PaymentAreaData[] = await hierarchyRes.json();
+        const customerNamesData: { CUSTOMER_NAME: string }[] = await customerNamesRes.json();
+        const areasData: { LOCATION_NAME: string }[] = await areasRes.json();
         const stationData: StationData[] = await stationsRes.json();
+        const paymentMethodsData: { PAYMENT_METHOD: string }[] = await paymentMethodsRes.json();
 
-        console.log(`✅ Loaded ${hierarchyData.length} areas and ${stationData.length} stations`);
+        console.log(`✅ Loaded ${customerNamesData.length} customer names`);
+        console.log(`✅ Loaded ${areasData.length} areas`);
+        console.log(`✅ Loaded ${stationData.length} stations`);
+        console.log(`✅ Loaded ${paymentMethodsData.length} payment methods`);
 
-        setCompleteHierarchy(hierarchyData || []);
+        // Debug: Log sample data
+        if (customerNamesData.length > 0) {
+          console.log("👤 Sample customers:", customerNamesData.slice(0, 5).map(c => c.CUSTOMER_NAME));
+        } else {
+          console.warn("⚠️ No customer names returned!");
+        }
+
+        setCustomerNames(customerNamesData.map(row => row.CUSTOMER_NAME) || []);
+        setAreaData(areasData.map(row => row.LOCATION_NAME) || []);
         setStationData(stationData || []);
+        setPaymentMethods(paymentMethodsData.map(row => row.PAYMENT_METHOD) || []);
       } catch (err: any) {
-        console.error("Failed to fetch geographic data:", err);
-        setError(err.message || "Failed to fetch geographic data");
+        console.error("❌ Failed to fetch filter data:", err);
+        setError(err.message || "Failed to fetch filter data");
       } finally {
         setLoading(false);
       }
@@ -132,109 +172,84 @@ const useGeographicHierarchy = () => {
     fetchData();
   }, []);
 
-  return { completeHierarchy, stationData, loading, error };
+  return { areaData, stationData, paymentMethods, customerNames, loading, error };
+};
+
+// ✅ Helper function for default date range - Last Calendar Year
+const getDefaultDateRange = (): DateRange => {
+  const today = new Date();
+  const lastYear = today.getFullYear() - 1;
+  const defaultFrom = new Date(lastYear, 0, 1); // January 1st of last year
+  const defaultTo = new Date(lastYear, 11, 31); // December 31st of last year
+  return { from: defaultFrom, to: defaultTo };
 };
 
 export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
-  const today = new Date();
-  const defaultFrom = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const defaultTo = new Date(today.getFullYear(), today.getMonth(), 0);
-  const defaultRange: DateRange = { from: defaultFrom, to: defaultTo };
+  const defaultRange = getDefaultDateRange();
 
   const [dateRange, setDateRange] = useState<DateRange | undefined>(defaultRange);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [tempRange, setTempRange] = useState<DateRange | undefined>(defaultRange);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
   const [datePickerMode, setDatePickerMode] = useState<"from" | "to">("from");
-  const [quickTime, setQuickTime] = useState<string>("last_month");
+  const [quickTime, setQuickTime] = useState<string>("last_year");
 
   const [filters, setFilters] = useState<SwapFilters>({
     dateRange: defaultRange,
-    selectedProvinces: [],
-    selectedDistricts: [],
     selectedAreas: [],
     selectedStations: [],
-    customerId: "",
+    selectedCustomers: [],  // ✅ Changed from customerId
     paymentMethods: [],
   });
 
   const [appliedFilters, setAppliedFilters] = useState<SwapFilters>({
     dateRange: defaultRange,
-    selectedProvinces: [],
-    selectedDistricts: [],
     selectedAreas: [],
     selectedStations: [],
-    customerId: "",
+    selectedCustomers: [],  // ✅ Changed from customerId
     paymentMethods: [],
   });
 
-  const { completeHierarchy, stationData, loading } = useGeographicHierarchy();
+  const { areaData, stationData, paymentMethods, customerNames, loading, error } = useSwapFilterData();
+
+  // ✅ Auto-apply default filters on mount (immediately, don't wait for filter data)
+  useEffect(() => {
+    console.log("🚀 [SwapFilters] Auto-applying default filters on mount");
+    onFiltersChange?.(appliedFilters);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount only
+
+  // Debug: Log when data is loaded
+  useEffect(() => {
+    if (!loading) {
+      console.log("📊 Filter data loaded:", {
+        customers: customerNames.length,
+        areas: areaData.length,
+        stations: stationData.length,
+        paymentMethods: paymentMethods.length,
+      });
+    }
+  }, [loading, customerNames.length, areaData.length, stationData.length, paymentMethods.length]);
 
   const hasPendingChanges = useMemo(() => {
     return JSON.stringify(filters) !== JSON.stringify(appliedFilters);
   }, [filters, appliedFilters]);
 
-  const paymentMethods = [
-    "Credit Card",
-    "Mobile Payment",
-    "Subscription",
-    "Cash",
-    "Corporate Account",
-  ];
-
-  const availableProvinces = useMemo(() => {
-    const provinces = new Set<string>();
-    completeHierarchy.forEach((item) => provinces.add(item.PROVINCE));
-    return Array.from(provinces).sort();
-  }, [completeHierarchy]);
-
-  const availableDistricts = useMemo(() => {
-    const districts = new Set<string>();
-    let filteredData = completeHierarchy;
-
-    if (filters.selectedProvinces.length > 0) {
-      filteredData = filteredData.filter((item) =>
-        filters.selectedProvinces.includes(item.PROVINCE)
-      );
-    }
-
-    filteredData.forEach((item) => districts.add(item.DISTRICT));
-    return Array.from(districts).sort();
-  }, [completeHierarchy, filters.selectedProvinces]);
-
   const availableAreas = useMemo(() => {
-    const areas = new Set<string>();
-    let filteredData = completeHierarchy;
-
-    if (filters.selectedProvinces.length > 0) {
-      filteredData = filteredData.filter((item) =>
-        filters.selectedProvinces.includes(item.PROVINCE)
-      );
-    }
-
-    if (filters.selectedDistricts.length > 0) {
-      filteredData = filteredData.filter((item) =>
-        filters.selectedDistricts.includes(item.DISTRICT)
-      );
-    }
-
-    filteredData.forEach((item) => areas.add(item.AREA));
-    return Array.from(areas).sort();
-  }, [completeHierarchy, filters.selectedProvinces, filters.selectedDistricts]);
+    return areaData.sort();
+  }, [areaData]);
 
   const availableStations = useMemo(() => {
     if (filters.selectedAreas.length > 0) {
-      return stationData
+      const result = stationData
         .filter((station) => filters.selectedAreas.includes(station.AREA))
         .map((station) => station.STATION)
         .sort();
+      console.log("🏢 Available Stations for selected areas:", result);
+      return result;
     }
     return [];
   }, [stationData, filters.selectedAreas]);
-
-  useEffect(() => {
-    onFiltersChange?.(appliedFilters);
-  }, [appliedFilters, onFiltersChange]);
 
   const updateFilters = (newFilters: Partial<SwapFilters>) => {
     const updated = { ...filters, ...newFilters };
@@ -242,149 +257,36 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
   };
 
   const applyFilters = () => {
-    setAppliedFilters({ ...filters });
+    const newAppliedFilters = { ...filters };
+    console.log("🎯 [SwapFilters] Applying filters:", newAppliedFilters);
+    setAppliedFilters(newAppliedFilters);
+    
+    onFiltersChange?.(newAppliedFilters);
   };
 
   const clearAllFilters = () => {
-    const today = new Date();
-    const oneMonthAgo = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const lastDayLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
-
     const cleared: SwapFilters = {
-      selectedProvinces: [],
-      selectedDistricts: [],
       selectedAreas: [],
       selectedStations: [],
-      customerId: "",
+      selectedCustomers: [],  // ✅ Changed from customerId
       paymentMethods: [],
-      dateRange: { from: oneMonthAgo, to: lastDayLastMonth },
+      dateRange: defaultRange,
     };
 
+    console.log("🧹 [SwapFilters] Clearing all filters");
     setFilters(cleared);
     setAppliedFilters(cleared);
     setDateRange(cleared.dateRange);
     setTempRange(cleared.dateRange);
-    setQuickTime("last_month");
-  };
-
-  const handleProvinceChange = (province: string, checked: boolean) => {
-    const newProvinces = checked
-      ? [...filters.selectedProvinces, province]
-      : filters.selectedProvinces.filter((p) => p !== province);
-
-    let newDistricts = filters.selectedDistricts;
-    let newAreas = filters.selectedAreas;
-    let newStations = filters.selectedStations;
-
-    if (!checked) {
-      if (newProvinces.length === 0) {
-        // Keep current selections
-      } else {
-        const validDistricts = new Set<string>();
-        completeHierarchy
-          .filter((item) => newProvinces.includes(item.PROVINCE))
-          .forEach((item) => validDistricts.add(item.DISTRICT));
-
-        newDistricts = newDistricts.filter((d) => validDistricts.has(d));
-
-        const validAreas = new Set<string>();
-        completeHierarchy
-          .filter(
-            (item) =>
-              newProvinces.includes(item.PROVINCE) &&
-              (newDistricts.length === 0 || newDistricts.includes(item.DISTRICT))
-          )
-          .forEach((item) => validAreas.add(item.AREA));
-
-        newAreas = newAreas.filter((a) => validAreas.has(a));
-
-        newStations = newStations.filter((s) => {
-          const stationArea = stationData.find((station) => station.STATION === s)?.AREA;
-          return stationArea && validAreas.has(stationArea);
-        });
-      }
-    }
-
-    updateFilters({
-      selectedProvinces: newProvinces,
-      selectedDistricts: newDistricts,
-      selectedAreas: newAreas,
-      selectedStations: newStations,
-    });
-  };
-
-  const handleDistrictChange = (district: string, checked: boolean) => {
-    const newDistricts = checked
-      ? [...filters.selectedDistricts, district]
-      : filters.selectedDistricts.filter((d) => d !== district);
-
-    let newProvinces = filters.selectedProvinces;
-    if (checked) {
-      const districtProvince = completeHierarchy.find(
-        (item) => item.DISTRICT === district
-      )?.PROVINCE;
-      if (districtProvince && !newProvinces.includes(districtProvince)) {
-        newProvinces = [...newProvinces, districtProvince];
-      }
-    }
-
-    let newAreas = filters.selectedAreas;
-    let newStations = filters.selectedStations;
-
-    if (!checked) {
-      if (newDistricts.length === 0 && newProvinces.length === 0) {
-        // Keep current selections
-      } else {
-        const validAreas = new Set<string>();
-        completeHierarchy
-          .filter((item) => {
-            const matchesProvince =
-              newProvinces.length === 0 || newProvinces.includes(item.PROVINCE);
-            const matchesDistrict =
-              newDistricts.length === 0 || newDistricts.includes(item.DISTRICT);
-            return matchesProvince && matchesDistrict;
-          })
-          .forEach((item) => validAreas.add(item.AREA));
-
-        if (validAreas.size > 0) {
-          newAreas = newAreas.filter((a) => validAreas.has(a));
-          newStations = newStations.filter((s) => {
-            const stationArea = stationData.find(
-              (station) => station.STATION === s
-            )?.AREA;
-            return stationArea && validAreas.has(stationArea);
-          });
-        }
-      }
-    }
-
-    updateFilters({
-      selectedProvinces: newProvinces,
-      selectedDistricts: newDistricts,
-      selectedAreas: newAreas,
-      selectedStations: newStations,
-    });
+    setQuickTime("last_year");
+    
+    onFiltersChange?.(cleared);
   };
 
   const handleAreaChange = (area: string, checked: boolean) => {
     const newAreas = checked
       ? [...filters.selectedAreas, area]
       : filters.selectedAreas.filter((a) => a !== area);
-
-    let newDistricts = filters.selectedDistricts;
-    let newProvinces = filters.selectedProvinces;
-
-    if (checked) {
-      const areaInfo = completeHierarchy.find((item) => item.AREA === area);
-      if (areaInfo) {
-        if (!newDistricts.includes(areaInfo.DISTRICT)) {
-          newDistricts = [...newDistricts, areaInfo.DISTRICT];
-        }
-        if (!newProvinces.includes(areaInfo.PROVINCE)) {
-          newProvinces = [...newProvinces, areaInfo.PROVINCE];
-        }
-      }
-    }
 
     let newStations = filters.selectedStations;
     if (!checked) {
@@ -395,8 +297,6 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
     }
 
     updateFilters({
-      selectedProvinces: newProvinces,
-      selectedDistricts: newDistricts,
       selectedAreas: newAreas,
       selectedStations: newStations,
     });
@@ -408,8 +308,6 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
       : filters.selectedStations.filter((s) => s !== station);
 
     let newAreas = filters.selectedAreas;
-    let newDistricts = filters.selectedDistricts;
-    let newProvinces = filters.selectedProvinces;
 
     if (checked) {
       const stationInfo = stationData.find((s) => s.STATION === station);
@@ -418,22 +316,10 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
         if (!newAreas.includes(areaName)) {
           newAreas = [...newAreas, areaName];
         }
-
-        const areaInfo = completeHierarchy.find((item) => item.AREA === areaName);
-        if (areaInfo) {
-          if (!newDistricts.includes(areaInfo.DISTRICT)) {
-            newDistricts = [...newDistricts, areaInfo.DISTRICT];
-          }
-          if (!newProvinces.includes(areaInfo.PROVINCE)) {
-            newProvinces = [...newProvinces, areaInfo.PROVINCE];
-          }
-        }
       }
     }
 
     updateFilters({
-      selectedProvinces: newProvinces,
-      selectedDistricts: newDistricts,
       selectedAreas: newAreas,
       selectedStations: newStations,
     });
@@ -444,6 +330,14 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
       ? [...filters.paymentMethods, method]
       : filters.paymentMethods.filter((m) => m !== method);
     updateFilters({ paymentMethods: newMethods });
+  };
+
+  // ✅ Fixed customer change handler
+  const handleCustomerChange = (customer: string, checked: boolean) => {
+    const newCustomers = checked
+      ? [...filters.selectedCustomers, customer]
+      : filters.selectedCustomers.filter((c) => c !== customer);
+    updateFilters({ selectedCustomers: newCustomers });
   };
 
   const MonthYearSelector = ({
@@ -523,11 +417,9 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
   const getActiveFiltersCount = () => {
     let count = 0;
     if (dateRange?.from || dateRange?.to) count++;
-    if (filters.selectedProvinces.length > 0) count++;
-    if (filters.selectedDistricts.length > 0) count++;
     if (filters.selectedAreas.length > 0) count++;
     if (filters.selectedStations.length > 0) count++;
-    if (filters.customerId.trim()) count++;
+    if (filters.selectedCustomers.length > 0) count++;  // ✅ Changed
     if (filters.paymentMethods.length > 0) count++;
     return count;
   };
@@ -561,8 +453,9 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
         newTo = new Date(today.getFullYear(), today.getMonth(), 0);
         break;
       case "last_year":
-        newFrom = new Date(today.getFullYear() - 1, today.getMonth(), 1);
-        newTo = new Date(today.getFullYear(), today.getMonth(), 0);
+        const lastYear = today.getFullYear() - 1;
+        newFrom = new Date(lastYear, 0, 1); // January 1st of last year
+        newTo = new Date(lastYear, 11, 31); // December 31st of last year
         break;
       default:
         return;
@@ -657,6 +550,19 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
     );
   }
 
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="text-red-600">
+            <p className="font-medium">Error loading filters</p>
+            <p className="text-sm mt-1">{error}</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card>
       <CardContent className="p-4 space-y-4">
@@ -693,7 +599,7 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* Quick Time Filter */}
           <div className="space-y-2">
             <Label>Quick Time</Label>
@@ -865,93 +771,44 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
             </Popover>
           </div>
 
-          {/* Customer ID */}
+          {/* ✅ Customer - Multi-select */}
           <div className="space-y-2">
-            <Label>Customer ID</Label>
-            <Input
-              placeholder="Enter customer ID..."
-              value={filters.customerId}
-              onChange={(e) => updateFilters({ customerId: e.target.value })}
-              className="w-full"
-            />
-          </div>
-
-          {/* Province */}
-          <div className="space-y-2">
-            <Label>Province</Label>
+            <Label>Customer ({customerNames.length} available)</Label>
             <Select
               value=""
               onValueChange={(value) => {
-                if (!filters.selectedProvinces.includes(value)) {
-                  handleProvinceChange(value, true);
+                if (!filters.selectedCustomers.includes(value)) {
+                  handleCustomerChange(value, true);
                 }
               }}
+              disabled={customerNames.length === 0}
             >
               <SelectTrigger>
                 <span>
-                  {filters.selectedProvinces.length > 0
-                    ? `${filters.selectedProvinces.length} selected`
-                    : "Select provinces"}
+                  {filters.selectedCustomers.length > 0
+                    ? `${filters.selectedCustomers.length} selected`
+                    : customerNames.length === 0
+                    ? "No customers available"
+                    : "Select customers"}
                 </span>
               </SelectTrigger>
               <SelectContent>
-                {availableProvinces
-                  .filter((province) => !filters.selectedProvinces.includes(province))
-                  .map((province) => (
-                    <SelectItem key={province} value={province}>
-                      {province}
+                {customerNames
+                  .filter((customer) => !filters.selectedCustomers.includes(customer))
+                  .map((customer) => (
+                    <SelectItem key={customer} value={customer}>
+                      {customer}
                     </SelectItem>
                   ))}
               </SelectContent>
             </Select>
             <div className="flex flex-wrap gap-1">
-              {filters.selectedProvinces.map((province) => (
-                <Badge key={province} variant="secondary">
-                  {province}
+              {filters.selectedCustomers.map((customer) => (
+                <Badge key={customer} variant="secondary">
+                  {customer}
                   <X
                     className="h-3 w-3 ml-1 cursor-pointer"
-                    onClick={() => handleProvinceChange(province, false)}
-                  />
-                </Badge>
-              ))}
-            </div>
-          </div>
-
-          {/* District */}
-          <div className="space-y-2">
-            <Label>District</Label>
-            <Select
-              value=""
-              onValueChange={(value) => {
-                if (!filters.selectedDistricts.includes(value)) {
-                  handleDistrictChange(value, true);
-                }
-              }}
-            >
-              <SelectTrigger>
-                <span>
-                  {filters.selectedDistricts.length > 0
-                    ? `${filters.selectedDistricts.length} selected`
-                    : "Select districts"}
-                </span>
-              </SelectTrigger>
-              <SelectContent>
-                {availableDistricts
-                  .filter((district) => !filters.selectedDistricts.includes(district))
-                  .map((district) => (
-                    <SelectItem key={district} value={district}>
-                      {district}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <div className="flex flex-wrap gap-1">
-              {filters.selectedDistricts.map((district) => (
-                <Badge key={district} variant="secondary">
-                  {district}
-                  <X
-                    className="h-3 w-3 ml-1 cursor-pointer"
-                    onClick={() => handleDistrictChange(district, false)}
+                    onClick={() => handleCustomerChange(customer, false)}
                   />
                 </Badge>
               ))}
@@ -960,7 +817,7 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
 
           {/* Area */}
           <div className="space-y-2">
-            <Label>Area</Label>
+            <Label>Area ({availableAreas.length} available)</Label>
             <Select
               value=""
               onValueChange={(value) => {
@@ -968,11 +825,14 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
                   handleAreaChange(value, true);
                 }
               }}
+              disabled={availableAreas.length === 0}
             >
               <SelectTrigger>
                 <span>
                   {filters.selectedAreas.length > 0
                     ? `${filters.selectedAreas.length} selected`
+                    : availableAreas.length === 0
+                    ? "No areas available"
                     : "Select areas"}
                 </span>
               </SelectTrigger>
@@ -1002,7 +862,7 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
           {/* BSS Stations */}
           {filters.selectedAreas.length > 0 && (
             <div className="space-y-2">
-              <Label>BSS Stations</Label>
+              <Label>BSS Stations ({availableStations.length} available)</Label>
               <Select
                 value=""
                 onValueChange={(value) => {
@@ -1010,12 +870,15 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
                     handleStationChange(value, true);
                   }
                 }}
+                disabled={availableStations.length === 0}
               >
                 <SelectTrigger>
                   <SelectValue
                     placeholder={
                       filters.selectedStations.length > 0
                         ? `${filters.selectedStations.length} selected`
+                        : availableStations.length === 0
+                        ? "No stations available"
                         : "Select stations"
                     }
                   />
@@ -1046,7 +909,7 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
 
           {/* Payment Methods */}
           <div className="space-y-2">
-            <Label>Payment Method</Label>
+            <Label>Payment Method ({paymentMethods.length} available)</Label>
             <Select
               value=""
               onValueChange={(value) => {
@@ -1054,11 +917,14 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
                   handlePaymentMethodChange(value, true);
                 }
               }}
+              disabled={paymentMethods.length === 0}
             >
               <SelectTrigger>
                 <span>
                   {filters.paymentMethods.length > 0
                     ? `${filters.paymentMethods.length} selected`
+                    : paymentMethods.length === 0
+                    ? "No methods available"
                     : "Select methods"}
                 </span>
               </SelectTrigger>

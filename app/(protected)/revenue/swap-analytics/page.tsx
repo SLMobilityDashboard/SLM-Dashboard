@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -33,7 +33,6 @@ import {
   Loader2,
   RefreshCw,
 } from "lucide-react";
-// ✅ FIX: Import SwapFilters instead of RevenueFilters
 import {
   SwapFilters,
   type SwapFilters as SwapFiltersType,
@@ -43,8 +42,7 @@ import {
   type SwapTransaction,
 } from "@/hooks/useSwapTransactions";
 
-// ─── Display helpers ──────────────────────────────────────────────────────────
-
+// Display helpers
 const formatTimestamp = (timestampMs: number) => {
   if (!timestampMs) return { date: "—", time: "—" };
   const d = new Date(timestampMs);
@@ -101,8 +99,6 @@ const getBatteryHealth = (temp: number, voltage: number, battStatus: number) => 
   return { label: "Good", color: "text-green-400", icon: CheckCircle };
 };
 
-// ─── SwapCard ─────────────────────────────────────────────────────────────────
-
 const SwapCard: React.FC<{ swap: SwapTransaction }> = ({ swap }) => {
   const { date, time } = formatTimestamp(swap.TRANSACTION_TIME);
   const batteryGain = swap.NEWBID_BATPERCENT - swap.OLDBID_BATPERCENT;
@@ -146,7 +142,7 @@ const SwapCard: React.FC<{ swap: SwapTransaction }> = ({ swap }) => {
               <User className="h-3 w-3 text-purple-400 flex-shrink-0" />
               <span className="text-slate-500">Customer:</span>
               <span className="text-slate-200 font-mono truncate">
-                {swap.CUSTOMER_ID || "—"}
+                {swap.CUSTOMER_NAME || swap.CUSTOMER_ID || "—"}
               </span>
             </div>
             <div className="flex items-center gap-2">
@@ -181,7 +177,6 @@ const SwapCard: React.FC<{ swap: SwapTransaction }> = ({ swap }) => {
             </span>
           </div>
 
-          {/* ✅ RETURNED BATTERY (OLD) */}
           <div className="bg-slate-900/60 rounded-lg p-2.5 border border-slate-700/80">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
@@ -241,7 +236,6 @@ const SwapCard: React.FC<{ swap: SwapTransaction }> = ({ swap }) => {
             <ArrowRight className="h-4 w-4 text-slate-600" />
           </div>
 
-          {/* ✅ DISPENSED BATTERY (NEW) */}
           <div className="bg-slate-900/60 rounded-lg p-2.5 border border-emerald-800/60">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
@@ -345,8 +339,6 @@ const SwapCard: React.FC<{ swap: SwapTransaction }> = ({ swap }) => {
   );
 };
 
-// ─── Skeletons ────────────────────────────────────────────────────────────────
-
 const SkeletonCard: React.FC = () => (
   <Card className="border-slate-800 animate-pulse">
     <CardContent className="p-3 space-y-3">
@@ -377,8 +369,6 @@ const SkeletonKpi: React.FC = () => (
     </CardContent>
   </Card>
 );
-
-// ─── Pagination ───────────────────────────────────────────────────────────────
 
 const Pagination: React.FC<{
   currentPage: number;
@@ -472,29 +462,36 @@ const Pagination: React.FC<{
   );
 };
 
-// ─── Page ─────────────────────────────────────────────────────────────────────
-
 export default function SwapAnalyticsPage() {
   const getDefaultDateRange = () => {
-    const to = new Date();
-    const from = new Date();
-    from.setDate(from.getDate() - 365);
+    const today = new Date();
+    const lastYear = today.getFullYear() - 1;
+    const from = new Date(lastYear, 0, 1); // January 1st of last year
+    const to = new Date(lastYear, 11, 31); // December 31st of last year
     return { from, to };
   };
 
-  // ✅ FIX: Use SwapFiltersType instead of RevenueFiltersType
-  const [filters, setFilters] = useState<SwapFiltersType>({
+  // ✅ FIX: Use correct SwapFiltersType with selectedCustomers array
+  const [appliedFilters, setAppliedFilters] = useState<SwapFiltersType>({
     dateRange: getDefaultDateRange(),
-    selectedProvinces: [],
-    selectedDistricts: [],
     selectedAreas: [],
     selectedStations: [],
-    customerId: "",
+    selectedCustomers: [],  // ✅ Changed from customerId: ""
     paymentMethods: [],
   });
 
   const [searchTerm, setSearchTerm] = useState("");
 
+  // Debug: Log initial state
+  useEffect(() => {
+    console.log("🎯 [Page] Mounted with appliedFilters:", appliedFilters);
+    console.log("🎯 [Page] Date range valid?", 
+      appliedFilters.dateRange?.from instanceof Date,
+      appliedFilters.dateRange?.to instanceof Date
+    );
+  }, []);
+
+  // ✅ FIX: Use appliedFilters (what user confirmed) instead of filters (what's being edited)
   const {
     swaps,
     swapsLoading,
@@ -507,23 +504,25 @@ export default function SwapAnalyticsPage() {
     totalPages,
     goToPage,
     refetch,
-  } = useSwapTransactions(filters);
+  } = useSwapTransactions(appliedFilters);
 
-  // ✅ FIX: Use SwapFiltersType in callback
+  // ✅ FIX: Update appliedFilters when user confirms changes
   const handleFiltersChange = useCallback((f: SwapFiltersType) => {
-    setFilters(f);
+    console.log("🎯 [Page] Filters changed, updating appliedFilters:", f);
+    setAppliedFilters(f);
     setSearchTerm("");
   }, []);
 
   const isDateRangeSet =
-    filters.dateRange?.from instanceof Date &&
-    filters.dateRange?.to instanceof Date;
+    appliedFilters.dateRange?.from instanceof Date &&
+    appliedFilters.dateRange?.to instanceof Date;
 
   const visibleSwaps = searchTerm
     ? swaps.filter(
         (s) =>
           s.PAYMENT_ID.toLowerCase().includes(searchTerm.toLowerCase()) ||
           s.CUSTOMER_ID.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          s.CUSTOMER_NAME?.toLowerCase().includes(searchTerm.toLowerCase()) ||  // ✅ Added customer name search
           s.STATION_NAME.toLowerCase().includes(searchTerm.toLowerCase()) ||
           s.LOCATION_NAME.toLowerCase().includes(searchTerm.toLowerCase()) ||
           s.OLDCABINET_BID.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -533,20 +532,28 @@ export default function SwapAnalyticsPage() {
 
   const filterSummary = (() => {
     const parts: string[] = [];
-    if (filters.selectedStations?.length)
+    if (appliedFilters.selectedStations?.length)
       parts.push(
-        `${filters.selectedStations.length} Station${filters.selectedStations.length > 1 ? "s" : ""}`
+        `${appliedFilters.selectedStations.length} Station${appliedFilters.selectedStations.length > 1 ? "s" : ""}`
       );
-    if (filters.paymentMethods?.length)
+    if (appliedFilters.paymentMethods?.length)
       parts.push(
-        `${filters.paymentMethods.length} Payment Method${filters.paymentMethods.length > 1 ? "s" : ""}`
+        `${appliedFilters.paymentMethods.length} Payment Method${appliedFilters.paymentMethods.length > 1 ? "s" : ""}`
+      );
+    if (appliedFilters.selectedAreas?.length)
+      parts.push(
+        `${appliedFilters.selectedAreas.length} Area${appliedFilters.selectedAreas.length > 1 ? "s" : ""}`
+      );
+    if (appliedFilters.selectedCustomers?.length)  // ✅ Changed from customerId
+      parts.push(
+        `${appliedFilters.selectedCustomers.length} Customer${appliedFilters.selectedCustomers.length > 1 ? "s" : ""}`
       );
     return parts.length > 0 ? ` — ${parts.join(", ")}` : "";
   })();
 
   const handleExport = () => {
     const headers = [
-      "Payment ID", "Date", "Time", "Customer ID", "Model", "Status",
+      "Payment ID", "Date", "Time", "Customer ID", "Customer Name", "Model", "Status",
       "Station", "Location",
       "Old Cab", "Old BID", "Old SOC%", "Old Temp°C", "Old V", "Old A",
       "New Cab", "New BID", "New SOC%", "New Temp°C", "New V", "New A",
@@ -555,7 +562,7 @@ export default function SwapAnalyticsPage() {
     const rows = swaps.map((s) => {
       const { date, time } = formatTimestamp(s.TRANSACTION_TIME);
       return [
-        s.PAYMENT_ID, date, time, s.CUSTOMER_ID, s.MODEL, s.STATUS,
+        s.PAYMENT_ID, date, time, s.CUSTOMER_ID, s.CUSTOMER_NAME || "", s.MODEL, s.STATUS,
         s.STATION_NAME, s.LOCATION_NAME,
         s.OLDCABINET_NO, s.OLDCABINET_BID, s.OLDBID_BATPERCENT,
         s.OLDCABINET_CELL_TEMP.toFixed(1), s.OLDCABINET_V.toFixed(1), s.OLDCABINET_I.toFixed(1),
@@ -612,10 +619,9 @@ export default function SwapAnalyticsPage() {
         )}
       </div>
 
-      {/* ✅ FIX: Use SwapFilters component */}
       <SwapFilters onFiltersChange={handleFiltersChange} />
 
-      {isDateRangeSet && (
+      {/* {isDateRangeSet && ( */}
         <>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {kpiLoading ? (
@@ -812,7 +818,7 @@ export default function SwapAnalyticsPage() {
             </CardContent>
           </Card>
         </>
-      )}
+      {/* )} */}
     </div>
   );
 }
