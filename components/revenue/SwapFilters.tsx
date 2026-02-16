@@ -71,7 +71,7 @@ const useSwapFilterData = () => {
         console.log("🔄 Starting to fetch filter data...");
 
         // ✅ Fetch customer names (with fallback to CUSTOMER_ID if name is empty)
-        const customerNamesRes = await fetch("/api/testquery", {
+        const customerNamesRes = await fetch("/api/query", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -86,7 +86,7 @@ const useSwapFilterData = () => {
         });
 
         // Fetch distinct areas
-        const areasRes = await fetch("/api/testquery", {
+        const areasRes = await fetch("/api/query", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -99,7 +99,7 @@ const useSwapFilterData = () => {
         });
 
         // Fetch stations per area
-        const stationsRes = await fetch("/api/testquery", {
+        const stationsRes = await fetch("/api/query", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -116,7 +116,7 @@ const useSwapFilterData = () => {
         });
 
         // Fetch distinct payment methods
-        const paymentMethodsRes = await fetch("/api/testquery", {
+        const paymentMethodsRes = await fetch("/api/query", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
