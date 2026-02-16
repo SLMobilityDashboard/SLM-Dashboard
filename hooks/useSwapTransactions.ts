@@ -276,7 +276,7 @@ WHERE ${buildWhere(filters)}
 // ============================================================================
 
 async function runQuery<T>(sql: string, signal: AbortSignal): Promise<T[]> {
-  const res = await fetch("/api/query", {
+  const res = await fetch("/api/testquery", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sql }),
