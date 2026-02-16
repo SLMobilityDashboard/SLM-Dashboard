@@ -313,9 +313,9 @@ function normaliseRow(raw: RawSwapRow): SwapTransaction | null {
   const locationName = toStr(raw.LOCATION_NAME);
   const transactionTime = toNum(raw.TRANSACTION_TIME);
 
-  if (amount <= 0 || !stationName || !locationName || transactionTime < 946684800000) {
-    return null;
-  }
+  // if (amount <= 0 || !stationName || !locationName || transactionTime < 946684800000) {
+  //   return null;
+  // }
 
   return {
     MODEL: toStr(raw.MODEL),
