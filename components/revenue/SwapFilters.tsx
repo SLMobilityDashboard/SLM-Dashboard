@@ -212,13 +212,6 @@ export function SwapFilters({ onFiltersChange }: SwapFiltersProps) {
 
   const { areaData, stationData, paymentMethods, customerNames, loading, error } = useSwapFilterData();
 
-  // ✅ Auto-apply default filters on mount (immediately, don't wait for filter data)
-  useEffect(() => {
-    console.log("🚀 [SwapFilters] Auto-applying default filters on mount");
-    onFiltersChange?.(appliedFilters);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount only
-
   // Debug: Log when data is loaded
   useEffect(() => {
     if (!loading) {

@@ -222,8 +222,8 @@ export function MainSidebar() {
           icon: <TrendingUp className="h-4 w-4" />,
         },
         {
-          path: "/revenue/swap-analytics",
-          label: "Swap Analytics",
+          path: "/revenue/transaction-analytics",
+          label: "Transaction Analytics",
           icon: <ShoppingCart className="h-4 w-4" />,
         }
         // {
