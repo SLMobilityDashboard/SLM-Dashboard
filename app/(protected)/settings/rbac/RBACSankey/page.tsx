@@ -179,10 +179,11 @@ export default function RBACSankey() {
   //   Hovering a ROLE or ROUTE, or idle → show aggregate effect across all
   //                       users with that role (original dashed-line behaviour)
   function resolvedEdgeEffect(e) {
-    // Direct grant override edge (user → route, bypassing role column)
+    // user-route-grant edges: show when hovering THIS user OR the target route
     if (e.type === "user-route-grant") {
-      // Only show this edge when hovering THIS specific user
-      return activeUserEmail === e.userEmail ? "grant" : null;
+      if (activeUserEmail === e.userEmail) return "grant";
+      if (activeId === e.to) return "grant"; // route is selected/hovered
+      return null;
     }
 
     if (e.type !== "role-route") return null; // user→role edges never have overrides
@@ -208,9 +209,11 @@ export default function RBACSankey() {
     const nodes = new Set([nodeId]);
     const edges = new Set();
 
-    // For user-route-grant edges, only include them if the active node IS that user
+    // For user-route-grant edges, include them if the active node is either
+    // the user (e.from) OR the route (e.to) — so clicking the route shows
+    // the direct arc back to the grant-overridden user.
     const traversableEdges = allEdges.filter((e) =>
-      e.type !== "user-route-grant" || e.from === nodeId
+      e.type !== "user-route-grant" || e.from === nodeId || e.to === nodeId
     );
 
     traversableEdges.forEach((e, _i) => {
