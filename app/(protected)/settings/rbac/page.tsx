@@ -5,7 +5,8 @@ import {
   Shield, Users, Route, LayoutGrid, GitBranch,
   Plus, Trash2, Save, RefreshCw, X, Check,
   AlertCircle, Loader2, Search, ToggleLeft, ToggleRight,
-  Edit2, UserPlus, ChevronRight,
+  Edit2, UserPlus, ChevronRight, ShieldAlert, ShieldCheck,
+  EyeOff, Eye,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -47,6 +48,15 @@ type RoleHierarchy = {
   inherited_roles: string[];
 };
 
+type Override = {
+  id: string;
+  email: string;
+  target_type: "route" | "menu";
+  target_id: string;
+  effect: "grant" | "deny";
+  granted_at: string;
+};
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 const ALL_ROLES = ["Admin", "Manager", "Analyst", "Viewer", "FactoryManager", "QA"];
 
@@ -60,8 +70,6 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
-// All calls route through /api/permissions which uses the service role key.
-// This bypasses RLS entirely — no direct Supabase client on the browser.
 const api = {
   async fetchAll() {
     const res = await fetch("/api/permissions?type=admin-all");
@@ -75,6 +83,7 @@ const api = {
       protectedRoutes: ProtectedRoute[];
       routePerms: RoutePermission[];
       hierarchy: RoleHierarchy[];
+      overrides: Override[];
     }>;
   },
 
@@ -154,8 +163,7 @@ function RolePicker({ selectedRoles, onChange }: { selectedRoles: string[]; onCh
               selected
                 ? ROLE_COLORS[role] ?? "bg-slate-600 text-slate-200 border-slate-500"
                 : "bg-slate-800/50 text-slate-500 border-slate-700 hover:border-slate-500 hover:text-slate-300"
-            }`}
-          >
+            }`}>
             {selected && <Check className="inline h-3 w-3 mr-1" />}
             {role}
           </button>
@@ -182,7 +190,7 @@ function CardHeader({ label, icon, count }: { label: string; icon: React.ReactNo
 // ROOT PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function RBACAdminPage() {
-  const [activeTab, setActiveTab] = useState<"users" | "menu" | "routes" | "hierarchy">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "menu" | "routes" | "hierarchy" | "overrides">("users");
   const { toasts, toast } = useToast();
   const [loading, setLoading]       = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -192,6 +200,7 @@ export default function RBACAdminPage() {
   const [protectedRoutes, setProtectedRoutes] = useState<ProtectedRoute[]>([]);
   const [routePerms, setRoutePerms]           = useState<RoutePermission[]>([]);
   const [roleHierarchy, setRoleHierarchy]     = useState<RoleHierarchy[]>([]);
+  const [overrides, setOverrides]             = useState<Override[]>([]);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -203,6 +212,7 @@ export default function RBACAdminPage() {
       setProtectedRoutes(d.protectedRoutes ?? []);
       setRoutePerms(d.routePerms ?? []);
       setRoleHierarchy(d.hierarchy ?? []);
+      setOverrides(d.overrides ?? []);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       setFetchError(msg);
@@ -215,10 +225,11 @@ export default function RBACAdminPage() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   const tabs = [
-    { id: "users"     as const, label: "Users",           icon: <Users className="h-4 w-4" /> },
-    { id: "menu"      as const, label: "Menu Visibility",  icon: <LayoutGrid className="h-4 w-4" /> },
-    { id: "routes"    as const, label: "Route Access",     icon: <Route className="h-4 w-4" /> },
-    { id: "hierarchy" as const, label: "Role Hierarchy",   icon: <GitBranch className="h-4 w-4" /> },
+    { id: "users"     as const, label: "Users",          icon: <Users className="h-4 w-4" /> },
+    { id: "menu"      as const, label: "Menu Visibility", icon: <LayoutGrid className="h-4 w-4" /> },
+    { id: "routes"    as const, label: "Route Access",    icon: <Route className="h-4 w-4" /> },
+    { id: "hierarchy" as const, label: "Role Hierarchy",  icon: <GitBranch className="h-4 w-4" /> },
+    { id: "overrides" as const, label: "User Overrides",  icon: <ShieldAlert className="h-4 w-4" /> },
   ];
 
   return (
@@ -265,7 +276,14 @@ export default function RBACAdminPage() {
                   ? "border-cyan-400 text-cyan-300"
                   : "border-transparent text-slate-500 hover:text-slate-300"
               }`}>
-              {tab.icon}{tab.label}
+              {tab.icon}
+              {tab.label}
+              {/* Badge showing override count */}
+              {tab.id === "overrides" && overrides.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs border border-amber-500/30">
+                  {overrides.length}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -276,27 +294,30 @@ export default function RBACAdminPage() {
         {loading ? (
           <div className="flex flex-col items-center justify-center h-64 gap-3 text-slate-500">
             <Loader2 className="h-6 w-6 animate-spin text-cyan-500" />
-            <span className="text-sm">Loading from Supabase via /api/permissions...</span>
+            <span className="text-sm">Loading from Supabase...</span>
           </div>
         ) : fetchError ? (
           <div className="flex flex-col items-center justify-center h-64 gap-3">
             <AlertCircle className="h-8 w-8 text-red-400" />
             <p className="text-sm text-red-300">{fetchError}</p>
-            <p className="text-xs text-slate-500 text-center max-w-md">
-              Make sure <code className="bg-slate-800 px-1 rounded">GET /api/permissions?type=admin-all</code> is
-              handled in your API route and returns{" "}
-              <code className="bg-slate-800 px-1 rounded">{"{ users, menuPerms, protectedRoutes, routePerms, hierarchy }"}</code>
-            </p>
-            <button onClick={fetchAll} className="mt-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-300 border border-slate-700">
-              Retry
-            </button>
+            <button onClick={fetchAll} className="mt-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-300 border border-slate-700">Retry</button>
           </div>
         ) : (
           <>
-            {activeTab === "users"     && <UsersTab     users={users}                     setUsers={setUsers}                                                     toast={toast} />}
-            {activeTab === "menu"      && <MenuTab      menuPerms={menuPerms}              setMenuPerms={setMenuPerms}                                              toast={toast} />}
-            {activeTab === "routes"    && <RoutesTab    protectedRoutes={protectedRoutes}  setProtectedRoutes={setProtectedRoutes} routePerms={routePerms} setRoutePerms={setRoutePerms} toast={toast} />}
-            {activeTab === "hierarchy" && <HierarchyTab hierarchy={roleHierarchy}          setHierarchy={setRoleHierarchy}                                         toast={toast} />}
+            {activeTab === "users"     && <UsersTab     users={users} setUsers={setUsers} toast={toast} />}
+            {activeTab === "menu"      && <MenuTab      menuPerms={menuPerms} setMenuPerms={setMenuPerms} toast={toast} />}
+            {activeTab === "routes"    && <RoutesTab    protectedRoutes={protectedRoutes} setProtectedRoutes={setProtectedRoutes} routePerms={routePerms} setRoutePerms={setRoutePerms} toast={toast} />}
+            {activeTab === "hierarchy" && <HierarchyTab hierarchy={roleHierarchy} setHierarchy={setRoleHierarchy} toast={toast} />}
+            {activeTab === "overrides" && (
+              <OverridesTab
+                overrides={overrides}
+                setOverrides={setOverrides}
+                users={users}
+                menuPerms={menuPerms}
+                protectedRoutes={protectedRoutes}
+                toast={toast}
+              />
+            )}
           </>
         )}
       </div>
@@ -369,7 +390,6 @@ function UsersTab({ users, setUsers, toast }: {
 
   return (
     <div className="space-y-5">
-      {/* Toolbar */}
       <div className="flex items-center justify-between gap-4">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
@@ -383,7 +403,6 @@ function UsersTab({ users, setUsers, toast }: {
         </button>
       </div>
 
-      {/* Role stats */}
       <div className="grid grid-cols-6 gap-2">
         {ALL_ROLES.map((role) => (
           <div key={role} className={`rounded-lg px-3 py-2.5 border ${ROLE_COLORS[role]}`}>
@@ -393,7 +412,6 @@ function UsersTab({ users, setUsers, toast }: {
         ))}
       </div>
 
-      {/* New user form */}
       {showNewForm && (
         <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/20 p-5 space-y-4">
           <h3 className="text-sm font-semibold text-cyan-300 flex items-center gap-2"><UserPlus className="h-4 w-4" />Create New User</h3>
@@ -418,16 +436,14 @@ function UsersTab({ users, setUsers, toast }: {
           <div className="flex gap-2">
             <button onClick={createUser} disabled={creating || !newUser.email}
               className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 rounded-lg text-xs text-cyan-200 font-medium transition-colors disabled:opacity-40">
-              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-              Create User
+              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}Create User
             </button>
             <button onClick={() => { setShowNewForm(false); setNewUser({ email: "", display_name: "", roles: [] }); }}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-400 transition-colors">Cancel</button>
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-400">Cancel</button>
           </div>
         </div>
       )}
 
-      {/* Table */}
       <SectionCard>
         <CardHeader label="User Accounts" icon={<Users className="h-4 w-4 text-cyan-400" />} count={filtered.length} />
         <table className="w-full text-sm">
@@ -441,13 +457,9 @@ function UsersTab({ users, setUsers, toast }: {
           </thead>
           <tbody className="divide-y divide-slate-800/60">
             {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="py-16 text-center text-slate-600 text-sm">
-                  {users.length === 0
-                    ? "No users returned from API — check that type=admin-all is handled"
-                    : "No users match your search"}
-                </td>
-              </tr>
+              <tr><td colSpan={4} className="py-16 text-center text-slate-600 text-sm">
+                {users.length === 0 ? "No users returned from API" : "No users match your search"}
+              </td></tr>
             ) : filtered.map((user) => {
               const isEditing = editingUser?.id === user.id;
               const current   = isEditing ? editingUser! : user;
@@ -477,9 +489,7 @@ function UsersTab({ users, setUsers, toast }: {
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-500">
-                    {new Date(user.updated_at).toLocaleDateString()}
-                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-500">{new Date(user.updated_at).toLocaleDateString()}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5">
                       {isEditing ? (
@@ -488,15 +498,13 @@ function UsersTab({ users, setUsers, toast }: {
                             className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-xs text-emerald-300 transition-colors disabled:opacity-40">
                             {saving === user.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}Save
                           </button>
-                          <button onClick={() => setEditingUser(null)}
-                            className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-400">
+                          <button onClick={() => setEditingUser(null)} className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-400">
                             <X className="h-3 w-3" />
                           </button>
                         </>
                       ) : (
                         <>
-                          <button onClick={() => setEditingUser({ ...user })}
-                            className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors">
+                          <button onClick={() => setEditingUser({ ...user })} className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors">
                             <Edit2 className="h-3.5 w-3.5" />
                           </button>
                           <button onClick={() => deleteUser(user)} disabled={deleting === user.id}
@@ -559,10 +567,8 @@ function MenuTab({ menuPerms, setMenuPerms, toast }: {
         <p className="text-xs text-slate-400 leading-relaxed">
           <span className="text-cyan-400 font-semibold">Menu Visibility</span> — toggle sections on/off for all users,
           or restrict them to specific roles. An empty role list means all authenticated users can see it.
-          Disabling triggers <code className="bg-slate-800 px-1 rounded">trg_sync_subcategory_on_category_mute</code> automatically.
         </p>
       </div>
-
       <SectionCard>
         <CardHeader label="Sidebar Menu Sections" icon={<LayoutGrid className="h-4 w-4 text-cyan-400" />} count={menuPerms.length} />
         <div className="divide-y divide-slate-800/60">
@@ -574,39 +580,29 @@ function MenuTab({ menuPerms, setMenuPerms, toast }: {
             return (
               <div key={item.menu_id} className={`px-5 py-4 transition-colors ${isEdit ? "bg-slate-800/40" : "hover:bg-slate-800/20"}`}>
                 <div className="flex items-start gap-4">
-                  {/* Toggle */}
-                  <button onClick={() => toggleEnabled(item)} disabled={saving === item.menu_id} className="mt-0.5 shrink-0"
-                    title={current.is_enabled ? "Click to disable" : "Click to enable"}>
+                  <button onClick={() => toggleEnabled(item)} disabled={saving === item.menu_id} className="mt-0.5 shrink-0">
                     {saving === item.menu_id
                       ? <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
-                      : current.is_enabled
-                        ? <ToggleRight className="h-6 w-6 text-cyan-400" />
-                        : <ToggleLeft className="h-6 w-6 text-slate-600" />}
+                      : current.is_enabled ? <ToggleRight className="h-6 w-6 text-cyan-400" /> : <ToggleLeft className="h-6 w-6 text-slate-600" />}
                   </button>
-
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2.5 flex-wrap">
                       <span className={`font-semibold text-sm ${current.is_enabled ? "text-slate-200" : "text-slate-500"}`}>
                         {item.display_name || item.menu_id}
                       </span>
                       <code className="text-xs text-slate-600 font-mono bg-slate-800/60 px-1.5 py-0.5 rounded">{item.menu_id}</code>
-                      {!current.is_enabled && (
-                        <span className="px-1.5 py-0.5 rounded text-xs bg-slate-700/80 text-slate-400 border border-slate-600/50">disabled</span>
-                      )}
+                      {!current.is_enabled && <span className="px-1.5 py-0.5 rounded text-xs bg-slate-700/80 text-slate-400 border border-slate-600/50">disabled</span>}
                     </div>
-
                     {isEdit ? (
                       <div className="space-y-3">
-                        <p className="text-xs text-slate-400">Roles that can see this section (empty = all roles):</p>
-                        <RolePicker selectedRoles={current.allowed_roles}
-                          onChange={(roles) => setEditing({ ...current, allowed_roles: roles })} />
+                        <p className="text-xs text-slate-400">Roles that can see this section:</p>
+                        <RolePicker selectedRoles={current.allowed_roles} onChange={(roles) => setEditing({ ...current, allowed_roles: roles })} />
                         <div className="flex gap-2 pt-1">
                           <button onClick={() => saveRoles(editing!)} disabled={saving === item.menu_id}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-xs text-emerald-300 transition-colors">
                             {saving === item.menu_id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}Save
                           </button>
-                          <button onClick={() => setEditing(null)}
-                            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-400">Cancel</button>
+                          <button onClick={() => setEditing(null)} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-400">Cancel</button>
                         </div>
                       </div>
                     ) : (
@@ -617,10 +613,8 @@ function MenuTab({ menuPerms, setMenuPerms, toast }: {
                       </div>
                     )}
                   </div>
-
                   {!isEdit && (
-                    <button onClick={() => setEditing({ ...item })}
-                      className="shrink-0 p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors">
+                    <button onClick={() => setEditing({ ...item })} className="shrink-0 p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors">
                       <Edit2 className="h-3.5 w-3.5" />
                     </button>
                   )}
@@ -689,6 +683,8 @@ function RoutesTab({ protectedRoutes, setProtectedRoutes, routePerms, setRoutePe
 
   const createRoute = async () => {
     if (!newRoute.path_prefix) return;
+    const already = protectedRoutes.find((r) => r.path_prefix === newRoute.path_prefix);
+    if (already) { toast(`"${newRoute.path_prefix}" already exists`, "error"); return; }
     setCreating(true);
     try {
       const { data } = await api.post("protected_routes", {
@@ -718,7 +714,6 @@ function RoutesTab({ protectedRoutes, setProtectedRoutes, routePerms, setRoutePe
     } finally { setSaving(null); }
   };
 
-  // Group by subcategory_id
   const grouped = protectedRoutes.reduce<Record<string, ProtectedRoute[]>>((acc, r) => {
     const key = r.subcategory_id ?? "__standalone__";
     (acc[key] ??= []).push(r);
@@ -727,6 +722,7 @@ function RoutesTab({ protectedRoutes, setProtectedRoutes, routePerms, setRoutePe
   const groupOrder = Object.keys(grouped).sort((a, b) =>
     a === "__standalone__" ? 1 : b === "__standalone__" ? -1 : a.localeCompare(b)
   );
+  const isDuplicate = protectedRoutes.some((r) => r.path_prefix === newRoute.path_prefix);
 
   return (
     <div className="space-y-4">
@@ -734,7 +730,7 @@ function RoutesTab({ protectedRoutes, setProtectedRoutes, routePerms, setRoutePe
         <div className="rounded-xl border border-slate-800/60 bg-slate-800/20 px-5 py-3 flex-1">
           <p className="text-xs text-slate-400 leading-relaxed">
             <span className="text-cyan-400 font-semibold">Route Access</span> — toggle routes on/off in middleware,
-            and control which roles can access each path. Routes with no permission row are unprotected.
+            and control which roles can access each path.
           </p>
         </div>
         <button onClick={() => setShowNewRoute(true)}
@@ -747,22 +743,28 @@ function RoutesTab({ protectedRoutes, setProtectedRoutes, routePerms, setRoutePe
         <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/20 p-5 space-y-4">
           <h3 className="text-sm font-semibold text-cyan-300">Add Protected Route</h3>
           <div className="grid grid-cols-3 gap-3">
-            {[
-              { key: "path_prefix", label: "Path Prefix *", placeholder: "/my-route" },
-              { key: "description", label: "Description", placeholder: "Optional description" },
-              { key: "subcategory_id", label: "Subcategory ID", placeholder: "e.g. gps, 360" },
-            ].map(({ key, label, placeholder }) => (
-              <div key={key}>
-                <label className="block text-xs text-slate-400 mb-1.5">{label}</label>
-                <input value={(newRoute as Record<string,string>)[key]}
-                  onChange={(e) => setNewRoute((p) => ({ ...p, [key]: e.target.value }))}
-                  placeholder={placeholder}
-                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50" />
-              </div>
-            ))}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">Path Prefix *</label>
+              <input value={newRoute.path_prefix} onChange={(e) => setNewRoute((p) => ({ ...p, path_prefix: e.target.value }))}
+                placeholder="/my-route"
+                className={`w-full px-3 py-2 bg-slate-800 border rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none ${isDuplicate ? "border-red-500/50" : "border-slate-700 focus:border-cyan-500/50"}`} />
+              {isDuplicate && <p className="text-xs text-red-400 mt-1">Already exists — edit it in the list below</p>}
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">Description</label>
+              <input value={newRoute.description} onChange={(e) => setNewRoute((p) => ({ ...p, description: e.target.value }))}
+                placeholder="Optional description"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50" />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">Subcategory ID</label>
+              <input value={newRoute.subcategory_id} onChange={(e) => setNewRoute((p) => ({ ...p, subcategory_id: e.target.value }))}
+                placeholder="e.g. gps, 360"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50" />
+            </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={createRoute} disabled={creating || !newRoute.path_prefix}
+            <button onClick={createRoute} disabled={creating || !newRoute.path_prefix || isDuplicate}
               className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 rounded-lg text-xs text-cyan-200 font-medium transition-colors disabled:opacity-40">
               {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}Create
             </button>
@@ -773,16 +775,10 @@ function RoutesTab({ protectedRoutes, setProtectedRoutes, routePerms, setRoutePe
       )}
 
       {protectedRoutes.length === 0 ? (
-        <div className="rounded-xl border border-slate-800 py-16 text-center text-slate-600 text-sm">
-          No protected_routes rows found in database
-        </div>
+        <div className="rounded-xl border border-slate-800 py-16 text-center text-slate-600 text-sm">No protected_routes rows found</div>
       ) : groupOrder.map((groupId) => (
         <SectionCard key={groupId}>
-          <CardHeader
-            label={groupId === "__standalone__" ? "Standalone Routes" : `Group: ${groupId}`}
-            icon={<Route className="h-4 w-4 text-cyan-400" />}
-            count={grouped[groupId].length}
-          />
+          <CardHeader label={groupId === "__standalone__" ? "Standalone Routes" : `Group: ${groupId}`} icon={<Route className="h-4 w-4 text-cyan-400" />} count={grouped[groupId].length} />
           <div className="divide-y divide-slate-800/60">
             {grouped[groupId].map((route) => {
               const perm   = getRoutePerm(route.path_prefix);
@@ -791,24 +787,15 @@ function RoutesTab({ protectedRoutes, setProtectedRoutes, routePerms, setRoutePe
                 <div key={route.id} className={`px-5 py-3.5 transition-colors ${isEdit ? "bg-slate-800/40" : "hover:bg-slate-800/20"}`}>
                   <div className="flex items-start gap-4">
                     <button onClick={() => toggleEnabled(route)} disabled={saving === route.id} className="mt-0.5 shrink-0">
-                      {saving === route.id
-                        ? <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
-                        : route.is_enabled
-                          ? <ToggleRight className="h-6 w-6 text-cyan-400" />
-                          : <ToggleLeft className="h-6 w-6 text-slate-600" />}
+                      {saving === route.id ? <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
+                        : route.is_enabled ? <ToggleRight className="h-6 w-6 text-cyan-400" /> : <ToggleLeft className="h-6 w-6 text-slate-600" />}
                     </button>
-
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <code className={`text-xs font-mono px-2 py-0.5 rounded border ${
-                          route.is_enabled
-                            ? "bg-slate-700/60 text-cyan-300 border-slate-600"
-                            : "bg-slate-800/60 text-slate-600 border-slate-700"
-                        }`}>{route.path_prefix}</code>
+                        <code className={`text-xs font-mono px-2 py-0.5 rounded border ${route.is_enabled ? "bg-slate-700/60 text-cyan-300 border-slate-600" : "bg-slate-800/60 text-slate-600 border-slate-700"}`}>{route.path_prefix}</code>
                         {route.description && <span className="text-xs text-slate-500">{route.description}</span>}
                         {!route.is_enabled && <span className="px-1.5 py-0.5 rounded text-xs bg-slate-700/80 text-slate-400 border border-slate-600/50">disabled</span>}
                       </div>
-
                       {isEdit ? (
                         <div className="space-y-2 mt-2">
                           <p className="text-xs text-slate-400">Allowed roles:</p>
@@ -818,8 +805,7 @@ function RoutesTab({ protectedRoutes, setProtectedRoutes, routePerms, setRoutePe
                               className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-xs text-emerald-300 transition-colors">
                               {saving === route.path_prefix ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}Save
                             </button>
-                            <button onClick={() => setEditing(null)}
-                              className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-400">Cancel</button>
+                            <button onClick={() => setEditing(null)} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-400">Cancel</button>
                           </div>
                         </div>
                       ) : (
@@ -830,13 +816,9 @@ function RoutesTab({ protectedRoutes, setProtectedRoutes, routePerms, setRoutePe
                         </div>
                       )}
                     </div>
-
                     {!isEdit && (
                       <div className="flex gap-1 shrink-0">
-                        <button onClick={() => startEdit(route)}
-                          className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors">
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </button>
+                        <button onClick={() => startEdit(route)} className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors"><Edit2 className="h-3.5 w-3.5" /></button>
                         <button onClick={() => deleteRoute(route)} disabled={saving === route.id}
                           className="p-1.5 hover:bg-red-500/10 rounded text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40">
                           {saving === route.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -868,7 +850,6 @@ function HierarchyTab({ hierarchy, setHierarchy, toast }: {
   const save = async (item: RoleHierarchy) => {
     setSaving(item.role);
     try {
-      // upsert=true so new roles not yet in DB also get created
       await api.post("role_hierarchy", { role: item.role, inherited_roles: item.inherited_roles }, true);
       setHierarchy((p) => {
         const exists = p.some((h) => h.role === item.role);
@@ -881,7 +862,6 @@ function HierarchyTab({ hierarchy, setHierarchy, toast }: {
     } finally { setSaving(null); }
   };
 
-  // Show every known role even if it has no DB row yet
   const allEntries = ALL_ROLES.map(
     (role) => hierarchy.find((h) => h.role === role) ?? { role, inherited_roles: [] }
   );
@@ -891,12 +871,9 @@ function HierarchyTab({ hierarchy, setHierarchy, toast }: {
       <div className="rounded-xl border border-slate-800/60 bg-slate-800/20 px-5 py-3">
         <p className="text-xs text-slate-400 leading-relaxed">
           <span className="text-amber-400 font-semibold">Role Hierarchy</span> — when a user has a role, they automatically
-          inherit all roles listed under it. Inheritance is expanded at login and stored in the session.
-          For example, if <code className="bg-slate-800 px-1 rounded text-cyan-300">Admin</code> inherits{" "}
-          <code className="bg-slate-800 px-1 rounded text-orange-300">Manager</code>, an Admin passes any Manager permission check.
+          inherit all roles listed under it. Expanded at login and stored in the session.
         </p>
       </div>
-
       <SectionCard>
         <CardHeader label="Role Inheritance" icon={<GitBranch className="h-4 w-4 text-cyan-400" />} />
         <div className="divide-y divide-slate-800/60">
@@ -914,28 +891,19 @@ function HierarchyTab({ hierarchy, setHierarchy, toast }: {
                       <span className="text-xs text-slate-500">inherits</span>
                       <ChevronRight className="h-3.5 w-3.5 text-slate-600" />
                     </div>
-
                     {isEdit ? (
                       <div className="space-y-3">
-                        <p className="text-xs text-slate-400">
-                          Roles that <strong className="text-slate-300">{item.role}</strong> should inherit:
-                        </p>
+                        <p className="text-xs text-slate-400">Roles that <strong className="text-slate-300">{item.role}</strong> should inherit:</p>
                         <div className="flex flex-wrap gap-1.5">
                           {others.map((role) => {
                             const selected = current.inherited_roles.includes(role);
                             return (
                               <button key={role}
                                 onClick={() => {
-                                  const next = selected
-                                    ? current.inherited_roles.filter((r) => r !== role)
-                                    : [...current.inherited_roles, role];
+                                  const next = selected ? current.inherited_roles.filter((r) => r !== role) : [...current.inherited_roles, role];
                                   setEditing({ ...current, inherited_roles: next });
                                 }}
-                                className={`px-2.5 py-1 rounded text-xs border font-medium transition-all ${
-                                  selected
-                                    ? ROLE_COLORS[role] ?? "bg-slate-600 text-slate-200 border-slate-500"
-                                    : "bg-slate-800/50 text-slate-500 border-slate-700 hover:border-slate-500 hover:text-slate-300"
-                                }`}>
+                                className={`px-2.5 py-1 rounded text-xs border font-medium transition-all ${selected ? ROLE_COLORS[role] ?? "bg-slate-600 text-slate-200 border-slate-500" : "bg-slate-800/50 text-slate-500 border-slate-700 hover:border-slate-500 hover:text-slate-300"}`}>
                                 {selected && <Check className="inline h-3 w-3 mr-1" />}{role}
                               </button>
                             );
@@ -946,8 +914,7 @@ function HierarchyTab({ hierarchy, setHierarchy, toast }: {
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg text-xs text-emerald-300 transition-colors">
                             {saving === item.role ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}Save
                           </button>
-                          <button onClick={() => setEditing(null)}
-                            className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-400">Cancel</button>
+                          <button onClick={() => setEditing(null)} className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-400">Cancel</button>
                         </div>
                       </div>
                     ) : (
@@ -958,10 +925,8 @@ function HierarchyTab({ hierarchy, setHierarchy, toast }: {
                       </div>
                     )}
                   </div>
-
                   {!isEdit && (
-                    <button onClick={() => setEditing({ ...item })}
-                      className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors shrink-0">
+                    <button onClick={() => setEditing({ ...item })} className="p-1.5 hover:bg-slate-700 rounded text-slate-500 hover:text-slate-300 transition-colors shrink-0">
                       <Edit2 className="h-3.5 w-3.5" />
                     </button>
                   )}
@@ -971,6 +936,342 @@ function HierarchyTab({ hierarchy, setHierarchy, toast }: {
           })}
         </div>
       </SectionCard>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TAB 5 — USER OVERRIDES
+// ═══════════════════════════════════════════════════════════════════════════════
+function OverridesTab({ overrides, setOverrides, users, menuPerms, protectedRoutes, toast }: {
+  overrides: Override[];
+  setOverrides: React.Dispatch<React.SetStateAction<Override[]>>;
+  users: UserRole[];
+  menuPerms: MenuPermission[];
+  protectedRoutes: ProtectedRoute[];
+  toast: (m: string, t?: "success" | "error") => void;
+}) {
+  const [search, setSearch]     = useState("");
+  const [saving, setSaving]     = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [newOv, setNewOv]       = useState({
+    email:       "",
+    target_type: "route" as "route" | "menu",
+    target_id:   "",
+    effect:      "deny"  as "grant" | "deny",
+  });
+  const [creating, setCreating] = useState(false);
+
+  // Group overrides by email
+  const grouped = overrides.reduce<Record<string, Override[]>>((acc, o) => {
+    (acc[o.email] ??= []).push(o);
+    return acc;
+  }, {});
+
+  const filteredEmails = Object.keys(grouped).filter((e) =>
+    e.toLowerCase().includes(search.toLowerCase())
+  );
+
+  // Dropdown options for target_id based on selected type
+  const targetOptions = newOv.target_type === "menu"
+    ? menuPerms.map((m) => ({ value: m.menu_id,      label: m.display_name || m.menu_id }))
+    : protectedRoutes.map((r) => ({ value: r.path_prefix, label: r.path_prefix }));
+
+  const createOverride = async () => {
+    if (!newOv.email || !newOv.target_id) return;
+    setCreating(true);
+    try {
+      const { data } = await api.post("user_permission_overrides", {
+        email:       newOv.email,
+        target_type: newOv.target_type,
+        target_id:   newOv.target_id,
+        effect:      newOv.effect,
+      }, true); // upsert — updates if same email+target_type+target_id already exists
+      const created = data as Override;
+      setOverrides((p) => {
+        const exists = p.find((o) => o.id === created.id);
+        return exists ? p.map((o) => o.id === created.id ? created : o) : [...p, created];
+      });
+      setNewOv({ email: "", target_type: "route", target_id: "", effect: "deny" });
+      setShowForm(false);
+      toast(`Override set for ${created.email}`);
+    } catch (err: unknown) {
+      toast(err instanceof Error ? err.message : "Create failed", "error");
+    } finally { setCreating(false); }
+  };
+
+  // Click the effect badge to flip grant ↔ deny
+  const flipEffect = async (ov: Override) => {
+    setSaving(ov.id);
+    const next = ov.effect === "grant" ? "deny" : "grant";
+    try {
+      await api.patch("user_permission_overrides", { id: ov.id }, { effect: next });
+      setOverrides((p) => p.map((o) => o.id === ov.id ? { ...o, effect: next } : o));
+      toast(`Changed to ${next}`);
+    } catch (err: unknown) {
+      toast(err instanceof Error ? err.message : "Update failed", "error");
+    } finally { setSaving(null); }
+  };
+
+  const removeOverride = async (ov: Override) => {
+    setDeleting(ov.id);
+    try {
+      await api.remove("user_permission_overrides", { id: ov.id });
+      setOverrides((p) => p.filter((o) => o.id !== ov.id));
+      toast(`Removed override for ${ov.target_id}`);
+    } catch (err: unknown) {
+      toast(err instanceof Error ? err.message : "Delete failed", "error");
+    } finally { setDeleting(null); }
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Info banner */}
+      <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 px-5 py-3.5">
+        <p className="text-xs text-amber-200/70 leading-relaxed">
+          <span className="text-amber-400 font-semibold">User Overrides</span> — per-user exceptions on top of RBAC.
+          Priority: <span className="text-red-400 font-medium">User DENY</span> beats everything →{" "}
+          <span className="text-emerald-400 font-medium">User GRANT</span> overrides role denial →{" "}
+          <span className="text-slate-300 font-medium">RBAC role</span> is the fallback baseline.
+          To fully block a user from a section, add both a <code className="bg-slate-800/80 px-1 rounded">menu</code> deny
+          (hides sidebar) and a <code className="bg-slate-800/80 px-1 rounded">route</code> deny (blocks direct URL access).
+        </p>
+      </div>
+
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filter by email..."
+            className="w-full pl-9 pr-4 py-2 bg-slate-800/60 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-cyan-500/50" />
+        </div>
+        <button onClick={() => setShowForm(true)}
+          className="shrink-0 flex items-center gap-2 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-lg text-xs text-amber-300 font-medium transition-colors">
+          <Plus className="h-4 w-4" /> Add Override
+        </button>
+      </div>
+
+      {/* New override form */}
+      {showForm && (
+        <div className="rounded-xl border border-amber-500/20 bg-amber-950/20 p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-amber-300 flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4" /> Add User Override
+          </h3>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Email — datalist for autocomplete from existing users */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">User Email *</label>
+              <input
+                list="override-user-emails"
+                value={newOv.email}
+                onChange={(e) => setNewOv((p) => ({ ...p, email: e.target.value }))}
+                placeholder="user@company.com"
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
+              />
+              <datalist id="override-user-emails">
+                {users.map((u) => <option key={u.email} value={u.email}>{u.display_name}</option>)}
+              </datalist>
+            </div>
+
+            {/* Effect toggle */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">Effect *</label>
+              <div className="flex gap-2">
+                {(["deny", "grant"] as const).map((effect) => (
+                  <button key={effect} onClick={() => setNewOv((p) => ({ ...p, effect }))}
+                    className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
+                      newOv.effect === effect
+                        ? effect === "deny"
+                          ? "bg-red-500/20 border-red-500/40 text-red-300"
+                          : "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                        : "bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300"
+                    }`}>
+                    {effect === "deny" ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    {effect === "deny" ? "Deny" : "Grant"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            {/* Target type toggle */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">Target Type *</label>
+              <div className="flex gap-2">
+                {(["route", "menu"] as const).map((type) => (
+                  <button key={type} onClick={() => setNewOv((p) => ({ ...p, target_type: type, target_id: "" }))}
+                    className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium border transition-all ${
+                      newOv.target_type === type
+                        ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-300"
+                        : "bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300"
+                    }`}>
+                    {type === "route" ? "Route (URL block)" : "Menu (Sidebar hide)"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Target ID dropdown */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">
+                {newOv.target_type === "route" ? "Route Path *" : "Menu Section *"}
+              </label>
+              <select
+                value={newOv.target_id}
+                onChange={(e) => setNewOv((p) => ({ ...p, target_id: e.target.value }))}
+                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-slate-200 focus:outline-none focus:border-amber-500/50"
+              >
+                <option value="">Select {newOv.target_type === "route" ? "a route" : "a menu section"}...</option>
+                {targetOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Live preview of what the override will do */}
+          {newOv.email && newOv.target_id && (
+            <div className={`rounded-lg px-4 py-2.5 border text-xs flex items-center gap-2 ${
+              newOv.effect === "deny"
+                ? "bg-red-950/30 border-red-500/20 text-red-300"
+                : "bg-emerald-950/30 border-emerald-500/20 text-emerald-300"
+            }`}>
+              {newOv.effect === "deny"
+                ? <EyeOff className="h-3.5 w-3.5 shrink-0" />
+                : <ShieldCheck className="h-3.5 w-3.5 shrink-0" />}
+              <span>
+                <strong>{newOv.email}</strong> will be{" "}
+                <strong>{newOv.effect === "deny" ? "blocked from" : "granted access to"}</strong>{" "}
+                {newOv.target_type}{" "}
+                <code className="bg-slate-800/60 px-1 rounded">{newOv.target_id}</code>{" "}
+                regardless of their role.
+              </span>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button onClick={createOverride} disabled={creating || !newOv.email || !newOv.target_id}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 rounded-lg text-xs text-amber-200 font-medium transition-colors disabled:opacity-40">
+              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              Set Override
+            </button>
+            <button onClick={() => { setShowForm(false); setNewOv({ email: "", target_type: "route", target_id: "", effect: "deny" }); }}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-400">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Override list grouped by user */}
+      {overrides.length === 0 ? (
+        <div className="rounded-xl border border-slate-800 py-16 text-center space-y-2">
+          <ShieldCheck className="h-8 w-8 text-slate-700 mx-auto" />
+          <p className="text-slate-600 text-sm">No user overrides set</p>
+          <p className="text-slate-700 text-xs">All access is controlled purely by RBAC roles</p>
+        </div>
+      ) : filteredEmails.length === 0 ? (
+        <div className="rounded-xl border border-slate-800 py-10 text-center text-slate-600 text-sm">No users match your search</div>
+      ) : (
+        <div className="space-y-3">
+          {filteredEmails.map((email) => {
+            const userOverrides = grouped[email];
+            const user          = users.find((u) => u.email === email);
+            const denyCount     = userOverrides.filter((o) => o.effect === "deny").length;
+            const grantCount    = userOverrides.filter((o) => o.effect === "grant").length;
+
+            return (
+              <SectionCard key={email}>
+                {/* User header row */}
+                <div className="bg-slate-800/40 border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="h-7 w-7 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center text-xs font-bold text-slate-300 shrink-0">
+                      {email.substring(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-slate-200">
+                        {user?.display_name || email}
+                      </div>
+                      {user?.display_name && <div className="text-xs text-slate-500">{email}</div>}
+                    </div>
+                    <div className="flex flex-wrap gap-1 ml-1">
+                      {user?.roles.map((r) => <RoleBadge key={r} role={r} />)}
+                    </div>
+                  </div>
+                  {/* Summary counts */}
+                  <div className="flex items-center gap-2 text-xs shrink-0">
+                    {denyCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 border border-red-500/20">
+                        {denyCount} denied
+                      </span>
+                    )}
+                    {grantCount > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
+                        {grantCount} granted
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Individual override rows */}
+                <div className="divide-y divide-slate-800/60">
+                  {userOverrides.map((ov) => (
+                    <div key={ov.id} className="px-4 py-3 flex items-center gap-3 hover:bg-slate-800/20 transition-colors">
+                      {/* Clickable effect badge — click to flip grant↔deny */}
+                      <button
+                        onClick={() => flipEffect(ov)}
+                        disabled={saving === ov.id}
+                        title="Click to toggle grant / deny"
+                        className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all ${
+                          ov.effect === "deny"
+                            ? "bg-red-500/15 text-red-400 border-red-500/25 hover:bg-red-500/25"
+                            : "bg-emerald-500/15 text-emerald-400 border-emerald-500/25 hover:bg-emerald-500/25"
+                        }`}>
+                        {saving === ov.id
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : ov.effect === "deny"
+                            ? <EyeOff className="h-3 w-3" />
+                            : <ShieldCheck className="h-3 w-3" />
+                        }
+                        {ov.effect}
+                      </button>
+
+                      {/* Target type pill */}
+                      <span className={`shrink-0 px-2 py-0.5 rounded text-xs border font-mono ${
+                        ov.target_type === "route"
+                          ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20"
+                          : "bg-violet-500/10 text-violet-400 border-violet-500/20"
+                      }`}>
+                        {ov.target_type}
+                      </span>
+
+                      {/* Target ID */}
+                      <code className="flex-1 text-xs text-slate-300 font-mono bg-slate-800/60 px-2 py-1 rounded border border-slate-700/60 truncate">
+                        {ov.target_id}
+                      </code>
+
+                      {/* Date added */}
+                      <span className="text-xs text-slate-600 shrink-0">
+                        {new Date(ov.granted_at).toLocaleDateString()}
+                      </span>
+
+                      {/* Remove button */}
+                      <button
+                        onClick={() => removeOverride(ov)}
+                        disabled={deleting === ov.id}
+                        className="shrink-0 p-1.5 hover:bg-red-500/10 rounded text-slate-600 hover:text-red-400 transition-colors disabled:opacity-40">
+                        {deleting === ov.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

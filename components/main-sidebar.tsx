@@ -36,7 +36,8 @@ import {
   getRoutePermissions,
   hasMenuAccessSync,
   hasRouteAccessSync,
-  UserRole,
+  MenuPermEntry,
+  RoutePermEntry,
 } from "@/lib/auth/roles";
 
 export function MainSidebar() {
@@ -47,14 +48,15 @@ export function MainSidebar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     dashboard: true,
-    gps: pathname?.startsWith("/gps") || false,
-    "360": pathname?.startsWith("/vehicles") || pathname?.startsWith("/batteries") || pathname?.startsWith("/bss") || false,
-    revenue: pathname?.startsWith("/revenue") || false,
-    sales: pathname?.startsWith("/sales") || false,
+    gps:     pathname?.startsWith("/gps")      || false,
+    "360":   pathname?.startsWith("/vehicles") || pathname?.startsWith("/batteries") || pathname?.startsWith("/bss") || false,
+    revenue: pathname?.startsWith("/revenue")  || false,
+    sales:   pathname?.startsWith("/sales")    || false,
   });
 
-  const [menuPerms, setMenuPerms] = useState<Record<string, UserRole[]>>({});
-  const [routePerms, setRoutePerms] = useState<Record<string, UserRole[]>>({});
+  // ── Correct types so user_effect is preserved ─────────────────────────────
+  const [menuPerms,  setMenuPerms]  = useState<Record<string, MenuPermEntry>>({});
+  const [routePerms, setRoutePerms] = useState<Record<string, RoutePermEntry>>({});
   const [permsLoaded, setPermsLoaded] = useState(false);
 
   useEffect(() => {
@@ -68,8 +70,6 @@ export function MainSidebar() {
         console.error("[Sidebar] Failed to load permissions:", err);
       })
       .finally(() => {
-        // Always mark loaded — even on error — so !permsLoaded
-        // never permanently bypasses all permission checks.
         setPermsLoaded(true);
       });
   }, [session]);
@@ -87,17 +87,23 @@ export function MainSidebar() {
   const openMobileMenu  = () => setIsMobileMenuOpen(true);
 
   // ── Permission checks ──────────────────────────────────────────────────────
-  // canAccessMenu  → checks menu_permissions table (controls sidebar visibility)
-  // canAccessRoute → checks route_permissions table (controls grouped sub-items)
   //
-  // While loading: hide everything to avoid flash of restricted items.
-  // On error:      permsLoaded becomes true with empty perms → everything hidden,
-  //                which is the safe default.
+  // canAccessMenu(menuId, routePath?)
+  //   For standalone links, pass BOTH the menu_id AND the route path.
+  //   A deny on EITHER the menu entry OR the route entry will hide the link.
+  //   This means admins can block a user via a route override (/adhoc) OR
+  //   a menu override (adhoc) — whichever they set in the admin UI.
+  //
+  // canAccessRoute(route)
+  //   Used for grouped sub-items (GPS, 360, Revenue children).
 
-  const canAccessMenu = (menuId: string) =>
-    permsLoaded && hasMenuAccessSync(menuPerms, userRoles, menuId);
+  // Replace canAccessMenu in MainSidebar:
+  const canAccessMenu = (menuId: string): boolean => {
+    if (!permsLoaded) return false;
+    return hasMenuAccessSync(menuPerms, userRoles, menuId);
+  };
 
-  const canAccessRoute = (route: string) =>
+  const canAccessRoute = (route: string): boolean =>
     permsLoaded && hasRouteAccessSync(routePerms, userRoles, route);
 
   const categoryIcons: Record<string, { icon: React.ReactNode; color: string }> = {
@@ -148,12 +154,12 @@ export function MainSidebar() {
     },
   ];
 
+  // Grouped categories — menu_id only (no standalone route path needed)
   const visibleCategories = menuCategories.filter(
     (c) => c.show && canAccessMenu(c.id)
   );
 
   const renderMenuContent = () => {
-    // Show skeleton while permissions are loading
     if (!permsLoaded) {
       return (
         <div className="px-4 py-3 space-y-2">
@@ -166,10 +172,12 @@ export function MainSidebar() {
 
     return (
       <>
-        {/* ── Standalone links — visibility controlled by menu_permissions ── */}
+        {/* ── Standalone links ───────────────────────────────────────────────
+            Pass BOTH menu_id AND route path so either override type works.
+            A route deny on "/realtime" OR a menu deny on "realtime" hides it.
+        ── */}
 
-        {/* menu_permissions.menu_id = 'realtime' */}
-        {canAccessMenu("realtime") && (
+        {canAccessMenu("realtime", "/realtime") && (
           <SidebarGroup className="px-2 py-1">
             <SidebarMenu>
               <SidebarMenuItem>
@@ -187,8 +195,7 @@ export function MainSidebar() {
           </SidebarGroup>
         )}
 
-        {/* menu_permissions.menu_id = 'adhoc' */}
-        {canAccessMenu("adhoc") && (
+        {canAccessMenu("adhoc", "/adhoc") && (
           <SidebarGroup className="px-2 py-1">
             <SidebarMenu>
               <SidebarMenuItem>
@@ -206,8 +213,7 @@ export function MainSidebar() {
           </SidebarGroup>
         )}
 
-        {/* menu_permissions.menu_id = 'predictive' */}
-        {canAccessMenu("predictive") && (
+        {canAccessMenu("predictive", "/predictive") && (
           <SidebarGroup className="px-2 py-1">
             <SidebarMenu>
               <SidebarMenuItem>
@@ -227,7 +233,7 @@ export function MainSidebar() {
 
         {visibleCategories.length > 0 && <SidebarSeparator className="my-1 bg-slate-800" />}
 
-        {/* ── Grouped categories — header via menu_permissions, items via route_permissions ── */}
+        {/* ── Grouped categories ─────────────────────────────────────────── */}
         {visibleCategories.map((category) => (
           <Collapsible
             key={category.id}
@@ -259,7 +265,7 @@ export function MainSidebar() {
                             className={`w-full px-3 py-2 rounded-md transition-colors ${
                               isActive(item.path)
                                 ? `bg-gradient-to-r ${
-                                    category.icon.color.includes("cyan")    ? "from-cyan-500/15 to-cyan-600/10 border border-cyan-500/20"
+                                    category.icon.color.includes("cyan")      ? "from-cyan-500/15 to-cyan-600/10 border border-cyan-500/20"
                                     : category.icon.color.includes("emerald") ? "from-emerald-500/15 to-emerald-600/10 border border-emerald-500/20"
                                     : "from-blue-500/15 to-blue-600/10 border border-blue-500/20"
                                   } ${category.icon.color}`

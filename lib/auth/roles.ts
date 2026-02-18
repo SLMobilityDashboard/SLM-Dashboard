@@ -1,33 +1,53 @@
 // lib/roles.ts
 // All permission data is stored in Supabase, fetched via /api/permissions.
 // Safe to call from both client and server components.
+//
+// Override priority (highest → lowest):
+//   1. user_effect === 'deny'  → always block / hide
+//   2. user_effect === 'grant' → always allow / show
+//   3. RBAC allowed_roles check
+//   4. empty allowed_roles     → allow all authenticated users (menu)
+//                                / allow all authenticated users (route, no entry)
 
 export const ROLES = {
-  ADMIN: 'Admin',
-  MANAGER: 'Manager',
-  ANALYST: 'Analyst',
-  VIEWER: 'Viewer',
+  ADMIN:           'Admin',
+  MANAGER:         'Manager',
+  ANALYST:         'Analyst',
+  VIEWER:          'Viewer',
   FACTORY_MANAGER: 'FactoryManager',
-  QA: 'QA',
+  QA:              'QA',
 } as const;
 
 export type UserRole = typeof ROLES[keyof typeof ROLES];
 
-// ---------------------------------------------------------------------------
-// In-memory cache — avoids hammering the API on every render
-// TTL: 60 seconds
-// ---------------------------------------------------------------------------
+// ── Richer types returned by the updated API ──────────────────────────────────
+
+export type MenuPermEntry = {
+  menu_id:       string;
+  allowed_roles: string[];
+  is_enabled:    boolean;
+  user_effect:   'grant' | 'deny' | null;
+};
+
+export type RoutePermEntry = {
+  route:         string;
+  allowed_roles: string[];
+  user_effect:   'grant' | 'deny' | null;
+};
+
+type MenuPermMap  = Record<string, MenuPermEntry>;
+type RoutePermMap = Record<string, RoutePermEntry>;
+
+// ── In-memory cache — 60 s TTL ───────────────────────────────────────────────
 
 const CACHE_TTL_MS = 60_000;
 
 const cache: {
-  menuPerms?: { data: Record<string, UserRole[]>; expiresAt: number };
-  routePerms?: { data: Record<string, UserRole[]>; expiresAt: number };
+  menuPerms?:  { data: MenuPermMap;  expiresAt: number };
+  routePerms?: { data: RoutePermMap; expiresAt: number };
 } = {};
 
-// ---------------------------------------------------------------------------
-// Fetch helper
-// ---------------------------------------------------------------------------
+// ── Fetch helper ──────────────────────────────────────────────────────────────
 
 function getBaseUrl(): string {
   if (typeof window !== 'undefined') return '';
@@ -51,133 +71,136 @@ async function fetchPermissions<T>(type: string): Promise<T | null> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Data fetchers (with cache)
-// ---------------------------------------------------------------------------
+// ── Data fetchers (cached) ────────────────────────────────────────────────────
 
-export async function getRoutePermissions(): Promise<Record<string, UserRole[]>> {
+export async function getRoutePermissions(): Promise<RoutePermMap> {
   const now = Date.now();
-  if (cache.routePerms && cache.routePerms.expiresAt > now) {
-    return cache.routePerms.data;
+  if (cache.routePerms && cache.routePerms.expiresAt > now) return cache.routePerms.data;
+
+  const data = await fetchPermissions<{ routePerms: RoutePermEntry[] | Record<string, string[]> }>('routeperms');
+  const raw  = data?.routePerms ?? [];
+
+  let result: RoutePermMap;
+  if (Array.isArray(raw)) {
+    // New format — array with user_effect
+    result = Object.fromEntries(raw.map((r) => [r.route, r]));
+  } else {
+    // Old flat format — wrap into RoutePermEntry with null user_effect
+    result = Object.fromEntries(
+      Object.entries(raw).map(([route, allowed_roles]) => [
+        route,
+        { route, allowed_roles, user_effect: null } as RoutePermEntry,
+      ])
+    );
   }
-  const data = await fetchPermissions<{ routePerms: Record<string, UserRole[]> }>('routeperms');
-  const result = data?.routePerms ?? {};
+
   cache.routePerms = { data: result, expiresAt: now + CACHE_TTL_MS };
   return result;
 }
 
-export async function getMenuPermissions(): Promise<Record<string, UserRole[]>> {
+export async function getMenuPermissions(): Promise<MenuPermMap> {
   const now = Date.now();
-  if (cache.menuPerms && cache.menuPerms.expiresAt > now) {
-    return cache.menuPerms.data;
+  if (cache.menuPerms && cache.menuPerms.expiresAt > now) return cache.menuPerms.data;
+
+  const data = await fetchPermissions<{ menuPerms: MenuPermEntry[] | Record<string, string[]> }>('menu');
+  const raw  = data?.menuPerms ?? [];
+
+  let result: MenuPermMap;
+  if (Array.isArray(raw)) {
+    // New format — array with is_enabled + user_effect
+    result = Object.fromEntries(raw.map((m) => [m.menu_id, m]));
+  } else {
+    // Old flat format
+    result = Object.fromEntries(
+      Object.entries(raw).map(([menu_id, allowed_roles]) => [
+        menu_id,
+        { menu_id, allowed_roles, is_enabled: true, user_effect: null } as MenuPermEntry,
+      ])
+    );
   }
-  const data = await fetchPermissions<{ menuPerms: Record<string, UserRole[]> }>('menu');
-  const result = data?.menuPerms ?? {};
+
   cache.menuPerms = { data: result, expiresAt: now + CACHE_TTL_MS };
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Async helpers
-// ---------------------------------------------------------------------------
+// ── Sync helpers — called by the sidebar after fetching once ──────────────────
 
-export async function hasRouteAccess(
-  userRoles: string[] | undefined,
-  route: string
-): Promise<boolean> {
-  if (!userRoles?.length) return false;
-  const routePerms = await getRoutePermissions();
-  return _checkRouteAccess(routePerms, userRoles, route);
-}
-
-export async function hasMenuAccess(
-  userRoles: string[] | undefined,
-  menuId: string
-): Promise<boolean> {
-  if (!userRoles?.length) return false;
-  const menuPerms = await getMenuPermissions();
-  return _checkMenuAccess(menuPerms, userRoles, menuId);
-}
-
-export async function filterMenuByRoles(
-  menuCategories: any[],
-  userRoles: string[] | undefined
-): Promise<any[]> {
-  if (!userRoles?.length) return [];
-  const menuPerms = await getMenuPermissions();
-  return menuCategories.filter((category) => {
-    if (category.show === false) return false;
-    return _checkMenuAccess(menuPerms, userRoles, category.id);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Sync variants — use when you've already fetched permissions once
-//
-// Pattern:
-//   const menuPerms  = await getMenuPermissions();
-//   const routePerms = await getRoutePermissions();
-//   const visible    = filterMenuByRolesSync(menuPerms, categories, userRoles);
-//   const canView    = hasRouteAccessSync(routePerms, userRoles, '/revenue');
-// ---------------------------------------------------------------------------
-
-export function hasRouteAccessSync(
-  routePerms: Record<string, UserRole[]>,
-  userRoles: string[] | undefined,
-  route: string
-): boolean {
-  if (!userRoles?.length) return false;
-  return _checkRouteAccess(routePerms, userRoles, route);
-}
-
+/**
+ * Check menu visibility for the current user.
+ *
+ * Priority:
+ *   deny override  → false  (hidden regardless of role)
+ *   !is_enabled    → false  (globally off)
+ *   grant override → true   (shown regardless of role)
+ *   allowed_roles  → RBAC check
+ *   empty roles    → true   (no restriction)
+ */
 export function hasMenuAccessSync(
-  menuPerms: Record<string, UserRole[]>,
+  menuPerms: MenuPermMap,
   userRoles: string[] | undefined,
   menuId: string
 ): boolean {
   if (!userRoles?.length) return false;
-  return _checkMenuAccess(menuPerms, userRoles, menuId);
+
+  const entry = menuPerms[menuId];
+  if (!entry) return true; // unknown menu → no restriction, fail open
+
+  if (entry.user_effect === 'deny')  return false;
+  if (!entry.is_enabled)             return false;
+  if (entry.user_effect === 'grant') return true;
+
+  if (entry.allowed_roles.length === 0) return true;
+  return userRoles.some((r) => entry.allowed_roles.includes(r));
+}
+
+/**
+ * Check route / sub-item visibility for the current user.
+ *
+ * Priority:
+ *   deny override  → false
+ *   grant override → true
+ *   allowed_roles  → RBAC check
+ *   no entry / empty roles → true (no restriction)
+ */
+export function hasRouteAccessSync(
+  routePerms: RoutePermMap,
+  userRoles: string[] | undefined,
+  route: string
+): boolean {
+  if (!userRoles?.length) return false;
+
+  const entry = routePerms[route];
+  if (!entry) return true;
+
+  if (entry.user_effect === 'deny')  return false;
+  if (entry.user_effect === 'grant') return true;
+
+  if (entry.allowed_roles.length === 0) return true;
+  return userRoles.some((r) => entry.allowed_roles.includes(r));
+}
+
+// ── Async helpers ─────────────────────────────────────────────────────────────
+
+export async function hasRouteAccess(userRoles: string[] | undefined, route: string): Promise<boolean> {
+  if (!userRoles?.length) return false;
+  return hasRouteAccessSync(await getRoutePermissions(), userRoles, route);
+}
+
+export async function hasMenuAccess(userRoles: string[] | undefined, menuId: string): Promise<boolean> {
+  if (!userRoles?.length) return false;
+  return hasMenuAccessSync(await getMenuPermissions(), userRoles, menuId);
+}
+
+export async function filterMenuByRoles(menuCategories: any[], userRoles: string[] | undefined): Promise<any[]> {
+  if (!userRoles?.length) return [];
+  return filterMenuByRolesSync(await getMenuPermissions(), menuCategories, userRoles);
 }
 
 export function filterMenuByRolesSync(
-  menuPerms: Record<string, UserRole[]>,
+  menuPerms: MenuPermMap,
   menuCategories: any[],
   userRoles: string[] | undefined
 ): any[] {
   if (!userRoles?.length) return [];
-  return menuCategories.filter((category) => {
-    if (category.show === false) return false;
-    return _checkMenuAccess(menuPerms, userRoles, category.id);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Private implementations
-// ---------------------------------------------------------------------------
-
-function _checkRouteAccess(
-  routePerms: Record<string, UserRole[]>,
-  userRoles: string[],
-  route: string
-): boolean {
-  if (routePerms[route]) {
-    return userRoles.some((r) => routePerms[route].includes(r as UserRole));
-  }
-  const parts = route.split('/').filter(Boolean);
-  for (let i = parts.length - 1; i > 0; i--) {
-    const parent = '/' + parts.slice(0, i).join('/');
-    if (routePerms[parent]) {
-      return userRoles.some((r) => routePerms[parent].includes(r as UserRole));
-    }
-  }
-  return false;
-}
-
-function _checkMenuAccess(
-  menuPerms: Record<string, UserRole[]>,
-  userRoles: string[],
-  menuId: string
-): boolean {
-  if (!menuPerms[menuId]) return false;
-  return userRoles.some((r) => menuPerms[menuId].includes(r as UserRole));
+  return menuCategories.filter((c) => c.show !== false && hasMenuAccessSync(menuPerms, userRoles, c.id));
 }

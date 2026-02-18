@@ -2,16 +2,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 
-const PUBLIC_PREFIXES = ['/auth', '/api/'];
-const PUBLIC_EXACT    = ['/'];
-
-// Redirect unauthorized users here
-const FORBIDDEN_REDIRECT = '/auth/sign-in';
+const PUBLIC_PREFIXES    = ['/auth', '/api/'];
+const PUBLIC_EXACT       = ['/'];
+const FORBIDDEN_REDIRECT = '/unauthorized';
 
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 1. Always allow public paths
   if (
     PUBLIC_EXACT.includes(pathname) ||
     PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))
@@ -19,10 +16,8 @@ export default async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 2. Get session token — contains roles assigned at sign-in
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
 
-  // 3. Not logged in — redirect to sign in
   if (!token) {
     const signInUrl = new URL('/auth/sign-in', req.url);
     signInUrl.searchParams.set('callbackUrl', req.url);
@@ -30,68 +25,69 @@ export default async function middleware(req: NextRequest) {
   }
 
   const userRoles: string[] = (token.roles as string[]) ?? [];
+  const userEmail: string   = (token.email as string)   ?? '';
 
-  // 4. Fetch route permissions from internal API
-  //    We use the internal secret here — this is server-side middleware, so it's available
-  let routePerms: Record<string, string[]> = {};
+  // Fetch route perms from the EXISTING endpoint, passing email for overrides
+  let routePerms: Array<{ route: string; allowed_roles: string[]; user_effect: 'grant' | 'deny' | null }> = [];
   try {
-    const res = await fetch(
-      `${req.nextUrl.origin}/api/permissions/routes`,
-      {
-        headers: {
-          'x-internal-secret': process.env.INTERNAL_API_SECRET ?? '',
-        },
-        // Cache for 60s to avoid hitting DB on every request
-        // @ts-ignore — Next.js extended fetch
-        next: { revalidate: 60 },
-      }
-    );
+    const url = new URL('/api/permissions', req.nextUrl.origin);
+    url.searchParams.set('type', 'routeperms');
+    if (userEmail) url.searchParams.set('email', userEmail);
+
+    const res = await fetch(url.toString(), {
+      headers: { 'x-internal-secret': process.env.INTERNAL_API_SECRET ?? '' },
+    });
+
     if (res.ok) {
       const data = await res.json();
-      routePerms = data.routePerms ?? {};
+      routePerms = data.routePerms ?? [];
     }
   } catch (err) {
     console.error('[middleware] Failed to fetch route permissions:', err);
-    // Fail open for non-sensitive paths — user is at least authenticated
   }
 
-  // 5. Check if this path has role restrictions
-  const allowedRoles = findAllowedRoles(routePerms, pathname);
+  // Build a map for O(1) lookup
+  const permsMap = Object.fromEntries(
+    routePerms.map((r) => [r.route, r])
+  );
 
-  // No restriction defined for this path — allow authenticated user through
-  if (!allowedRoles) return NextResponse.next();
+  const entry = findEntry(permsMap, pathname);
 
-  // 6. Check if user has at least one allowed role
-  const hasAccess = userRoles.some((role) => allowedRoles.includes(role));
+  // No restriction defined → allow
+  if (!entry) return NextResponse.next();
 
+  // Route override — checked independently of menu overrides
+  if (entry.user_effect === 'deny') {
+    console.warn(`[middleware] Override DENY: ${userEmail} → ${pathname}`);
+    return NextResponse.redirect(new URL(FORBIDDEN_REDIRECT, req.url));
+  }
+
+  if (entry.user_effect === 'grant') {
+    return NextResponse.next();
+  }
+
+  // Standard RBAC
+  if (entry.allowed_roles.length === 0) return NextResponse.next();
+
+  const hasAccess = userRoles.some((role) => entry.allowed_roles.includes(role));
   if (!hasAccess) {
-    console.warn(
-      `[middleware] Access denied: ${token.email} (${userRoles.join(',')}) → ${pathname}`
-    );
-    // Redirect to a 403 page or back to home
-    return NextResponse.redirect(new URL('/unauthorized', req.url));
+    console.warn(`[middleware] Access denied: ${userEmail} (${userRoles.join(',')}) → ${pathname}`);
+    return NextResponse.redirect(new URL(FORBIDDEN_REDIRECT, req.url));
   }
 
   return NextResponse.next();
 }
 
-/**
- * Find allowed roles for a pathname.
- * Checks exact match first, then walks up to parent routes.
- * Returns null if no restriction is defined (allow all authenticated users).
- */
-function findAllowedRoles(
-  routePerms: Record<string, string[]>,
+function findEntry(
+  permsMap: Record<string, { route: string; allowed_roles: string[]; user_effect: 'grant' | 'deny' | null }>,
   pathname: string
-): string[] | null {
-  // Exact match
-  if (routePerms[pathname]) return routePerms[pathname];
+) {
+  if (permsMap[pathname]) return permsMap[pathname];
 
-  // Walk up: /revenue/analytics → /revenue
   const parts = pathname.split('/').filter(Boolean);
   for (let i = parts.length - 1; i > 0; i--) {
     const parent = '/' + parts.slice(0, i).join('/');
-    if (routePerms[parent]) return routePerms[parent];
+    if (permsMap[parent]) return permsMap[parent];
   }
 
   return null;
