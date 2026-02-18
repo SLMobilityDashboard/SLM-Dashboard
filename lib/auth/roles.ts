@@ -1,5 +1,6 @@
 // lib/roles.ts
-// This file defines all roles and permissions for your application
+// All permission data is stored in Supabase, fetched via /api/permissions.
+// Safe to call from both client and server components.
 
 export const ROLES = {
   ADMIN: 'Admin',
@@ -8,148 +9,175 @@ export const ROLES = {
   VIEWER: 'Viewer',
   FACTORY_MANAGER: 'FactoryManager',
   QA: 'QA',
-} as const
+} as const;
 
-export type UserRole = typeof ROLES[keyof typeof ROLES]
+export type UserRole = typeof ROLES[keyof typeof ROLES];
 
-/**
- * Current Access Rules:
- * - Admin: Full access to everything (super user)
- * - QA: Full access to everything (quality assurance oversight)
- * - FactoryManager: Access to everything EXCEPT revenue
- * 
- * Future roles (Manager, Analyst, Viewer) are defined but not yet assigned
- */
+// ---------------------------------------------------------------------------
+// In-memory cache — avoids hammering the API on every render
+// TTL: 60 seconds
+// ---------------------------------------------------------------------------
 
-// Define which roles can access which menu categories
-export const MENU_PERMISSIONS: Record<string, UserRole[]> = {
-  realtime: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-  fleet: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  gps: [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER, ROLES.ANALYST],
-  batteries: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  vehicles: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  sales: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  charging: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  revenue: [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER], // FactoryManager excluded
-  analytics: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-  factory: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER], // Factory-specific
-  production: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER], // Factory-specific
-  quality: [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER], // QA and Factory oversight
+const CACHE_TTL_MS = 60_000;
+
+const cache: {
+  menuPerms?: { data: Record<string, UserRole[]>; expiresAt: number };
+  routePerms?: { data: Record<string, UserRole[]>; expiresAt: number };
+} = {};
+
+// ---------------------------------------------------------------------------
+// Fetch helper
+// ---------------------------------------------------------------------------
+
+function getBaseUrl(): string {
+  if (typeof window !== 'undefined') return '';
+  return process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
 }
 
-// Define which roles can access which routes
-export const ROUTE_PERMISSIONS: Record<string, UserRole[]> = {
-  // Dashboard routes
-  '/realtime': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-  '/adhoc': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  '/predictive': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  
-  // Fleet Management
-  '/fleet': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  '/fleet/vehicles': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  '/fleet/maintenance': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  '/fleet/schedule': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  
-  // GPS Analytics
-  '/gps': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  '/gps/route-planning': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  '/gps/usage-patterns': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  '/gps/area-analysis': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  '/gps/density-analysis': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  
-  // Battery 360
-  '/batteries': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-
-  // Vehicles
-  '/vehicles': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-
-  // Home Charging 360
-  '/home-charging': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  
-  // Sales Management
-  '/sales': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  '/sales/regional': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  '/sales/financial': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  '/sales/dealers': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  '/sales/customers': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER],
-  
-  // BSS 360
-  '/bss': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  
-  // Revenue Management - FactoryManager EXCLUDED
-  '/revenue': [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER],
-  '/revenue/analytics': [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER],
-  '/revenue/patterns': [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER],
-  '/revenue/package': [ROLES.ADMIN, ROLES.QA, ROLES.MANAGER],
-  
-  // Analytics
-  '/analytics': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-  '/analytics/reports': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-  '/analytics/predictions': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  '/analytics/alerts': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST],
-  
-  // Factory Management - Factory-specific routes
-  '/factory': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/factory/production': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/factory/assembly': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/factory/inventory': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  
-  // Production Management
-  '/production': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/production/schedule': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/production/status': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/production/line': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  
-  // Quality Assurance
-  '/qa': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/qa/inspections': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/qa/reports': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/qa/defects': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/quality': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/quality/control': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  '/quality/standards': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER],
-  
-  // Settings
-  '/settings': [ROLES.ADMIN, ROLES.QA, ROLES.FACTORY_MANAGER, ROLES.MANAGER, ROLES.ANALYST, ROLES.VIEWER],
-}
-
-// Helper function to check if user has access to a route
-export function hasRouteAccess(userRoles: string[] | undefined, route: string): boolean {
-  if (!userRoles || userRoles.length === 0) return false
-  
-  // Check exact route match first
-  if (ROUTE_PERMISSIONS[route]) {
-    return userRoles.some(role => ROUTE_PERMISSIONS[route].includes(role as UserRole))
+async function fetchPermissions<T>(type: string): Promise<T | null> {
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/permissions?type=${type}`, {
+      credentials: 'include',
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      console.error(`[fetchPermissions] ${type} → ${res.status}`);
+      return null;
+    }
+    return res.json() as Promise<T>;
+  } catch (err) {
+    console.error(`[fetchPermissions] Failed for type=${type}:`, err);
+    return null;
   }
-  
-  // Check parent routes (e.g., /gps for /gps/some-page)
-  const routeParts = route.split('/').filter(Boolean)
-  for (let i = routeParts.length; i > 0; i--) {
-    const parentRoute = '/' + routeParts.slice(0, i).join('/')
-    if (ROUTE_PERMISSIONS[parentRoute]) {
-      return userRoles.some(role => ROUTE_PERMISSIONS[parentRoute].includes(role as UserRole))
+}
+
+// ---------------------------------------------------------------------------
+// Data fetchers (with cache)
+// ---------------------------------------------------------------------------
+
+export async function getRoutePermissions(): Promise<Record<string, UserRole[]>> {
+  const now = Date.now();
+  if (cache.routePerms && cache.routePerms.expiresAt > now) {
+    return cache.routePerms.data;
+  }
+  const data = await fetchPermissions<{ routePerms: Record<string, UserRole[]> }>('routeperms');
+  const result = data?.routePerms ?? {};
+  cache.routePerms = { data: result, expiresAt: now + CACHE_TTL_MS };
+  return result;
+}
+
+export async function getMenuPermissions(): Promise<Record<string, UserRole[]>> {
+  const now = Date.now();
+  if (cache.menuPerms && cache.menuPerms.expiresAt > now) {
+    return cache.menuPerms.data;
+  }
+  const data = await fetchPermissions<{ menuPerms: Record<string, UserRole[]> }>('menu');
+  const result = data?.menuPerms ?? {};
+  cache.menuPerms = { data: result, expiresAt: now + CACHE_TTL_MS };
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Async helpers
+// ---------------------------------------------------------------------------
+
+export async function hasRouteAccess(
+  userRoles: string[] | undefined,
+  route: string
+): Promise<boolean> {
+  if (!userRoles?.length) return false;
+  const routePerms = await getRoutePermissions();
+  return _checkRouteAccess(routePerms, userRoles, route);
+}
+
+export async function hasMenuAccess(
+  userRoles: string[] | undefined,
+  menuId: string
+): Promise<boolean> {
+  if (!userRoles?.length) return false;
+  const menuPerms = await getMenuPermissions();
+  return _checkMenuAccess(menuPerms, userRoles, menuId);
+}
+
+export async function filterMenuByRoles(
+  menuCategories: any[],
+  userRoles: string[] | undefined
+): Promise<any[]> {
+  if (!userRoles?.length) return [];
+  const menuPerms = await getMenuPermissions();
+  return menuCategories.filter((category) => {
+    if (category.show === false) return false;
+    return _checkMenuAccess(menuPerms, userRoles, category.id);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sync variants — use when you've already fetched permissions once
+//
+// Pattern:
+//   const menuPerms  = await getMenuPermissions();
+//   const routePerms = await getRoutePermissions();
+//   const visible    = filterMenuByRolesSync(menuPerms, categories, userRoles);
+//   const canView    = hasRouteAccessSync(routePerms, userRoles, '/revenue');
+// ---------------------------------------------------------------------------
+
+export function hasRouteAccessSync(
+  routePerms: Record<string, UserRole[]>,
+  userRoles: string[] | undefined,
+  route: string
+): boolean {
+  if (!userRoles?.length) return false;
+  return _checkRouteAccess(routePerms, userRoles, route);
+}
+
+export function hasMenuAccessSync(
+  menuPerms: Record<string, UserRole[]>,
+  userRoles: string[] | undefined,
+  menuId: string
+): boolean {
+  if (!userRoles?.length) return false;
+  return _checkMenuAccess(menuPerms, userRoles, menuId);
+}
+
+export function filterMenuByRolesSync(
+  menuPerms: Record<string, UserRole[]>,
+  menuCategories: any[],
+  userRoles: string[] | undefined
+): any[] {
+  if (!userRoles?.length) return [];
+  return menuCategories.filter((category) => {
+    if (category.show === false) return false;
+    return _checkMenuAccess(menuPerms, userRoles, category.id);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Private implementations
+// ---------------------------------------------------------------------------
+
+function _checkRouteAccess(
+  routePerms: Record<string, UserRole[]>,
+  userRoles: string[],
+  route: string
+): boolean {
+  if (routePerms[route]) {
+    return userRoles.some((r) => routePerms[route].includes(r as UserRole));
+  }
+  const parts = route.split('/').filter(Boolean);
+  for (let i = parts.length - 1; i > 0; i--) {
+    const parent = '/' + parts.slice(0, i).join('/');
+    if (routePerms[parent]) {
+      return userRoles.some((r) => routePerms[parent].includes(r as UserRole));
     }
   }
-  
-  return false
+  return false;
 }
 
-// Helper function to check if user can see a menu category
-export function hasMenuAccess(userRoles: string[] | undefined, menuId: string): boolean {
-  if (!userRoles || userRoles.length === 0) return false
-  
-  if (!MENU_PERMISSIONS[menuId]) return true // If not defined, allow by default
-  
-  return userRoles.some(role => MENU_PERMISSIONS[menuId].includes(role as UserRole))
-}
-
-// Helper function to filter menu categories based on user roles
-export function filterMenuByRoles(menuCategories: any[], userRoles: string[] | undefined) {
-  return menuCategories.filter(category => {
-    // If category has show: false, don't show it regardless of role
-    if (category.show === false) return false
-    
-    // Check if user has access based on roles
-    return hasMenuAccess(userRoles, category.id)
-  })
+function _checkMenuAccess(
+  menuPerms: Record<string, UserRole[]>,
+  userRoles: string[],
+  menuId: string
+): boolean {
+  if (!menuPerms[menuId]) return false;
+  return userRoles.some((r) => menuPerms[menuId].includes(r as UserRole));
 }
