@@ -28,8 +28,8 @@ export default function RBACSankey() {
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(true);
   const [error, setError]       = useState(null);
-  const [hovered, setHovered]   = useState(null); // nodeId string or null
-  const [selected, setSelected] = useState(null); // nodeId string or null
+  const [hovered, setHovered]   = useState(null);
+  const [selected, setSelected] = useState(null);
   const svgRef = useRef(null);
 
   useEffect(() => {
@@ -78,19 +78,34 @@ export default function RBACSankey() {
   // ── Graph ────────────────────────────────────────────────────────────────
   const allRoles = [...new Set(users.flatMap((u) => u.roles))].sort();
 
+  // ── Vertical symmetry: centre each column against the tallest ────────────
+  const colHeight = (count) => count * (NODE_H + GAP) - GAP;
+  const maxHeight = Math.max(
+    colHeight(users.length),
+    colHeight(allRoles.length),
+    colHeight(routePerms.length),
+  );
+  const colOffset = (count) => Math.round((maxHeight - colHeight(count)) / 2);
+
+  const userOffset  = colOffset(users.length);
+  const roleOffset  = colOffset(allRoles.length);
+  const routeOffset = colOffset(routePerms.length);
+
+  // ── Edges — effect is resolved dynamically at render time, NOT baked in ──
   const urEdges = users.flatMap((u) =>
     u.roles.map((r) => ({
-      from: `u:${u.id}`, to: `r:${r}`, type: "user-role", effect: null,
+      from: `u:${u.id}`, to: `r:${r}`, type: "user-role",
+      effect: null,
+      userEmail: u.email,
     }))
   );
 
   const rrEdges = routePerms.flatMap((rp) =>
-    rp.allowed_roles.map((r) => {
-      const usersWithRole = users.filter((u) => u.roles.includes(r));
-      const effects = usersWithRole.map((u) => userRouteEffect(u.email, rp.route)).filter(Boolean);
-      const effect  = effects.includes("deny") ? "deny" : effects.includes("grant") ? "grant" : null;
-      return { from: `r:${r}`, to: `rt:${rp.route}`, type: "role-route", effect };
-    })
+    rp.allowed_roles.map((r) => ({
+      from: `r:${r}`, to: `rt:${rp.route}`, type: "role-route",
+      effect: null,   // resolved per-hover via resolvedEdgeEffect()
+      route: rp.route,
+    }))
   );
 
   const allEdges = [...urEdges, ...rrEdges];
@@ -98,13 +113,14 @@ export default function RBACSankey() {
   // ── Nodes ────────────────────────────────────────────────────────────────
   const userNodes = users.map((u, i) => ({
     id: `u:${u.id}`, label: u.display_name || u.email, sub: u.email,
-    x: COL_USER, y: i * (NODE_H + GAP), color: USER_COLOR,
+    x: COL_USER, y: userOffset + i * (NODE_H + GAP),
+    color: USER_COLOR, email: u.email,
     overrideEffect: null, overrideUsers: null,
   }));
 
   const roleNodes = allRoles.map((r, i) => ({
     id: `r:${r}`, label: r,
-    x: COL_ROLE, y: i * (NODE_H + GAP),
+    x: COL_ROLE, y: roleOffset + i * (NODE_H + GAP),
     color: ROLE_COLORS[r] ?? "#94a3b8",
     overrideEffect: null, overrideUsers: null,
   }));
@@ -115,7 +131,7 @@ export default function RBACSankey() {
     const overrideEffect = effects.includes("deny") ? "deny" : effects.includes("grant") ? "grant" : null;
     return {
       id: `rt:${rp.route}`, label: rp.route,
-      x: COL_ROUTE, y: i * (NODE_H + GAP),
+      x: COL_ROUTE, y: routeOffset + i * (NODE_H + GAP),
       color: ROUTE_COLOR, overrideEffect, overrideUsers: ovm,
     };
   });
@@ -123,45 +139,61 @@ export default function RBACSankey() {
   const allNodes = [...userNodes, ...roleNodes, ...routeNodes];
   const nodeMap  = Object.fromEntries(allNodes.map((n) => [n.id, n]));
 
-  const SVG_H = Math.max(userNodes.length, roleNodes.length, routeNodes.length) * (NODE_H + GAP) + 60;
+  const SVG_H = maxHeight + 60;
 
-  // ── Highlight logic ───────────────────────────────────────────────────────
-  // Only direct neighbours — ONE hop from the active node.
-  // User   → its roles, and roles' routes
-  // Role   → its users + its routes (direct only, NOT users of sibling roles)
-  // Route  → its roles + those roles' users
+  // ── Active context ────────────────────────────────────────────────────────
   const activeId = selected ?? hovered;
 
+  // The email of the hovered/selected user, if the active node is a user.
+  const activeUserEmail = activeId?.startsWith("u:")
+    ? userNodes.find((n) => n.id === activeId)?.email ?? null
+    : null;
+
+  // ── Per-context edge effect resolver ─────────────────────────────────────
+  // KEY LOGIC:
+  //   Hovering a USER  → role→route edge shows ONLY that user's own override
+  //                       (so user A's deny doesn't affect user B's view)
+  //   Hovering a ROLE or ROUTE, or idle → show aggregate effect across all
+  //                       users with that role (original dashed-line behaviour)
+  function resolvedEdgeEffect(e) {
+    if (e.type !== "role-route") return null; // user→role edges never have overrides
+
+    if (activeUserEmail) {
+      // User-context: only show override that belongs to THIS specific user
+      return userRouteEffect(activeUserEmail, e.route);
+    }
+
+    // Role / Route / idle context: aggregate
+    const role = e.from.slice(2); // strip "r:" prefix
+    const usersWithRole = users.filter((u) => u.roles.includes(role));
+    const effects = usersWithRole
+      .map((u) => userRouteEffect(u.email, e.route))
+      .filter(Boolean);
+    return effects.includes("deny") ? "deny" : effects.includes("grant") ? "grant" : null;
+  }
+
+  // ── Highlight (2-hop connected subgraph) ─────────────────────────────────
   function getDirectConnected(nodeId) {
     if (!nodeId) return { nodes: new Set(), edges: new Set() };
 
     const nodes = new Set([nodeId]);
     const edges = new Set();
 
-    // First hop
     allEdges.forEach((e, i) => {
       if (e.from === nodeId) { nodes.add(e.to);   edges.add(i); }
       if (e.to   === nodeId) { nodes.add(e.from); edges.add(i); }
     });
 
-    // Second hop — but ONLY along the chain of the active node
-    // i.e. if active is a Role, we want users who connect TO that role
-    // AND routes that connect FROM that role — not all edges of those nodes.
     const firstHop = new Set(nodes);
     allEdges.forEach((e, i) => {
-      // Only extend if one end is the active node's direct neighbour
-      // AND the other end is in the same direction (don't cross-connect)
       const fromIsFirst = firstHop.has(e.from) && e.from !== nodeId;
       const toIsFirst   = firstHop.has(e.to)   && e.to   !== nodeId;
 
       if (fromIsFirst && !nodes.has(e.to)) {
-        // extend downstream from first-hop neighbour
-        // only if active node is upstream of that neighbour
         const activeIsUpstream = allEdges.some((x) => x.from === nodeId && x.to === e.from);
         if (activeIsUpstream) { nodes.add(e.to); edges.add(i); }
       }
       if (toIsFirst && !nodes.has(e.from)) {
-        // extend upstream from first-hop neighbour
         const activeIsDownstream = allEdges.some((x) => x.to === nodeId && x.from === e.to);
         if (activeIsDownstream) { nodes.add(e.from); edges.add(i); }
       }
@@ -175,8 +207,8 @@ export default function RBACSankey() {
 
   // ── Edge renderer ─────────────────────────────────────────────────────────
   function edgeOpacity(idx) {
-    if (!isFiltering) return 0.18; // idle — show all dimmed
-    return hlEdges.has(idx) ? 0.88 : 0.04; // hover — show connected bright, hide rest
+    if (!isFiltering) return 0.18;
+    return hlEdges.has(idx) ? 0.88 : 0.04;
   }
 
   function edgePath(e, idx) {
@@ -188,9 +220,10 @@ export default function RBACSankey() {
     const x2 = to.x,            y2 = to.y   + NODE_H / 2;
     const cx  = (x1 + x2) / 2;
 
-    const isOverride  = e.effect !== null;
+    const effect      = resolvedEdgeEffect(e);
+    const isOverride  = effect !== null;
     const strokeColor = isOverride
-      ? (e.effect === "deny" ? DENY_COLOR : GRANT_COLOR)
+      ? (effect === "deny" ? DENY_COLOR : GRANT_COLOR)
       : from.color;
 
     const opacity = edgeOpacity(idx);
@@ -203,7 +236,7 @@ export default function RBACSankey() {
         stroke={strokeColor}
         strokeWidth={isHL ? (isOverride ? 2.5 : 2) : isOverride ? 1.8 : 1.5}
         strokeOpacity={opacity}
-        strokeDasharray={isOverride ? (e.effect === "deny" ? "5 4" : "8 3") : "none"}
+        strokeDasharray={isOverride ? (effect === "deny" ? "5 4" : "8 3") : "none"}
         style={{ transition: "stroke-opacity 0.15s, stroke-width 0.15s" }}
       />
     );
@@ -211,14 +244,14 @@ export default function RBACSankey() {
 
   // ── Node renderer ─────────────────────────────────────────────────────────
   function nodeOpacity(nodeId) {
-    if (!isFiltering) return 1;       // idle — all nodes full
-    return hlNodes.has(nodeId) ? 1 : 0.15; // hover — connected full, rest ghost
+    if (!isFiltering) return 1;
+    return hlNodes.has(nodeId) ? 1 : 0.15;
   }
 
   function renderNode(n) {
-    const opacity    = nodeOpacity(n.id);
-    const isActive   = activeId === n.id;
-    const isSelected = selected === n.id;
+    const opacity     = nodeOpacity(n.id);
+    const isActive    = activeId === n.id;
+    const isSelected  = selected === n.id;
     const hasOverride = n.overrideEffect !== null;
     const badgeColor  = n.overrideEffect === "deny" ? DENY_COLOR : GRANT_COLOR;
 
@@ -373,7 +406,6 @@ export default function RBACSankey() {
 
       <div className="flex gap-6">
         <div className="flex-1 overflow-x-auto">
-          {/* Column headers */}
           <div className="flex mb-3" style={{ paddingLeft: COL_USER }}>
             {[
               { label: "USERS",  color: USER_COLOR,  width: COL_ROLE - COL_USER },
@@ -388,14 +420,23 @@ export default function RBACSankey() {
           </div>
 
           <svg ref={svgRef} width={SVG_W} height={SVG_H} className="overflow-visible">
-            {/* Normal edges first, overrides on top */}
-            <g>{allEdges.filter((e) => !e.effect).map((e) => edgePath(e, allEdges.indexOf(e)))}</g>
-            <g>{allEdges.filter((e) =>  e.effect).map((e) => edgePath(e, allEdges.indexOf(e)))}</g>
+            {/* Render plain edges first, override-coloured edges on top */}
+            <g>
+              {allEdges
+                .map((e, i) => ({ e, i, eff: resolvedEdgeEffect(e) }))
+                .filter(({ eff }) => !eff)
+                .map(({ e, i }) => edgePath(e, i))}
+            </g>
+            <g>
+              {allEdges
+                .map((e, i) => ({ e, i, eff: resolvedEdgeEffect(e) }))
+                .filter(({ eff }) => !!eff)
+                .map(({ e, i }) => edgePath(e, i))}
+            </g>
             <g>{allNodes.map((n) => renderNode(n))}</g>
           </svg>
         </div>
 
-        {/* Right panel */}
         <div className="w-52 shrink-0">
           <div className="sticky top-6 space-y-3">
             <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-4">
