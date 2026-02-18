@@ -91,24 +91,44 @@ export default function RBACSankey() {
   const roleOffset  = colOffset(allRoles.length);
   const routeOffset = colOffset(routePerms.length);
 
-  // ── Edges — effect is resolved dynamically at render time, NOT baked in ──
+  // ── Edges ─────────────────────────────────────────────────────────────────
   const urEdges = users.flatMap((u) =>
     u.roles.map((r) => ({
       from: `u:${u.id}`, to: `r:${r}`, type: "user-role",
-      effect: null,
-      userEmail: u.email,
+      effect: null, userEmail: u.email,
     }))
   );
 
   const rrEdges = routePerms.flatMap((rp) =>
     rp.allowed_roles.map((r) => ({
       from: `r:${r}`, to: `rt:${rp.route}`, type: "role-route",
-      effect: null,   // resolved per-hover via resolvedEdgeEffect()
-      route: rp.route,
+      effect: null, route: rp.route,
     }))
   );
 
-  const allEdges = [...urEdges, ...rrEdges];
+  // Direct user→route edges for grant overrides where the route isn't
+  // reachable via the user's roles (e.g. route only allows one email).
+  // These are invisible lines used purely for highlight traversal + edge colouring.
+  const grantOverrideEdges = overrides
+    .filter((o) => o.effect === "grant")
+    .flatMap((o) => {
+      const user = users.find((u) => u.email === o.email);
+      if (!user) return [];
+      const routeId = `rt:${o.target_id}`;
+      // Only add if the user's roles don't already connect them to this route
+      const alreadyConnected = rrEdges.some((e) =>
+        e.to === routeId &&
+        urEdges.some((ue) => ue.from === `u:${user.id}` && ue.to === e.from)
+      );
+      // We always add it — it will render as a green dashed edge in user context
+      return [{
+        from: `u:${user.id}`, to: routeId,
+        type: "user-route-grant", effect: "grant",
+        route: o.target_id, userEmail: o.email,
+      }];
+    });
+
+  const allEdges = [...urEdges, ...rrEdges, ...grantOverrideEdges];
 
   // ── Nodes ────────────────────────────────────────────────────────────────
   const userNodes = users.map((u, i) => ({
@@ -126,13 +146,16 @@ export default function RBACSankey() {
   }));
 
   const routeNodes = routePerms.map((rp, i) => {
-    const ovm    = routeOverrideMap(rp.route);
+    const ovm = routeOverrideMap(rp.route);
+    // overrideEffect stored as aggregate for idle/role context.
+    // Per-user context is resolved dynamically in renderNode via activeUserEmail.
     const effects = Object.values(ovm);
     const overrideEffect = effects.includes("deny") ? "deny" : effects.includes("grant") ? "grant" : null;
     return {
       id: `rt:${rp.route}`, label: rp.route,
       x: COL_ROUTE, y: routeOffset + i * (NODE_H + GAP),
       color: ROUTE_COLOR, overrideEffect, overrideUsers: ovm,
+      route: rp.route,
     };
   });
 
@@ -156,6 +179,12 @@ export default function RBACSankey() {
   //   Hovering a ROLE or ROUTE, or idle → show aggregate effect across all
   //                       users with that role (original dashed-line behaviour)
   function resolvedEdgeEffect(e) {
+    // Direct grant override edge (user → route, bypassing role column)
+    if (e.type === "user-route-grant") {
+      // Only show this edge when hovering THIS specific user
+      return activeUserEmail === e.userEmail ? "grant" : null;
+    }
+
     if (e.type !== "role-route") return null; // user→role edges never have overrides
 
     if (activeUserEmail) {
@@ -164,7 +193,7 @@ export default function RBACSankey() {
     }
 
     // Role / Route / idle context: aggregate
-    const role = e.from.slice(2); // strip "r:" prefix
+    const role = e.from.slice(2);
     const usersWithRole = users.filter((u) => u.roles.includes(role));
     const effects = usersWithRole
       .map((u) => userRouteEffect(u.email, e.route))
@@ -179,22 +208,29 @@ export default function RBACSankey() {
     const nodes = new Set([nodeId]);
     const edges = new Set();
 
-    allEdges.forEach((e, i) => {
+    // For user-route-grant edges, only include them if the active node IS that user
+    const traversableEdges = allEdges.filter((e) =>
+      e.type !== "user-route-grant" || e.from === nodeId
+    );
+
+    traversableEdges.forEach((e, _i) => {
+      const i = allEdges.indexOf(e);
       if (e.from === nodeId) { nodes.add(e.to);   edges.add(i); }
       if (e.to   === nodeId) { nodes.add(e.from); edges.add(i); }
     });
 
     const firstHop = new Set(nodes);
-    allEdges.forEach((e, i) => {
+    traversableEdges.forEach((e) => {
+      const i = allEdges.indexOf(e);
       const fromIsFirst = firstHop.has(e.from) && e.from !== nodeId;
       const toIsFirst   = firstHop.has(e.to)   && e.to   !== nodeId;
 
       if (fromIsFirst && !nodes.has(e.to)) {
-        const activeIsUpstream = allEdges.some((x) => x.from === nodeId && x.to === e.from);
+        const activeIsUpstream = traversableEdges.some((x) => x.from === nodeId && x.to === e.from);
         if (activeIsUpstream) { nodes.add(e.to); edges.add(i); }
       }
       if (toIsFirst && !nodes.has(e.from)) {
-        const activeIsDownstream = allEdges.some((x) => x.to === nodeId && x.from === e.to);
+        const activeIsDownstream = traversableEdges.some((x) => x.to === nodeId && x.from === e.to);
         if (activeIsDownstream) { nodes.add(e.from); edges.add(i); }
       }
     });
@@ -216,11 +252,33 @@ export default function RBACSankey() {
     const to   = nodeMap[e.to];
     if (!from || !to) return null;
 
+    const effect = resolvedEdgeEffect(e);
+
+    // user-route-grant edges: only draw when THIS user is active
+    if (e.type === "user-route-grant") {
+      if (!effect) return null; // hide when another user is hovered
+      const x1 = from.x + NODE_W, y1 = from.y + NODE_H / 2;
+      const x2 = to.x,            y2 = to.y   + NODE_H / 2;
+      // Arc that bows outward (upward) to visually clear the role column
+      const cx = (x1 + x2) / 2;
+      const cy = Math.min(y1, y2) - 40; // bow above the role nodes
+      return (
+        <path key={`grant-override-${idx}`}
+          d={`M ${x1} ${y1} Q ${cx} ${cy}, ${x2} ${y2}`}
+          fill="none"
+          stroke={GRANT_COLOR}
+          strokeWidth={2.5}
+          strokeOpacity={0.9}
+          strokeDasharray="8 3"
+          style={{ transition: "stroke-opacity 0.15s" }}
+        />
+      );
+    }
+
     const x1 = from.x + NODE_W, y1 = from.y + NODE_H / 2;
     const x2 = to.x,            y2 = to.y   + NODE_H / 2;
     const cx  = (x1 + x2) / 2;
 
-    const effect      = resolvedEdgeEffect(e);
     const isOverride  = effect !== null;
     const strokeColor = isOverride
       ? (effect === "deny" ? DENY_COLOR : GRANT_COLOR)
@@ -249,11 +307,21 @@ export default function RBACSankey() {
   }
 
   function renderNode(n) {
-    const opacity     = nodeOpacity(n.id);
-    const isActive    = activeId === n.id;
-    const isSelected  = selected === n.id;
-    const hasOverride = n.overrideEffect !== null;
-    const badgeColor  = n.overrideEffect === "deny" ? DENY_COLOR : GRANT_COLOR;
+    const opacity    = nodeOpacity(n.id);
+    const isActive   = activeId === n.id;
+    const isSelected = selected === n.id;
+
+    // For route nodes: when a specific user is hovered/selected, show THEIR
+    // personal override on this route rather than the aggregate.
+    // e.g. if you have a grant override but aggregate is "deny" due to others,
+    // hovering your user node shows green badge on the route node.
+    let effectiveOverride = n.overrideEffect;
+    if (n.route && activeUserEmail && n.overrideUsers) {
+      effectiveOverride = n.overrideUsers[activeUserEmail] ?? null;
+    }
+
+    const hasOverride = effectiveOverride !== null;
+    const badgeColor  = effectiveOverride === "deny" ? DENY_COLOR : GRANT_COLOR;
 
     return (
       <g key={n.id}
@@ -299,7 +367,7 @@ export default function RBACSankey() {
               stroke={badgeColor} strokeWidth={1} />
             <text textAnchor="middle" dominantBaseline="middle"
               fontSize={7} fontWeight={700} fill={badgeColor}>
-              {n.overrideEffect === "deny" ? "✕" : "✓"}
+              {effectiveOverride === "deny" ? "✕" : "✓"}
             </text>
           </g>
         )}

@@ -61471,3 +61471,10 @@
 {"level":"INFO","message":"[1:32:24.006 PM]: Connection[id: 090392c0-b927-4c85-ad11-60801c6a6d80] - connecting. Associated Snowflake domain: GLOBAL"}
 {"level":"INFO","message":"[1:32:24.032 PM]: Connection[id: 090392c0-b927-4c85-ad11-60801c6a6d80] - authentication successful using: SNOWFLAKE_JWT"}
 {"level":"INFO","message":"[1:32:24.038 PM]: Connection[id: 090392c0-b927-4c85-ad11-60801c6a6d80] - connected successfully after 33.30970000103116 milliseconds"}
+{"level":"INFO","message":"[2:33:08.803 PM]: Creating new connection object"}
+{"level":"INFO","message":"[2:33:08.831 PM]: Creating Connection[id: 0741de64-8ea2-46e8-8b29-f82ca8972161] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SYSNOTIFICATION, role: ACCOUNTADMIN, database: ADHOC, schema: PUBLIC, warehouse: LOG_WH, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26200"}
+{"level":"INFO","message":"[2:33:08.834 PM]: Connection[id: 0741de64-8ea2-46e8-8b29-f82ca8972161] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[2:33:08.837 PM]: Connection[id: 0741de64-8ea2-46e8-8b29-f82ca8972161] - connection object created successfully."}
+{"level":"INFO","message":"[2:33:08.839 PM]: Connection[id: 0741de64-8ea2-46e8-8b29-f82ca8972161] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[2:33:08.867 PM]: Connection[id: 0741de64-8ea2-46e8-8b29-f82ca8972161] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[2:33:08.876 PM]: Connection[id: 0741de64-8ea2-46e8-8b29-f82ca8972161] - connected successfully after 37.004200000315905 milliseconds"}
