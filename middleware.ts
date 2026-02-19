@@ -6,16 +6,23 @@ import { getToken } from 'next-auth/jwt';
 const PUBLIC_EXACT: string[] = ['/'];
 
 const PUBLIC_PREFIXES = [
-  '/auth',              // sign-in, sign-out pages
-  '/api/auth',          // NextAuth signin / callback / session endpoints
+  '/auth',
+  '/api/auth',
   '/debug',
   '/api/debug',
   '/api/prewarm-job',
   '/api/redis-clear',
-  '/api/permissions', // RBAC config endpoints (middleware fetches routeperms with internal secret — all other calls blocked)
+  // ✅ /api/permissions removed — access mirrors /settings/rbac
 ];
 
 const FORBIDDEN_REDIRECT = '/unauthorized';
+
+// ── Maps API routes to their equivalent page route for RBAC lookup ────────────
+const API_ROUTE_PAGE_MAP: Record<string, string> = {
+  '/api/permissions': '/settings/rbac',
+  // add more here if needed in future e.g:
+  // '/api/users': '/settings/users',
+};
 
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -29,7 +36,6 @@ export default async function middleware(req: NextRequest) {
   }
 
   // ── 2. Internal middleware→API secret ────────────────────────────────────────
-  // Only permits the specific routeperms call used by this middleware itself
   const internalSecret = req.headers.get('x-internal-secret');
   if (
     internalSecret &&
@@ -44,23 +50,20 @@ export default async function middleware(req: NextRequest) {
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
 
   if (!token) {
-    // API routes → return 401 JSON (not a redirect — makes sense for API clients)
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    // Page routes → redirect to sign-in
     const signInUrl = new URL('/auth/sign-in', req.url);
     signInUrl.searchParams.set('callbackUrl', req.url);
     return NextResponse.redirect(signInUrl);
   }
 
-  // ── 4. Authenticated API routes — skip RBAC check ───────────────────────────
-  // Individual API route handlers manage their own role checks internally
-  if (pathname.startsWith('/api/')) {
+  // ── 4. Authenticated API routes — skip RBAC unless mapped to a page route ───
+  if (pathname.startsWith('/api/') && !API_ROUTE_PAGE_MAP[pathname]) {
     return NextResponse.next();
   }
 
-  // ── 5. Page route RBAC check ─────────────────────────────────────────────────
+  // ── 5. RBAC check — for pages AND mapped API routes ──────────────────────────
   const userRoles: string[] = (token.roles as string[]) ?? [];
   const userEmail: string   = (token.email as string)   ?? '';
 
@@ -83,28 +86,38 @@ export default async function middleware(req: NextRequest) {
   }
 
   const permsMap = Object.fromEntries(routePerms.map((r) => [r.route, r]));
-  const entry    = findEntry(permsMap, pathname);
 
-  // No restriction defined → allow
+  // ── If API route is mapped to a page route, look up the PAGE route entry ────
+  const lookupPath = API_ROUTE_PAGE_MAP[pathname] ?? pathname;
+  const entry      = findEntry(permsMap, lookupPath);
+
+  // No restriction defined → allow authenticated users through
   if (!entry) return NextResponse.next();
 
   // User-level override — deny
   if (entry.user_effect === 'deny') {
-    console.warn(`[middleware] Override DENY: ${userEmail} → ${pathname}`);
+    console.warn(`[middleware] Override DENY: ${userEmail} → ${pathname} (mapped from ${lookupPath})`);
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
     return NextResponse.redirect(new URL(FORBIDDEN_REDIRECT, req.url));
   }
 
   // User-level override — grant
   if (entry.user_effect === 'grant') {
+    console.log(`[middleware] Override GRANT: ${userEmail} → ${pathname} (mapped from ${lookupPath})`);
     return NextResponse.next();
   }
 
-  // Standard RBAC — no role restriction means all authenticated users allowed
+  // Standard RBAC — empty allowed_roles means all authenticated users allowed
   if (entry.allowed_roles.length === 0) return NextResponse.next();
 
   const hasAccess = userRoles.some((role) => entry.allowed_roles.includes(role));
   if (!hasAccess) {
-    console.warn(`[middleware] Access denied: ${userEmail} (${userRoles.join(',')}) → ${pathname}`);
+    console.warn(`[middleware] Access denied: ${userEmail} (${userRoles.join(', ')}) → ${pathname} (mapped from ${lookupPath})`);
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
     return NextResponse.redirect(new URL(FORBIDDEN_REDIRECT, req.url));
   }
 
