@@ -11,7 +11,8 @@ const PUBLIC_PREFIXES = [
   '/debug',
   '/api/debug',
   '/api/prewarm-job',
-  '/api/redis-clear'
+  '/api/redis-clear',
+  '/api/permissions', // RBAC config endpoints (middleware fetches routeperms with internal secret — all other calls blocked)
 ];
 
 const FORBIDDEN_REDIRECT = '/unauthorized';
