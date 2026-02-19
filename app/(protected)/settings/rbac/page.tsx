@@ -6,8 +6,10 @@ import {
   Plus, Trash2, Save, RefreshCw, X, Check,
   AlertCircle, Loader2, Search, ToggleLeft, ToggleRight,
   Edit2, UserPlus, ChevronRight, ShieldAlert, ShieldCheck,
-  EyeOff, Eye,
+  EyeOff, Eye, ClipboardList 
 } from "lucide-react";
+import AuditLogTab from "@/components/settings/AuditLogTab";
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type UserRole = {
@@ -190,7 +192,8 @@ function CardHeader({ label, icon, count }: { label: string; icon: React.ReactNo
 // ROOT PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function RBACAdminPage() {
-  const [activeTab, setActiveTab] = useState<"users" | "menu" | "routes" | "hierarchy" | "overrides">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "menu" | "routes" | "hierarchy" | "overrides" | "audit">("users");
+;
   const { toasts, toast } = useToast();
   const [loading, setLoading]       = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -230,6 +233,7 @@ export default function RBACAdminPage() {
     { id: "routes"    as const, label: "Route Access",    icon: <Route className="h-4 w-4" /> },
     { id: "hierarchy" as const, label: "Role Hierarchy",  icon: <GitBranch className="h-4 w-4" /> },
     { id: "overrides" as const, label: "User Overrides",  icon: <ShieldAlert className="h-4 w-4" /> },
+    { id: "audit" as const, label: "Audit Log", icon: <ClipboardList className="h-4 w-4" /> },
   ];
 
   return (
@@ -318,6 +322,7 @@ export default function RBACAdminPage() {
                 toast={toast}
               />
             )}
+            {activeTab === "audit" && <AuditLogTab toast={toast} />}
           </>
         )}
       </div>

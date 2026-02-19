@@ -2,13 +2,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 
-const PUBLIC_PREFIXES    = ['/auth', '/api/'];
-const PUBLIC_EXACT       = ['/'];
+// ── Explicitly public — everything else is blocked by default ─────────────────
+const PUBLIC_EXACT: string[] = ['/'];
+
+const PUBLIC_PREFIXES = [
+  '/auth',              // sign-in, sign-out pages
+  '/api/auth',          // NextAuth signin / callback / session endpoints
+  '/debug',
+  '/api/debug',
+  '/api/prewarm-job',
+  '/api/redis-clear'
+];
+
 const FORBIDDEN_REDIRECT = '/unauthorized';
 
 export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
+  // ── 1. Always public ─────────────────────────────────────────────────────────
   if (
     PUBLIC_EXACT.includes(pathname) ||
     PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))
@@ -16,18 +27,42 @@ export default async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // ── 2. Internal middleware→API secret ────────────────────────────────────────
+  // Only permits the specific routeperms call used by this middleware itself
+  const internalSecret = req.headers.get('x-internal-secret');
+  if (
+    internalSecret &&
+    internalSecret === process.env.INTERNAL_API_SECRET &&
+    pathname === '/api/permissions' &&
+    req.nextUrl.searchParams.get('type') === 'routeperms'
+  ) {
+    return NextResponse.next();
+  }
+
+  // ── 3. Everything else requires a valid session ──────────────────────────────
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
 
   if (!token) {
+    // API routes → return 401 JSON (not a redirect — makes sense for API clients)
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    // Page routes → redirect to sign-in
     const signInUrl = new URL('/auth/sign-in', req.url);
     signInUrl.searchParams.set('callbackUrl', req.url);
     return NextResponse.redirect(signInUrl);
   }
 
+  // ── 4. Authenticated API routes — skip RBAC check ───────────────────────────
+  // Individual API route handlers manage their own role checks internally
+  if (pathname.startsWith('/api/')) {
+    return NextResponse.next();
+  }
+
+  // ── 5. Page route RBAC check ─────────────────────────────────────────────────
   const userRoles: string[] = (token.roles as string[]) ?? [];
   const userEmail: string   = (token.email as string)   ?? '';
 
-  // Fetch route perms from the EXISTING endpoint, passing email for overrides
   let routePerms: Array<{ route: string; allowed_roles: string[]; user_effect: 'grant' | 'deny' | null }> = [];
   try {
     const url = new URL('/api/permissions', req.nextUrl.origin);
@@ -46,27 +81,24 @@ export default async function middleware(req: NextRequest) {
     console.error('[middleware] Failed to fetch route permissions:', err);
   }
 
-  // Build a map for O(1) lookup
-  const permsMap = Object.fromEntries(
-    routePerms.map((r) => [r.route, r])
-  );
-
-  const entry = findEntry(permsMap, pathname);
+  const permsMap = Object.fromEntries(routePerms.map((r) => [r.route, r]));
+  const entry    = findEntry(permsMap, pathname);
 
   // No restriction defined → allow
   if (!entry) return NextResponse.next();
 
-  // Route override — checked independently of menu overrides
+  // User-level override — deny
   if (entry.user_effect === 'deny') {
     console.warn(`[middleware] Override DENY: ${userEmail} → ${pathname}`);
     return NextResponse.redirect(new URL(FORBIDDEN_REDIRECT, req.url));
   }
 
+  // User-level override — grant
   if (entry.user_effect === 'grant') {
     return NextResponse.next();
   }
 
-  // Standard RBAC
+  // Standard RBAC — no role restriction means all authenticated users allowed
   if (entry.allowed_roles.length === 0) return NextResponse.next();
 
   const hasAccess = userRoles.some((role) => entry.allowed_roles.includes(role));
