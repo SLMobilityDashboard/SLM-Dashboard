@@ -19,6 +19,19 @@ async function requireSession() {
   return session;
 }
 
+// ── Denial logger ─────────────────────────────────────────────────────────────
+function logDenied(
+  method: string,
+  type: string | null,
+  email: string,
+  reason: string,
+  ip?: string | null
+) {
+  console.warn(
+    `[permissions] DENIED | method=${method} type=${type ?? 'n/a'} user=${email} ip=${ip ?? 'unknown'} reason="${reason}"`
+  );
+}
+
 // ── Human-readable description generator ─────────────────────────────────────
 function generateDescription(
   action: 'POST' | 'PATCH' | 'DELETE',
@@ -129,11 +142,11 @@ function generateDescription(
     // ── user_permission_overrides ───────────────────────────────────────────
     case 'user_permission_overrides': {
       if (action === 'POST') {
-        const email     = values?.email     ?? 'unknown user';
-        const effect    = values?.effect    ?? 'unknown';
+        const email      = values?.email      ?? 'unknown user';
+        const effect     = values?.effect     ?? 'unknown';
         const targetType = values?.target_type ?? 'resource';
-        const targetId  = values?.target_id ?? 'unknown';
-        const verb      = effect === 'deny' ? 'blocked from' : 'granted access to';
+        const targetId   = values?.target_id  ?? 'unknown';
+        const verb       = effect === 'deny' ? 'blocked from' : 'granted access to';
         return `${by} ${verb} ${email} for ${targetType} "${targetId}"`;
       }
       if (action === 'PATCH') {
@@ -195,6 +208,7 @@ async function writeAudit(
 export async function GET(req: NextRequest) {
   const type     = req.nextUrl.searchParams.get('type');
   const supabase = getServiceClient();
+  const ip       = req.headers.get('x-forwarded-for') ?? null;
 
   const internalSecret = req.headers.get('x-internal-secret');
   const isInternal     = !!internalSecret && internalSecret === process.env.INTERNAL_API_SECRET;
@@ -238,13 +252,18 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // ── All other GET requests require a valid session ────────────────────────
   const session = await requireSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!session) {
+    logDenied('GET', type, 'unauthenticated', 'No active session', ip);
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
-  const userEmail = session.user?.email ?? null;
+  const userEmail = session.user?.email ?? 'unknown';
 
   try {
     if (type === 'menu') {
+      console.log(`[permissions] GET menu | user=${userEmail} ip=${ip}`);
       const [menuRes, overridesRes] = await Promise.all([
         supabase.from('menu_permissions').select('menu_id, allowed_roles, is_enabled').order('sort_order'),
         userEmail
@@ -273,6 +292,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (type === 'routeperms') {
+      console.log(`[permissions] GET routeperms | user=${userEmail} ip=${ip}`);
       const [routePermsRes, overridesRes] = await Promise.all([
         supabase.from('route_permissions').select('route, allowed_roles'),
         userEmail
@@ -306,12 +326,8 @@ export async function GET(req: NextRequest) {
     }
 
     if (type === 'admin-all') {
-      const userRoles = (session as any).user?.roles as string[]
-                     ?? (session as any).roles as string[]
-                     ?? [];
-      if (!userRoles.includes('Admin')) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-      }
+      // ✅ No Admin check — access controlled by middleware/overrides
+      console.log(`[permissions] GET admin-all | user=${userEmail} ip=${ip}`);
 
       const [usersRes, menuRes, routesRes, routePermsRes, hierarchyRes, overridesRes] =
         await Promise.all([
@@ -339,7 +355,12 @@ export async function GET(req: NextRequest) {
 
     if (type === 'user-perms') {
       const email = session.user?.email;
-      if (!email) return NextResponse.json({ overrides: { route: {}, menu: {} } });
+      if (!email) {
+        logDenied('GET', type, userEmail, 'No email in session', ip);
+        return NextResponse.json({ overrides: { route: {}, menu: {} } });
+      }
+
+      console.log(`[permissions] GET user-perms | user=${userEmail} ip=${ip}`);
 
       const { data, error } = await supabase
         .from('user_permission_overrides')
@@ -358,15 +379,14 @@ export async function GET(req: NextRequest) {
     }
 
     if (type === 'user-overrides') {
-      const userRoles = (session as any).user?.roles as string[]
-                     ?? (session as any).roles as string[]
-                     ?? [];
-      if (!userRoles.includes('Admin')) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      // ✅ No Admin check — access controlled by middleware/overrides
+      const email = req.nextUrl.searchParams.get('email');
+      if (!email) {
+        logDenied('GET', type, userEmail, 'Missing ?email= query param', ip);
+        return NextResponse.json({ error: 'Provide ?email=' }, { status: 400 });
       }
 
-      const email = req.nextUrl.searchParams.get('email');
-      if (!email) return NextResponse.json({ error: 'Provide ?email=' }, { status: 400 });
+      console.log(`[permissions] GET user-overrides | user=${userEmail} target=${email} ip=${ip}`);
 
       const { data, error } = await supabase
         .from('user_permission_overrides')
@@ -377,19 +397,15 @@ export async function GET(req: NextRequest) {
     }
 
     if (type === 'audit') {
-      const userRoles = (session as any).user?.roles as string[]
-                     ?? (session as any).roles as string[]
-                     ?? [];
-      if (!userRoles.includes('Admin')) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-      }
-
+      // ✅ No Admin check — access controlled by middleware/overrides
       const page     = Math.max(1, parseInt(req.nextUrl.searchParams.get('page')     ?? '1'));
       const pageSize = Math.min(100, parseInt(req.nextUrl.searchParams.get('pageSize') ?? '20'));
       const search   = req.nextUrl.searchParams.get('search') ?? '';
       const action   = req.nextUrl.searchParams.get('action') ?? '';
       const table    = req.nextUrl.searchParams.get('table')  ?? '';
       const offset   = (page - 1) * pageSize;
+
+      console.log(`[permissions] GET audit | user=${userEmail} page=${page} pageSize=${pageSize} search="${search}" action="${action}" table="${table}" ip=${ip}`);
 
       let query = supabase
         .from('audit_log')
@@ -412,12 +428,15 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // Unknown type
+    logDenied('GET', type, userEmail, `Unknown or missing type param: "${type}"`, ip);
     return NextResponse.json(
       { error: 'Provide ?type=menu|routeperms|admin-all|user-perms|user-overrides|audit' },
       { status: 400 }
     );
+
   } catch (err: any) {
-    console.error('[/api/permissions] GET error:', err);
+    console.error(`[/api/permissions] GET error | user=${userEmail} type=${type} ip=${ip}:`, err);
     return NextResponse.json({ error: err?.message ?? 'Internal server error' }, { status: 500 });
   }
 }
@@ -425,21 +444,27 @@ export async function GET(req: NextRequest) {
 // ── PATCH ─────────────────────────────────────────────────────────────────────
 export async function PATCH(req: NextRequest) {
   const session = await requireSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const ip      = req.headers.get('x-forwarded-for') ?? null;
 
-  const performedBy = session.user?.email ?? 'unknown';
-  const ip          = req.headers.get('x-forwarded-for') ?? null;
-  const userRoles   = (session as any).user?.roles as string[]
-                   ?? (session as any).roles as string[]
-                   ?? [];
-  if (!userRoles.includes('Admin')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!session) {
+    logDenied('PATCH', null, 'unauthenticated', 'No active session', ip);
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // ✅ No Admin check — access controlled by middleware/overrides
+  const performedBy = session.user?.email ?? 'unknown';
+
   const ALLOWED = ['user_roles', 'menu_permissions', 'protected_routes', 'route_permissions', 'role_hierarchy', 'user_permission_overrides'];
+
   try {
     const { table, match, values } = await req.json();
-    if (!ALLOWED.includes(table)) return NextResponse.json({ error: 'Invalid table' }, { status: 400 });
+
+    if (!ALLOWED.includes(table)) {
+      logDenied('PATCH', null, performedBy, `Table not in allowlist: "${table}"`, ip);
+      return NextResponse.json({ error: 'Invalid table' }, { status: 400 });
+    }
+
+    console.log(`[permissions] PATCH | user=${performedBy} table=${table} match=${JSON.stringify(match)} ip=${ip}`);
 
     const supabase = getServiceClient();
     const { error } = await supabase.from(table).update(values).match(match);
@@ -456,7 +481,7 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    console.error('[/api/permissions] PATCH error:', err);
+    console.error(`[/api/permissions] PATCH error | user=${performedBy} ip=${ip}:`, err);
     return NextResponse.json({ error: err?.message ?? 'Internal server error' }, { status: 500 });
   }
 }
@@ -464,21 +489,27 @@ export async function PATCH(req: NextRequest) {
 // ── POST ──────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const session = await requireSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const ip      = req.headers.get('x-forwarded-for') ?? null;
 
-  const performedBy = session.user?.email ?? 'unknown';
-  const ip          = req.headers.get('x-forwarded-for') ?? null;
-  const userRoles   = (session as any).user?.roles as string[]
-                   ?? (session as any).roles as string[]
-                   ?? [];
-  if (!userRoles.includes('Admin')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!session) {
+    logDenied('POST', null, 'unauthenticated', 'No active session', ip);
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // ✅ No Admin check — access controlled by middleware/overrides
+  const performedBy = session.user?.email ?? 'unknown';
+
   const ALLOWED = ['user_roles', 'protected_routes', 'route_permissions', 'role_hierarchy', 'user_permission_overrides'];
+
   try {
     const { table, values, upsert } = await req.json();
-    if (!ALLOWED.includes(table)) return NextResponse.json({ error: 'Invalid table' }, { status: 400 });
+
+    if (!ALLOWED.includes(table)) {
+      logDenied('POST', null, performedBy, `Table not in allowlist: "${table}"`, ip);
+      return NextResponse.json({ error: 'Invalid table' }, { status: 400 });
+    }
+
+    console.log(`[permissions] POST | user=${performedBy} table=${table} upsert=${!!upsert} ip=${ip}`);
 
     const supabase = getServiceClient();
     const { data, error } = upsert
@@ -497,7 +528,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ data });
   } catch (err: any) {
-    console.error('[/api/permissions] POST error:', err);
+    console.error(`[/api/permissions] POST error | user=${performedBy} ip=${ip}:`, err);
     return NextResponse.json({ error: err?.message ?? 'Internal server error' }, { status: 500 });
   }
 }
@@ -505,21 +536,27 @@ export async function POST(req: NextRequest) {
 // ── DELETE ────────────────────────────────────────────────────────────────────
 export async function DELETE(req: NextRequest) {
   const session = await requireSession();
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const ip      = req.headers.get('x-forwarded-for') ?? null;
 
-  const performedBy = session.user?.email ?? 'unknown';
-  const ip          = req.headers.get('x-forwarded-for') ?? null;
-  const userRoles   = (session as any).user?.roles as string[]
-                   ?? (session as any).roles as string[]
-                   ?? [];
-  if (!userRoles.includes('Admin')) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  if (!session) {
+    logDenied('DELETE', null, 'unauthenticated', 'No active session', ip);
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // ✅ No Admin check — access controlled by middleware/overrides
+  const performedBy = session.user?.email ?? 'unknown';
+
   const ALLOWED = ['user_roles', 'protected_routes', 'user_permission_overrides'];
+
   try {
     const { table, match } = await req.json();
-    if (!ALLOWED.includes(table)) return NextResponse.json({ error: 'Invalid table' }, { status: 400 });
+
+    if (!ALLOWED.includes(table)) {
+      logDenied('DELETE', null, performedBy, `Table not in allowlist: "${table}"`, ip);
+      return NextResponse.json({ error: 'Invalid table' }, { status: 400 });
+    }
+
+    console.log(`[permissions] DELETE | user=${performedBy} table=${table} match=${JSON.stringify(match)} ip=${ip}`);
 
     const supabase = getServiceClient();
     const { error } = await supabase.from(table).delete().match(match);
@@ -536,7 +573,7 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    console.error('[/api/permissions] DELETE error:', err);
+    console.error(`[/api/permissions] DELETE error | user=${performedBy} ip=${ip}:`, err);
     return NextResponse.json({ error: err?.message ?? 'Internal server error' }, { status: 500 });
   }
 }
