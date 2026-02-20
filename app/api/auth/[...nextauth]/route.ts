@@ -19,65 +19,40 @@ export const authOptions: NextAuthOptions = {
   },
 
   callbacks: {
-    async jwt({ token, account, profile, user }) {
-      if (user) {
-        token.user = {
-          name: user.name || user.email,
-          email: user.email,
-        };
-      }
-
-    if (token.email) {
-      const roles = getRolesForEmail(token.email);
-      // console.log('✅ Roles assigned for:', token.email, '→', roles);
-      token.roles = roles;
-    } else {
-      console.log('⚠️ No roles assigned for:', token.email);
-    }
-  
-      // Extract roles from Cognito groups and merge with custom mappings
+    async jwt({ token, account, profile }) {
+      // account is only present on the first JWT call, right after OAuth callback.
+      // This is the correct place to fetch roles — runs once at sign-in, not on every request.
       if (account?.access_token && profile) {
         token.accessToken = account.access_token;
-        
-        // Get Cognito groups
-        const cognitoGroups = (profile as any)['cognito:groups'] || [];
-        
-        // Get custom role mappings from role-mappings.ts based on email
-        const customRoles = token.email ? getRolesForEmail(token.email) : [];
-        
-        // Merge roles from both Cognito and custom mappings (remove duplicates)
-        const allRoles = [...new Set([...cognitoGroups, ...customRoles])];
-        token.roles = allRoles;
-        
-        // Store additional user info
-        token.username = (profile as any)['cognito:username'];
-        token.givenName = (profile as any)['given_name'];
-        token.middleName = (profile as any)['middle_name'];
-        
-        // Log role assignment for debugging
-        if (allRoles.length > 0) {
-          // console.log('✅ Roles assigned for:', token.email, '→', allRoles);
-        } else {
-          console.log('⚠️ No roles assigned for:', token.email);
-        }
+        token.username    = (profile as any)['cognito:username'];
+        token.givenName   = (profile as any)['given_name'];
+        token.middleName  = (profile as any)['middle_name'];
+
+        // Roles from Cognito groups (if any)
+        const cognitoGroups: string[] = (profile as any)['cognito:groups'] ?? [];
+
+        // Custom roles from Supabase via internal API
+        // getRolesForEmail is async — must be awaited or token.roles becomes a Promise
+        const customRoles: string[] = token.email
+          ? await getRolesForEmail(token.email)
+          : [];
+
+        // Merge and deduplicate both sources
+        token.roles = [...new Set([...cognitoGroups, ...customRoles])];
+
+        console.log('✅ Roles assigned for:', token.email, '→', token.roles);
       }
 
       return token;
     },
 
-   
-
     async session({ session, token }) {
-      if (!session.user) {
-        session.user = {};
-      }
-
-      // Add user info and roles to session
       session.user = {
-        ...(token.user as any),
-        roles: token.roles as string[] || [],
-        username: token.username as string,
-        givenName: token.givenName as string,
+        name:       (token.user as any)?.name  ?? token.name,
+        email:      (token.user as any)?.email ?? token.email,
+        roles:      (token.roles as string[])  ?? [],
+        username:   token.username   as string,
+        givenName:  token.givenName  as string,
         middleName: token.middleName as string,
       };
 
@@ -91,13 +66,13 @@ export const authOptions: NextAuthOptions = {
     async redirect({ url, baseUrl }) {
       if (url.startsWith("/")) return `${baseUrl}${url}`;
       if (new URL(url).origin === baseUrl) return url;
-      return `${baseUrl}/`;
+      return `${baseUrl}/realtime`;
     },
   },
 
   pages: {
     signIn: "/auth/sign-in",
-    error: "/auth/error",
+    error:  "/auth/error",
   },
 
   secret: process.env.NEXTAUTH_SECRET,
@@ -105,5 +80,4 @@ export const authOptions: NextAuthOptions = {
 };
 
 const handler = NextAuth(authOptions);
-
 export { handler as GET, handler as POST };

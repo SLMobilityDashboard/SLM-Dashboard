@@ -49,7 +49,7 @@ export default function BatteryAnalysisPage() {
 
   const getDefaultStartDate = () => {
     const date = new Date();
-    date.setDate(date.getDate() - 7);
+    date.setDate(date.getDate() - 3); // Changed from 7 to 3
     return date.toISOString().split("T")[0];
   };
 
@@ -62,7 +62,7 @@ export default function BatteryAnalysisPage() {
 
   // Applied filters (actually used for fetching data)
   const [batteryFilters, setBatteryFilters] = useState<BatteryFilters>({
-    timeRange: 168,
+    timeRange: 72, // Changed from 168 (7 days) to 72 (3 days)
     includeIdleData: true,
     selectedVehicleImei: null,
     startTimestamp: Math.floor(new Date(getDefaultStartDate() + "T00:00:00").getTime() / 1000),
@@ -149,14 +149,14 @@ export default function BatteryAnalysisPage() {
 
     const start = new Date(newStartDate);
     const maxEnd = new Date(start);
-    maxEnd.setDate(maxEnd.getDate() + 7);
+    maxEnd.setDate(maxEnd.getDate() + 3); // Changed from 7 to 3
     const currentEnd = new Date(tempEndDate);
     const daysDiff = calculateDaysDifference(newStartDate, tempEndDate);
 
-    if (daysDiff > 7) {
+    if (daysDiff > 3) { // Changed from 7 to 3
       const adjustedEnd = maxEnd.toISOString().split("T")[0];
       setTempEndDate(adjustedEnd);
-      setDateRangeError("End date adjusted to maintain 7-day maximum range");
+      setDateRangeError("End date adjusted to maintain 3-day maximum range"); // Updated message
     } else if (currentEnd < start) {
       setTempEndDate(newStartDate);
     }
@@ -167,13 +167,13 @@ export default function BatteryAnalysisPage() {
     const start = new Date(tempStartDate);
     const end = new Date(newEndDate);
     const maxEnd = new Date(start);
-    maxEnd.setDate(maxEnd.getDate() + 7);
+    maxEnd.setDate(maxEnd.getDate() + 3); // Changed from 7 to 3
     const daysDiff = calculateDaysDifference(tempStartDate, newEndDate);
 
-    if (daysDiff > 7) {
+    if (daysDiff > 3) { // Changed from 7 to 3
       const adjustedEnd = maxEnd.toISOString().split("T")[0];
       setTempEndDate(adjustedEnd);
-      setDateRangeError("Maximum date range is 7 days");
+      setDateRangeError("Maximum date range is 3 days"); // Updated message
       return;
     }
 
@@ -189,7 +189,7 @@ export default function BatteryAnalysisPage() {
   const getMaxEndDate = () => {
     const start = new Date(tempStartDate);
     const maxEnd = new Date(start);
-    maxEnd.setDate(maxEnd.getDate() + 7);
+    maxEnd.setDate(maxEnd.getDate() + 3); // Changed from 7 to 3
     const today = new Date();
     return maxEnd < today
       ? maxEnd.toISOString().split("T")[0]
@@ -230,7 +230,7 @@ export default function BatteryAnalysisPage() {
     const endTime = new Date(defaultEnd + "T23:59:59").getTime() / 1000;
 
     setBatteryFilters({
-      timeRange: 168,
+      timeRange: 72, // Changed from 168 to 72
       startTimestamp: startTime,
       endTimestamp: endTime,
       includeIdleData: true,
@@ -258,7 +258,7 @@ export default function BatteryAnalysisPage() {
   const getActiveFiltersCount = () => {
     let count = 0;
     if (batteryFilters.selectedVehicleImei) count++;
-    if (batteryFilters.timeRange !== 168) count++;
+    if (batteryFilters.timeRange !== 72) count++; // Changed from 168 to 72
     if (batteryFilters.includeIdleData) count++;
     return count;
   };
@@ -483,7 +483,7 @@ export default function BatteryAnalysisPage() {
                       <span className="text-slate-400">Selected Range:</span>
                       <span
                         className={`font-medium ${
-                          daysDifference === 7 ? "text-purple-400" : "text-blue-400"
+                          daysDifference === 3 ? "text-purple-400" : "text-blue-400"
                         }`}
                       >
                         {daysDifference} day{daysDifference !== 1 ? "s" : ""}

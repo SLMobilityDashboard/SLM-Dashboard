@@ -474,7 +474,16 @@ export async function POST(req: NextRequest) {
 
   try {
     // ✅ CHANGE 1: Extract systemUser parameter
-    const { sql, forceDynamic, systemUser } = await req.json();
+    const contentType = req.headers.get('content-type') ?? '';
+    const text = await req.text();
+
+    if (!contentType.includes('application/json') || !text.trim()) {
+      return NextResponse.json({ error: 'Invalid request' }, { status: 400 });
+    }
+
+    const { sql, forceDynamic, systemUser } = JSON.parse(text);
+    
+    
     if (!sql || typeof sql !== "string") {
       return NextResponse.json({ error: "Missing or invalid SQL" }, { status: 400 });
     }

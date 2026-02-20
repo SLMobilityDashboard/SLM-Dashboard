@@ -213,7 +213,7 @@ const buildComprehensiveBSSQuery = () => {
       SELECT 
         STATION_NAME as STATION_ID,
         COUNT(*) as TOTAL_SWAPS,
-        MAX(TO_TIMESTAMP(PAID_AT)) as LAST_SWAP_DATE
+        MAX(PAID_AT) as LAST_SWAP_DATE
       FROM SOURCE_DATA.DYNAMO_DB.FACT_PAYMENT
       WHERE PAYMENT_TYPE = 'BATTERY_SWAP'
         AND STATION_NAME IS NOT NULL
@@ -484,7 +484,7 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
           <>
             <div className="pt-4 border-t border-slate-700/50 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="space-y-2">
+                {/* <div className="space-y-2">
                   <label className="text-sm text-slate-300">Country</label>
                   <select
                     value={tempFilters.countryFilter}
@@ -514,7 +514,7 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
                       </option>
                     ))}
                   </select>
-                </div>
+                </div> */}
 
                 <div className="space-y-2">
                   <label className="text-sm text-slate-300">Location</label>
@@ -881,6 +881,7 @@ const BSSOverviewPage: React.FC = () => {
       }
 
       const data = await response.json();
+      console.log("FIrst record", data[0]);
       console.log("BSS data loaded:", data.length, "records");
 
       // Transform and enrich data
@@ -982,21 +983,24 @@ const BSSOverviewPage: React.FC = () => {
   // Apply filters
   const filteredStations = useMemo(() => {
     return allStations.filter((station) => {
-      const matchesSearch =
-        !filters.searchTerm ||
-        [
-          station.STATION_ID,
-          station.STATION_NAME,
-          station.VENDOR_ID,
-          station.VENDOR_COMPANY_NAME,
-          station.STATION_MODEL,
-          station.LOCATION_NAME,
-          station.LOCATION_CODE,
-          station.SERIAL_NO,
-          station.CITY_ID,
-          station.VENDOR_COUNTRY,
-        ].some((field) => field?.toLowerCase().includes(filters.searchTerm.toLowerCase()));
 
+  const matchesSearch =
+    !filters.searchTerm ||
+    [
+      station.STATION_ID,
+      station.STATION_NAME,
+      station.VENDOR_ID,
+      station.VENDOR_COMPANY_NAME,
+      station.STATION_MODEL,
+      station.LOCATION_NAME,
+      station.LOCATION_CODE,
+      station.SERIAL_NO,
+      station.CITY_ID,
+      station.VENDOR_COUNTRY,
+    ].some((field) => 
+      field?.toString().toLowerCase().includes(filters.searchTerm.toLowerCase())
+    );
+    
       const matchesVendor = 
         filters.vendorFilter === "all" || 
         station.VENDOR_COMPANY_NAME === filters.vendorFilter;

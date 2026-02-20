@@ -251,7 +251,7 @@ const CellVoltageDisplay = ({
       </div>
 
       {/* Detailed Cell List for Critical/Warning Cells */}
-      {(hasCriticalIssue || hasWarning) && (
+      {/* {(hasCriticalIssue || hasWarning) && (
         <div className="mt-3 pt-3 border-t border-slate-700/50">
           <div className="text-xs text-slate-400 mb-2">Problem Cells:</div>
           <div className="space-y-1 max-h-32 overflow-y-auto scrollbar-thin">
@@ -283,7 +283,7 @@ const CellVoltageDisplay = ({
             })}
           </div>
         </div>
-      )}
+      )} */}
     </div>
   );
 };

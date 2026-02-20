@@ -1,115 +1,180 @@
 // lib/auth/role-mappings.ts
 
 /**
- * Define available roles in the system
+ * Define available roles in the system.
  * Currently active: Admin, FactoryManager, QA
  * Future roles: Manager, Analyst, Viewer
  */
 export type Role = 'Admin' | 'Manager' | 'Analyst' | 'Viewer' | 'FactoryManager' | 'QA';
 
-/**
- * Email to roles mapping
- * Add or modify email-role associations here
- */
-export const ROLE_MAPPINGS: Record<string, Role[]> = {
-  // Current Active Users
-  'safnas@slmobility.com': ['Admin'],            // Safnas
-  'hansika@slmobility.com': ['Admin'],           // Hansika
-  'oshani@slmobility.com': ['QA'],   // Oshani
-  'rasika@slmobility.com': ['FactoryManager'],   // Rasika
-  'zainab@slmobility.com': ['QA'],               // Zainab
-  'nayanakabuddhi@gmail.com': ['FactoryManager'],// Nayanaka
-  'mafaz@slmobility.com': ['FactoryManager'],    // Mafaz
-  'zaid@slmobility.com': ['Admin'],              // Zaid
-  'udara@slmobility.com': ['Admin'],             // Udara
-  'janaka@ascensionit.com': ['Admin'],           // Janaka
-  'dinusha@slmobility.com': ['FactoryManager'],  // Dinusha
-  'rifkhan@slmobility.com': ['Admin'],           // Rifkhan
+// ---------------------------------------------------------------------------
+// Internal API helpers
+// ---------------------------------------------------------------------------
 
-  
-  // Future users - uncomment and assign roles as needed
-  // 'manager@slmobility.com': ['Manager'],
-  // 'analyst@slmobility.com': ['Analyst'],
-  // 'viewer@slmobility.com': ['Viewer'],
-};
+function getBaseUrl(): string {
+  return process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
+}
+
+function internalHeaders(): HeadersInit {
+  return {
+    'x-internal-secret': process.env.INTERNAL_API_SECRET ?? '',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Data-fetching functions (all async, all via internal API)
+// ---------------------------------------------------------------------------
 
 /**
- * Role hierarchy - defines what permissions each role inherits
- * Higher roles inherit permissions from lower roles
- * 
- * Current Structure:
- * - Admin: Full access to everything (super user)
- * - QA: Full access to everything (quality assurance oversight)
- * - FactoryManager: Access to everything except revenue
- * 
- * Future roles ready for when needed:
- * - Manager: Access to most features except some admin-specific ones
- * - Analyst: Data analysis and reporting access
- * - Viewer: Read-only access
+ * Fetch the full role hierarchy from Supabase via the internal config API.
+ * Cached for 60s — hierarchy changes are rare but should propagate quickly.
+ *
+ * Returns a map of role → roles it grants, e.g.:
+ *   { Admin: ['Admin', 'Manager', ...], QA: ['QA', 'Manager', ...], ... }
  */
-export const ROLE_HIERARCHY: Record<Role, Role[]> = {
-  Admin: ['Admin', 'Manager', 'Analyst', 'Viewer', 'FactoryManager', 'QA'],
-  QA: ['QA', 'Manager', 'Analyst', 'Viewer'],
-  FactoryManager: ['FactoryManager', 'Analyst', 'Viewer'],
-  Manager: ['Manager', 'Analyst', 'Viewer'],
-  Analyst: ['Analyst', 'Viewer'],
-  Viewer: ['Viewer'],
-};
+export async function getRoleHierarchy(): Promise<Record<string, Role[]>> {
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/auth/config?type=hierarchy`, {
+      headers: internalHeaders(),
+      next: { revalidate: 60 },
+    });
 
-/**
- * Get roles for a specific email address
- * @param email - User's email address
- * @returns Array of roles assigned to the email
- */
-export function getRolesForEmail(email: string): Role[] {
-  const normalizedEmail = email.toLowerCase().trim();
-  return ROLE_MAPPINGS[normalizedEmail] || [];
+    if (!res.ok) return {};
+
+    const data = await res.json();
+    return (data.hierarchy as Record<string, Role[]>) ?? {};
+  } catch (err) {
+    console.error('[getRoleHierarchy] Failed to fetch hierarchy:', err);
+    return {};
+  }
 }
 
 /**
- * Check if user has a specific role (considering hierarchy)
- * @param userRoles - Array of user's roles
- * @param requiredRole - The role to check for
- * @returns True if user has the required role or a higher role
+ * Fetch roles for a specific email from the internal config API.
+ * Not cached — role changes should take effect immediately.
  */
-export function hasRole(userRoles: string[], requiredRole: Role): boolean {
-  return userRoles.some(role => 
-    ROLE_HIERARCHY[role as Role]?.includes(requiredRole)
+export async function getRolesForEmail(email: string): Promise<Role[]> {
+  try {
+    const url = `${getBaseUrl()}/api/auth/config?email=${encodeURIComponent(email)}`;
+    const res = await fetch(url, {
+      headers: internalHeaders(),
+      cache: 'no-store',
+    });
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    return (data.roles as Role[]) ?? [];
+  } catch (err) {
+    console.error('[getRolesForEmail] Failed to fetch roles:', err);
+    return [];
+  }
+}
+
+/**
+ * Fetch all protected route prefixes from the internal config API.
+ * Cached for 60s — routes change infrequently.
+ */
+export async function getProtectedRoutes(): Promise<string[]> {
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/auth/config?type=routes`, {
+      headers: internalHeaders(),
+      next: { revalidate: 60 },
+    });
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    return (data.routes as string[]) ?? [];
+  } catch (err) {
+    console.error('[getProtectedRoutes] Failed to fetch routes:', err);
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Role-checking helpers (async — fetch hierarchy once then check)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if user has a specific role (considering hierarchy).
+ */
+export async function hasRole(
+  userRoles: string[],
+  requiredRole: Role
+): Promise<boolean> {
+  const hierarchy = await getRoleHierarchy();
+  return userRoles.some((role) => hierarchy[role]?.includes(requiredRole));
+}
+
+/**
+ * Check if user has any of the required roles.
+ */
+export async function hasAnyRole(
+  userRoles: string[],
+  requiredRoles: Role[]
+): Promise<boolean> {
+  const hierarchy = await getRoleHierarchy();
+  return userRoles.some((role) =>
+    requiredRoles.some((required) => hierarchy[role]?.includes(required))
   );
 }
 
 /**
- * Check if user has any of the required roles
- * @param userRoles - Array of user's roles
- * @param requiredRoles - Array of roles to check for
- * @returns True if user has at least one of the required roles
+ * Check if user has all of the required roles.
  */
-export function hasAnyRole(userRoles: string[], requiredRoles: Role[]): boolean {
-  return requiredRoles.some(requiredRole => hasRole(userRoles, requiredRole));
+export async function hasAllRoles(
+  userRoles: string[],
+  requiredRoles: Role[]
+): Promise<boolean> {
+  const hierarchy = await getRoleHierarchy();
+  return requiredRoles.every((required) =>
+    userRoles.some((role) => hierarchy[role]?.includes(required))
+  );
 }
 
 /**
- * Check if user has all of the required roles
- * @param userRoles - Array of user's roles
- * @param requiredRoles - Array of roles to check for
- * @returns True if user has all of the required roles
+ * Get all permissions for a user based on their roles.
  */
-export function hasAllRoles(userRoles: string[], requiredRoles: Role[]): boolean {
-  return requiredRoles.every(requiredRole => hasRole(userRoles, requiredRole));
-}
-
-/**
- * Get all permissions for a user based on their roles
- * @param userRoles - Array of user's roles
- * @returns Set of all unique roles/permissions the user has
- */
-export function getAllPermissions(userRoles: string[]): Set<Role> {
+export async function getAllPermissions(userRoles: string[]): Promise<Set<Role>> {
+  const hierarchy = await getRoleHierarchy();
   const permissions = new Set<Role>();
-  
-  userRoles.forEach(role => {
-    const rolePermissions = ROLE_HIERARCHY[role as Role] || [];
-    rolePermissions.forEach(permission => permissions.add(permission));
+  userRoles.forEach((role) => {
+    (hierarchy[role] ?? []).forEach((p) => permissions.add(p));
   });
-  
+  return permissions;
+}
+
+// ---------------------------------------------------------------------------
+// Sync variants — use these when you've already fetched the hierarchy once
+// (avoids redundant API calls inside a single request handler)
+// ---------------------------------------------------------------------------
+
+export function hasRoleSync(
+  hierarchy: Record<string, Role[]>,
+  userRoles: string[],
+  requiredRole: Role
+): boolean {
+  return userRoles.some((role) => hierarchy[role]?.includes(requiredRole));
+}
+
+export function hasAnyRoleSync(
+  hierarchy: Record<string, Role[]>,
+  userRoles: string[],
+  requiredRoles: Role[]
+): boolean {
+  return userRoles.some((role) =>
+    requiredRoles.some((required) => hierarchy[role]?.includes(required))
+  );
+}
+
+export function getAllPermissionsSync(
+  hierarchy: Record<string, Role[]>,
+  userRoles: string[]
+): Set<Role> {
+  const permissions = new Set<Role>();
+  userRoles.forEach((role) => {
+    (hierarchy[role] ?? []).forEach((p) => permissions.add(p));
+  });
   return permissions;
 }
