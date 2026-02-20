@@ -586,55 +586,128 @@ const BatteryTelemetryDashboard = () => {
         </div>
         {/* <pre>{JSON.stringify(batteries, null, 2)}</pre> */}
 
-        {/* Priority Actions - Enhanced with cell voltage info */}
+        {/* Priority Actions - Dynamic SOH-based battery alerts */}
         <Card className="bg-gradient-to-r from-red-500/10 to-orange-500/10 border-red-500/20">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
-              <div className="space-y-2">
-                <h3 className="text-slate-200 font-semibold">
-                  Priority Actions Required
-                </h3>
-                <div className="text-sm text-slate-300 space-y-1">
-                  {kpis.CELL_VOLTAGE_ISSUES > 0 && (
-                    <p>
-                      •{" "}
-                      <strong className="text-red-400 animate-pulse">
-                        {kpis.CELL_VOLTAGE_ISSUES}
-                      </strong>{" "}
-                      batteries with{" "}
-                      <strong className="text-red-400">
-                        critical cell voltage issues
-                      </strong>{" "}
-                      (cells below 2.6V) - IMMEDIATE ACTION REQUIRED
-                    </p>
-                  )}
-                  <p>
+              <div className="space-y-3 w-full">
+                <h3 className="text-slate-200 font-semibold">Priority Actions Required</h3>
+
+                {/* Cell voltage issues summary line */}
+                {kpis.CELL_VOLTAGE_ISSUES > 0 && (
+                  <p className="text-sm text-slate-300">
                     •{" "}
-                    <strong className="text-red-400">
-                      {kpis.CRITICAL_BMS}
+                    <strong className="text-red-400 animate-pulse">
+                      {kpis.CELL_VOLTAGE_ISSUES}
                     </strong>{" "}
-                    batteries require immediate attention (Health Score &lt; 40)
+                    batteries with{" "}
+                    <strong className="text-red-400">critical cell voltage issues</strong>{" "}
+                    (cells outside safe range) — IMMEDIATE ACTION REQUIRED
                   </p>
-                  <p>
-                    •{" "}
-                    <strong className="text-orange-400">
-                      {kpis.WARNING_BMS}
-                    </strong>{" "}
-                    batteries showing warning signs - plan maintenance
-                  </p>
-                  <p>
-                    •{" "}
-                    <strong className="text-cyan-400">
-                      {kpis.TOTAL_ANOMALIES}
-                    </strong>{" "}
-                    total anomalies detected across fleet
-                  </p>
-                  <p className="text-slate-400 text-xs mt-2">
-                    💡 Batteries are sorted by health score (lowest first) to
-                    help you prioritize interventions
-                  </p>
-                </div>
+                )}
+
+                {/* SOH < 60: Critical batteries */}
+                {(() => {
+                  const criticalSOH = batteries.filter(
+                    (b) => b.batSOH !== null && b.batSOH < 60
+                  );
+                  if (criticalSOH.length === 0) return null;
+                  return (
+                    <div>
+                      <p className="text-sm font-semibold text-red-400 mb-1">
+                        🔴 Critical SOH (&lt;60%) — Immediate Replacement Required
+                      </p>
+                      <div className="space-y-1 pl-3 border-l-2 border-red-500/40">
+                        {criticalSOH.map((b) => (
+                          <p key={b.bmsId} className="text-xs text-slate-300">
+                            <span className="text-red-400 font-medium">{b.bmsId}</span>
+                            {" · "}
+                            <span>SOH: <strong className="text-red-300">{b.batSOH}%</strong></span>
+                            {" · "}
+                            <span>Cycles: {b.batCycleCount ?? "N/A"}</span>
+                            {" · "}
+                            <span>Distance: {b.totalDistanceTraveled.toLocaleString()} km</span>
+                            {" · "}
+                            <span className={b.isOnline ? "text-green-400" : "text-slate-500"}>
+                              {b.isOnline ? "Online" : `Offline ${Math.floor(b.offlineDuration / 24)}d`}
+                            </span>
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* SOH 60–69: Warning batteries */}
+                {(() => {
+                  const warnSOH = batteries.filter(
+                    (b) => b.batSOH !== null && b.batSOH >= 60 && b.batSOH < 70
+                  );
+                  if (warnSOH.length === 0) return null;
+                  return (
+                    <div>
+                      <p className="text-sm font-semibold text-orange-400 mb-1">
+                        🟠 Significant Degradation (60–69%) — Plan Replacement Within 1 Month
+                      </p>
+                      <div className="space-y-1 pl-3 border-l-2 border-orange-500/40">
+                        {warnSOH.map((b) => (
+                          <p key={b.bmsId} className="text-xs text-slate-300">
+                            <span className="text-orange-400 font-medium">{b.bmsId}</span>
+                            {" · "}
+                            <span>SOH: <strong className="text-orange-300">{b.batSOH}%</strong></span>
+                            {" · "}
+                            <span>Cycles: {b.batCycleCount ?? "N/A"}</span>
+                            {" · "}
+                            <span>Distance: {b.totalDistanceTraveled.toLocaleString()} km</span>
+                            {" · "}
+                            <span className={b.isOnline ? "text-green-400" : "text-slate-500"}>
+                              {b.isOnline ? "Online" : `Offline ${Math.floor(b.offlineDuration / 24)}d`}
+                            </span>
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* SOH 70–79: Monitor batteries */}
+                {(() => {
+                  const monitorSOH = batteries.filter(
+                    (b) => b.batSOH !== null && b.batSOH >= 70 && b.batSOH < 80
+                  );
+                  if (monitorSOH.length === 0) return null;
+                  return (
+                    <div>
+                      <p className="text-sm font-semibold text-yellow-400 mb-1">
+                        🟡 Moderate Wear (70–79%) — Monitor & Plan in 3–6 Months
+                      </p>
+                      <div className="space-y-1 pl-3 border-l-2 border-yellow-500/40">
+                        {monitorSOH.map((b) => (
+                          <p key={b.bmsId} className="text-xs text-slate-300">
+                            <span className="text-yellow-400 font-medium">{b.bmsId}</span>
+                            {" · "}
+                            <span>SOH: <strong className="text-yellow-300">{b.batSOH}%</strong></span>
+                            {" · "}
+                            <span>Cycles: {b.batCycleCount ?? "N/A"}</span>
+                            {" · "}
+                            <span>Distance: {b.totalDistanceTraveled.toLocaleString()} km</span>
+                            {" · "}
+                            <span className={b.isOnline ? "text-green-400" : "text-slate-500"}>
+                              {b.isOnline ? "Online" : `Offline ${Math.floor(b.offlineDuration / 24)}d`}
+                            </span>
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Footer note */}
+                <p className="text-slate-400 text-xs mt-2">
+                  💡 Batteries are sorted by health score (lowest first) to help you prioritize interventions.{" "}
+                  <strong className="text-cyan-400">{kpis.TOTAL_ANOMALIES}</strong> total anomalies detected across fleet.
+                </p>
               </div>
             </div>
           </CardContent>
