@@ -47,45 +47,46 @@ interface CacheMetadata {
 }
 
 // -------------------- User Extraction --------------------
-async function extractUserFromRequest(req: NextRequest): Promise<{ 
-  userId?: string; 
+async function extractUserFromRequest(req: NextRequest): Promise<{
+  userId?: string;
   username?: string;
   email?: string;
   roles?: string[];
+  cognitoAccessToken?: string; // ✅ ADDED
 }> {
   try {
-    // Get token from NextAuth - this works with Cognito
-    const token = await getToken({ 
-      req, 
-      secret: process.env.NEXTAUTH_SECRET 
+    const token = await getToken({
+      req,
+      secret: process.env.NEXTAUTH_SECRET
     });
-    
+
     if (token) {
       console.log('🔐 Token found:', {
         sub: token.sub,
         name: token.name,
         email: token.email,
         username: token.username,
-        roles: token.roles
+        roles: token.roles,
+        hasCognitoToken: !!token.cognitoAccessToken, // ✅ log presence without exposing token
       });
-      
+
       return {
         userId: token.sub || token.id,
         username: token.name as string || token.userName || token.email,
         email: token.email as string,
-        roles: token.roles as string[] || []
+        roles: token.roles as string[] || [],
+        cognitoAccessToken: token.cognitoAccessToken as string | undefined, // ✅ ADDED
       };
     }
 
-    // Check for session cookie as fallback
     const cookieHeader = req.headers.get('cookie');
     if (cookieHeader?.includes('next-auth.session-token')) {
       console.log('🔐 Session cookie found but token not decoded');
       return { userId: 'authenticated', username: 'user' };
     }
-    
+
     console.log('🔐 No user session found');
-    return {}; // No user info available
+    return {};
   } catch (error) {
     console.error('Error extracting user from request:', error);
     return {};
@@ -141,19 +142,19 @@ function getCacheStrategy(sql: string, forceDynamic?: boolean): {
   if (forceDynamic) {
     return { type: 'daily', ttl: 86400 };
   }
-  
+
   const lower = sql.toLowerCase();
   const hasTimeFunc = ['current_timestamp', 'current_time', 'now(', 'getdate(', 'sysdatetime(']
     .some(func => lower.includes(func));
-  
+
   if (hasTimeFunc) {
     return { type: 'hourly', ttl: 3600 };
   }
-  
+
   if (hasDynamicDates(sql)) {
     return { type: 'daily', ttl: 86400 };
   }
-  
+
   return { type: 'static', ttl: null };
 }
 
@@ -162,7 +163,6 @@ async function acquireRevalidationLock(cacheKey: string): Promise<boolean> {
   const redis = await getRedis();
   const lockKey = `lock:revalidate:${cacheKey}`;
   const lockValue = Date.now().toString();
-  
   const acquired = await redis.set(lockKey, lockValue, { NX: true, EX: 300 });
   return acquired === 'OK';
 }
@@ -174,50 +174,58 @@ async function releaseRevalidationLock(cacheKey: string): Promise<void> {
 }
 
 async function needsRevalidation(
-  cacheKey: string, 
+  cacheKey: string,
   isPersistent: boolean
 ): Promise<boolean> {
   if (!isPersistent) return false;
-  
+
   const redis = await getRedis();
   const metaKey = `${cacheKey}:meta`;
   const metaData = await redis.get(metaKey);
-  
+
   if (!metaData) return true;
-  
+
   const meta: CacheMetadata = JSON.parse(metaData);
   const lastVerified = new Date(meta.lastVerified);
   const daysSinceVerification = (Date.now() - lastVerified.getTime()) / (1000 * 60 * 60 * 24);
-  
+
   return daysSinceVerification >= 7;
 }
 
+// ✅ UPDATED: accepts cognitoAccessToken
 async function performRevalidation(
   cacheKey: string,
   shortHash: string,
   sql: string,
-  username?: string
+  username?: string,
+  cognitoAccessToken?: string // ✅ ADDED
 ): Promise<{ dataChanged: boolean; newData?: any[]; error?: string }> {
   console.log(`[REVALIDATE] [${shortHash}] Checking for data changes...`);
-  
+
   const redis = await getRedis();
   const metaKey = `${cacheKey}:meta`;
-  
+
   try {
-    const result = await SnowflakeConnectionManager.executeQuery(sql, username, false);
+    // ✅ UPDATED: pass token through
+    const result = await SnowflakeConnectionManager.executeQuery(
+      sql,
+      username,
+      false,
+      cognitoAccessToken
+    );
     const freshData = result.rows;
-    
+
     const freshDataHash = generateDataHash(freshData);
     const existingMetaData = await redis.get(metaKey);
-    const existingMeta: CacheMetadata | null = existingMetaData 
-      ? JSON.parse(existingMetaData) 
+    const existingMeta: CacheMetadata | null = existingMetaData
+      ? JSON.parse(existingMetaData)
       : null;
-    
+
     const dataChanged = !existingMeta || existingMeta.dataHash !== freshDataHash;
-    
+
     const cachedData = await redis.get(cacheKey);
     const cacheTTL = cachedData ? await redis.ttl(cacheKey) : null;
-    
+
     const newMeta: CacheMetadata = {
       lastVerified: new Date().toISOString(),
       dataHash: freshDataHash,
@@ -225,13 +233,13 @@ async function performRevalidation(
       lastDataChange: dataChanged ? new Date().toISOString() : existingMeta?.lastDataChange || null,
       dataChangeCount: (existingMeta?.dataChangeCount || 0) + (dataChanged ? 1 : 0),
     };
-    
+
     if (cacheTTL && cacheTTL > 0) {
       await redis.set(metaKey, JSON.stringify(newMeta), { EX: cacheTTL });
     } else {
       await redis.set(metaKey, JSON.stringify(newMeta));
     }
-    
+
     if (dataChanged) {
       console.log(`[REVALIDATE] [${shortHash}] Data changed (change #${newMeta.dataChangeCount})`);
       return { dataChanged: true, newData: freshData };
@@ -248,16 +256,16 @@ async function performRevalidation(
 // -------------------- Analytics Logger --------------------
 async function logQueryAnalytics(entry: QueryLogEntry): Promise<void> {
   const redis = await getRedis();
-  
+
   try {
     const today = new Date().toISOString().slice(0, 10);
-    
+
     const logKey = `query:log:${entry.shortHash}:${Date.now()}`;
     await redis.set(logKey, JSON.stringify(entry), { EX: 604800 });
 
     const statsKey = `query:stats:${entry.queryHash}`;
     const existingStats = await redis.get(statsKey);
-    
+
     let stats: QueryStats = existingStats ? JSON.parse(existingStats) : {
       queryHash: entry.queryHash,
       shortHash: entry.shortHash,
@@ -276,12 +284,12 @@ async function logQueryAnalytics(entry: QueryLogEntry): Promise<void> {
       consecutiveDaysNoHits: 0,
       isPersistent: false,
     };
-    
+
     stats.totalExecutions++;
     if (entry.cacheStatus === "HIT" || entry.cacheStatus === "REVALIDATED") {
       stats.totalHits++;
       stats.lastCacheHit = entry.timestamp.toISOString();
-      
+
       if (!stats.dailyHitHistory[today]) {
         stats.dailyHitHistory[today] = 0;
       }
@@ -289,27 +297,27 @@ async function logQueryAnalytics(entry: QueryLogEntry): Promise<void> {
     } else {
       stats.totalMisses++;
     }
-    
+
     stats.avgDuration = ((stats.avgDuration * (stats.totalExecutions - 1)) + entry.duration) / stats.totalExecutions;
     stats.avgRowCount = ((stats.avgRowCount * (stats.totalExecutions - 1)) + entry.rowCount) / stats.totalExecutions;
     stats.lastExecuted = entry.timestamp.toISOString();
     stats.cacheHitRate = (stats.totalHits / stats.totalExecutions) * 100;
-    
+
     cleanOldHistory(stats, 14);
     stats.consecutiveDaysNoHits = calculateConsecutiveDaysNoHits(stats, today);
     stats = applyDecayAndCalculateScore(stats);
     stats.isPersistent = shouldBePersistent(stats);
-    
+
     await redis.set(statsKey, JSON.stringify(stats));
     await redis.zAdd('query:prewarm:candidates', {
       score: stats.preWarmScore,
       value: entry.queryHash
     });
-    
+
     const statusLabel = entry.cacheStatus === 'REVALIDATED' ? 'REVALIDATED' : entry.cacheStatus;
     const userLabel = entry.username ? `[${entry.username}]` : '[Anonymous]';
     console.log(`[${entry.shortHash}] ${userLabel} ${statusLabel} | Score: ${stats.preWarmScore.toFixed(2)} | Persistent: ${stats.isPersistent} | No-hit: ${stats.consecutiveDaysNoHits}d`);
-    
+
   } catch (error) {
     console.error("Failed to log analytics:", error);
   }
@@ -319,7 +327,7 @@ function cleanOldHistory(stats: QueryStats, keepDays: number): void {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - keepDays);
   const cutoffStr = cutoffDate.toISOString().slice(0, 10);
-  
+
   Object.keys(stats.dailyHitHistory).forEach(date => {
     if (date < cutoffStr) {
       delete stats.dailyHitHistory[date];
@@ -331,36 +339,32 @@ function calculateConsecutiveDaysNoHits(stats: QueryStats, today: string): numbe
   if (!stats.lastCacheHit) {
     return stats.totalExecutions > 0 ? 1 : 0;
   }
-  
+
   const lastHitDate = new Date(stats.lastCacheHit).toISOString().slice(0, 10);
-  
+
   if (lastHitDate === today) {
     return 0;
   }
-  
+
   const daysSinceLastHit = Math.floor(
     (new Date(today).getTime() - new Date(lastHitDate).getTime()) / 86400000
   );
-  
+
   return Math.max(0, daysSinceLastHit);
 }
 
 function shouldBePersistent(stats: QueryStats): boolean {
-  if (stats.consecutiveDaysNoHits >= 7) {
-    return false;
-  }
-  
+  if (stats.consecutiveDaysNoHits >= 7) return false;
+
   const last7Days = getLast7Days();
   const dailyHitHistory = stats.dailyHitHistory || {};
   const activeDays = last7Days.filter(date => (dailyHitHistory[date] || 0) > 0);
-  
-  if (activeDays.length < 3) {
-    return false;
-  }
-  
+
+  if (activeDays.length < 3) return false;
+
   const totalHitsLast7Days = activeDays.reduce((sum, date) => sum + (dailyHitHistory[date] || 0), 0);
   const avgHitsPerActiveDay = totalHitsLast7Days / activeDays.length;
-  
+
   return avgHitsPerActiveDay >= 2;
 }
 
@@ -376,35 +380,35 @@ function getLast7Days(): string[] {
 
 function applyDecayAndCalculateScore(stats: QueryStats): QueryStats {
   const { totalExecutions, avgDuration, avgRowCount, totalHits, consecutiveDaysNoHits } = stats;
-  
+
   const last7Days = getLast7Days();
   const dailyHitHistory = stats.dailyHitHistory || {};
   const recentHits = last7Days.reduce((sum, date) => sum + (dailyHitHistory[date] || 0), 0);
   const activeDaysLast7 = last7Days.filter(date => (dailyHitHistory[date] || 0) > 0).length;
-  
-  const frequencyScore = Math.min(totalExecutions / 100, 1) * 0.2;
-  const durationScore = Math.min(avgDuration / 5000, 1) * 0.15;
-  const dataSizeScore = Math.min(avgRowCount / 100000, 1) * 0.1;
-  const hitScore = Math.min(totalHits / 50, 1) * 0.2;
+
+  const frequencyScore    = Math.min(totalExecutions / 100, 1) * 0.2;
+  const durationScore     = Math.min(avgDuration / 5000, 1) * 0.15;
+  const dataSizeScore     = Math.min(avgRowCount / 100000, 1) * 0.1;
+  const hitScore          = Math.min(totalHits / 50, 1) * 0.2;
   const recentActivityScore = Math.min(recentHits / 20, 1) * 0.25;
-  const consistencyScore = (activeDaysLast7 / 7) * 0.1;
-  
+  const consistencyScore  = (activeDaysLast7 / 7) * 0.1;
+
   let decayMultiplier = 1.0;
   if (consecutiveDaysNoHits > 0) {
     decayMultiplier = Math.pow(0.75, consecutiveDaysNoHits);
   }
-  
+
   const baseScore = (
-    frequencyScore + 
-    durationScore + 
-    dataSizeScore + 
-    hitScore + 
+    frequencyScore +
+    durationScore +
+    dataSizeScore +
+    hitScore +
     recentActivityScore +
     consistencyScore
   ) * 100;
-  
+
   stats.preWarmScore = Math.min(100, Math.max(0, baseScore * decayMultiplier));
-  
+
   return stats;
 }
 
@@ -416,9 +420,9 @@ async function readFromCache(cacheKey: string): Promise<any[] | null> {
 }
 
 async function writeToCache(
-  cacheKey: string, 
-  data: any[], 
-  shortHash: string, 
+  cacheKey: string,
+  data: any[],
+  shortHash: string,
   options: { strategy: { type: string; ttl: number | null }; stats?: QueryStats; isRevalidation?: boolean }
 ): Promise<void> {
   const redis = await getRedis();
@@ -426,10 +430,10 @@ async function writeToCache(
 
   try {
     const { strategy, stats, isRevalidation = false } = options;
-    
+
     if (strategy.type === 'static' && stats?.isPersistent) {
       await redis.set(cacheKey, JSON.stringify(data));
-      
+
       if (!isRevalidation) {
         const metaKey = `${cacheKey}:meta`;
         const meta: CacheMetadata = {
@@ -441,12 +445,12 @@ async function writeToCache(
         };
         await redis.set(metaKey, JSON.stringify(meta));
       }
-      
+
       const action = isRevalidation ? "Refreshed" : "Cached";
       console.log(`${action} [${shortHash}] PERSISTENT - ${data.length} rows (${(dataSize / 1024 / 1024).toFixed(1)}MB)`);
     } else if (strategy.ttl) {
       await redis.set(cacheKey, JSON.stringify(data), { EX: strategy.ttl });
-      
+
       const metaKey = `${cacheKey}:meta`;
       const meta: CacheMetadata = {
         lastVerified: new Date().toISOString(),
@@ -456,7 +460,7 @@ async function writeToCache(
         dataChangeCount: 0,
       };
       await redis.set(metaKey, JSON.stringify(meta), { EX: strategy.ttl });
-      
+
       const hours = Math.floor(strategy.ttl / 3600);
       console.log(`Cached [${shortHash}] for ${hours}h (${strategy.type}) - ${data.length} rows (${(dataSize / 1024 / 1024).toFixed(1)}MB)`);
     } else {
@@ -473,7 +477,6 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
-    // ✅ CHANGE 1: Extract systemUser parameter
     const contentType = req.headers.get('content-type') ?? '';
     const text = await req.text();
 
@@ -482,27 +485,27 @@ export async function POST(req: NextRequest) {
     }
 
     const { sql, forceDynamic, systemUser } = JSON.parse(text);
-    
-    
+
     if (!sql || typeof sql !== "string") {
       return NextResponse.json({ error: "Missing or invalid SQL" }, { status: 400 });
     }
 
-    // Extract user information from the request automatically
+    // Extract user + Cognito token from session
     const userInfo = await extractUserFromRequest(req);
-    
-    // ✅ CHANGE 2: Use systemUser if provided, otherwise use extracted user info
-    const userId = systemUser || userInfo.userId;
+
+    const userId   = systemUser || userInfo.userId;
     const username = systemUser || userInfo.username || 'ANONYMOUS';
-    const email = userInfo.email;
+    const email    = userInfo.email;
+    const cognitoAccessToken = userInfo.cognitoAccessToken; // ✅ ADDED
 
-    const queryHash = generateQueryHash(sql);
-    const cacheKey = generateCacheKey(queryHash, sql, forceDynamic);
-    const shortHash = queryHash.substring(0, 8);
-    const strategy = getCacheStrategy(sql, forceDynamic);
+    const queryHash  = generateQueryHash(sql);
+    const cacheKey   = generateCacheKey(queryHash, sql, forceDynamic);
+    const shortHash  = queryHash.substring(0, 8);
+    const strategy   = getCacheStrategy(sql, forceDynamic);
 
-    const userLabel = username ? `[${username}]` : email ? `[${email}]` : userId ? `[${userId}]` : '[Anonymous]';
-    console.log(`[${shortHash}] ${userLabel} - Processing query`);
+    const authMethod = cognitoAccessToken ? 'OAUTH' : 'JWT'; // ✅ log which auth is being used
+    const userLabel  = username ? `[${username}]` : email ? `[${email}]` : userId ? `[${userId}]` : '[Anonymous]';
+    console.log(`[${shortHash}] ${userLabel} [${authMethod}] - Processing query`);
 
     const redis = await getRedis();
     const statsKey = `query:stats:${queryHash}`;
@@ -511,31 +514,32 @@ export async function POST(req: NextRequest) {
     const isPersistent = stats?.isPersistent || false;
 
     const cachedData = await readFromCache(cacheKey);
-    
+
     if (cachedData) {
       const shouldRevalidate = await needsRevalidation(cacheKey, isPersistent);
-      
+
       if (shouldRevalidate) {
         const lockAcquired = await acquireRevalidationLock(cacheKey);
-        
+
         if (lockAcquired) {
           const duration = Date.now() - startTime;
           console.log(`🟡 [CACHE HIT] [${shortHash}] ${userLabel} [PERSISTENT] - Revalidating in background - ${cachedData.length} rows - ${duration}ms`);
-          
+
           (async () => {
             try {
               const revalidationResult = await performRevalidation(
                 cacheKey,
                 shortHash,
                 sql,
-                username
+                username,
+                cognitoAccessToken // ✅ ADDED
               );
-              
+
               if (revalidationResult.dataChanged && revalidationResult.newData) {
-                await writeToCache(cacheKey, revalidationResult.newData, shortHash, { 
-                  strategy, 
-                  stats, 
-                  isRevalidation: true 
+                await writeToCache(cacheKey, revalidationResult.newData, shortHash, {
+                  strategy,
+                  stats,
+                  isRevalidation: true
                 });
               }
             } catch (error) {
@@ -544,97 +548,91 @@ export async function POST(req: NextRequest) {
               await releaseRevalidationLock(cacheKey);
             }
           })();
-          
+
           await logQueryAnalytics({
-            queryHash,
-            shortHash,
-            sql,
-            userId,
-            username,
-            email,
+            queryHash, shortHash, sql, userId, username, email,
             cacheStatus: "REVALIDATED",
             rowCount: cachedData.length,
             duration,
             timestamp: new Date(),
             dataSize: Buffer.byteLength(JSON.stringify(cachedData), "utf-8")
           });
-          
+
           return NextResponse.json(cachedData, {
             status: 200,
-            headers: { 
+            headers: {
               "X-Cache-Status": "HIT-REVALIDATING",
               "X-Cache-Hash": queryHash,
               "X-Cache-Type": strategy.type,
               "X-Persistent": "true",
               "X-Revalidation": "background",
+              "X-Auth-Method": authMethod, // ✅ ADDED
               "X-User": username || userId || "anonymous"
             },
           });
         }
       }
-      
+
       const duration = Date.now() - startTime;
       const persistentLabel = isPersistent ? " [PERSISTENT]" : "";
       console.log(`🟢 [CACHE HIT] [${shortHash}] ${userLabel} (${strategy.type})${persistentLabel} - ${cachedData.length} rows - ${duration}ms`);
-      
+
       await logQueryAnalytics({
-        queryHash,
-        shortHash,
-        sql,
-        userId,
-        username,
-        email,
+        queryHash, shortHash, sql, userId, username, email,
         cacheStatus: "HIT",
         rowCount: cachedData.length,
         duration,
         timestamp: new Date(),
         dataSize: Buffer.byteLength(JSON.stringify(cachedData), "utf-8")
       });
-      
+
       return NextResponse.json(cachedData, {
         status: 200,
-        headers: { 
-          "X-Cache-Status": "HIT", 
+        headers: {
+          "X-Cache-Status": "HIT",
           "X-Cache-Hash": queryHash,
           "X-Cache-Type": strategy.type,
           "X-Persistent": isPersistent ? "true" : "false",
+          "X-Auth-Method": authMethod, // ✅ ADDED
           "X-User": username || userId || "anonymous"
         },
       });
     }
 
-    console.log(`🔴 [CACHE MISS] [${shortHash}] ${userLabel} (${strategy.type}) - Executing Snowflake`);
-    
-    const result = await SnowflakeConnectionManager.executeQuery(sql, username, true);
+    console.log(`🔴 [CACHE MISS] [${shortHash}] ${userLabel} [${authMethod}] (${strategy.type}) - Executing Snowflake`);
+
+    // ✅ UPDATED: pass cognitoAccessToken
+    const result = await SnowflakeConnectionManager.executeQuery(
+      sql,
+      username,
+      true,
+      cognitoAccessToken
+    );
     const rows = result.rows;
 
     if (!rows || rows.length === 0) {
       const emptyResult: any[] = [];
       await redis.set(cacheKey, JSON.stringify(emptyResult), { EX: 3600 });
       console.log(`[EMPTY RESULT] [${shortHash}] ${userLabel} - Cached for 1h`);
-      
+
       const duration = Date.now() - startTime;
       await logQueryAnalytics({
-        queryHash,
-        shortHash,
-        sql,
-        userId,
-        username,
-        email,
+        queryHash, shortHash, sql, userId, username, email,
         cacheStatus: "MISS",
         rowCount: 0,
         duration,
         timestamp: new Date(),
         dataSize: 0
       });
-      
+
       return NextResponse.json(emptyResult, {
         status: 200,
-        headers: { 
+        headers: {
           "X-Cache-Status": "MISS",
           "X-Cache-Hash": queryHash,
           "X-Cache-Type": "hourly",
           "X-Row-Count": "0",
+          "X-Auth-Method": authMethod, // ✅ ADDED
           "X-User": username || userId || "anonymous"
         },
       });
@@ -643,16 +641,11 @@ export async function POST(req: NextRequest) {
     await writeToCache(cacheKey, rows, shortHash, { strategy, stats });
 
     const totalDuration = Date.now() - startTime;
-    console.log(`✅ [QUERY COMPLETE] [${shortHash}] ${userLabel} - ${rows.length} rows - ${totalDuration}ms`);
+    console.log(`✅ [QUERY COMPLETE] [${shortHash}] ${userLabel} [${authMethod}] - ${rows.length} rows - ${totalDuration}ms`);
 
     const dataSize = Buffer.byteLength(JSON.stringify(rows), "utf-8");
     await logQueryAnalytics({
-      queryHash,
-      shortHash,
-      sql,
-      userId,
-      username,
-      email,
+      queryHash, shortHash, sql, userId, username, email,
       cacheStatus: "MISS",
       rowCount: rows.length,
       duration: totalDuration,
@@ -662,19 +655,21 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(rows, {
       status: 200,
-      headers: { 
-        "X-Cache-Status": "MISS", 
+      headers: {
+        "X-Cache-Status": "MISS",
         "X-Cache-Hash": queryHash,
         "X-Cache-Type": strategy.type,
         "X-Row-Count": rows.length.toString(),
         "X-Query-Duration": totalDuration.toString(),
+        "X-Auth-Method": authMethod, // ✅ ADDED
         "X-User": username || userId || "anonymous"
       },
     });
+
   } catch (err: any) {
     console.error(`❌ [ERROR] Duration: ${Date.now() - startTime}ms`, err);
     return NextResponse.json(
-      { error: "Query execution failed", details: err.message }, 
+      { error: "Query execution failed", details: err.message },
       { status: 500 }
     );
   }

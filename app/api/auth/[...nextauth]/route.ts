@@ -15,29 +15,24 @@ export const authOptions: NextAuthOptions = {
 
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60, // 1 day
+    maxAge: 24 * 60 * 60,
   },
 
   callbacks: {
     async jwt({ token, account, profile }) {
-      // account is only present on the first JWT call, right after OAuth callback.
-      // This is the correct place to fetch roles — runs once at sign-in, not on every request.
       if (account?.access_token && profile) {
-        token.accessToken = account.access_token;
-        token.username    = (profile as any)['cognito:username'];
-        token.givenName   = (profile as any)['given_name'];
-        token.middleName  = (profile as any)['middle_name'];
+        token.accessToken        = account.access_token;
+        token.cognitoAccessToken = account.access_token; // ✅ ADDED - used for Snowflake OAuth
+        token.username           = (profile as any)['cognito:username'];
+        token.givenName          = (profile as any)['given_name'];
+        token.middleName         = (profile as any)['middle_name'];
 
-        // Roles from Cognito groups (if any)
         const cognitoGroups: string[] = (profile as any)['cognito:groups'] ?? [];
 
-        // Custom roles from Supabase via internal API
-        // getRolesForEmail is async — must be awaited or token.roles becomes a Promise
         const customRoles: string[] = token.email
           ? await getRolesForEmail(token.email)
           : [];
 
-        // Merge and deduplicate both sources
         token.roles = [...new Set([...cognitoGroups, ...customRoles])];
 
         console.log('✅ Roles assigned for:', token.email, '→', token.roles);

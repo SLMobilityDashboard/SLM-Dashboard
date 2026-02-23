@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 import snowflake from "snowflake-sdk";
 
 export async function POST(request: NextRequest) {
+  // ✅ Auth guard — only logged-in Cognito users can test connections
+  const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
+  if (!token) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const {
       account,
@@ -36,7 +43,7 @@ export async function POST(request: NextRequest) {
       });
     });
 
-    // Ping the warehouse
+    // Verify connection is alive
     const testQuery = `SELECT CURRENT_TIMESTAMP() AS now;`;
     await new Promise((resolve, reject) => {
       connection.execute({
@@ -73,23 +80,25 @@ export async function POST(request: NextRequest) {
             },
           });
         });
-
         tableData.push({ name: tableName, rows: rows[0]["COUNT"] });
       } catch (e) {
-        tableData.push({ name: tableName, rows: 0 }); // fallback
+        tableData.push({ name: tableName, rows: 0 });
       }
     }
 
-    connection.destroy();
+    connection.destroy((err) => {
+      if (err) console.error("Error destroying test connection:", err);
+    });
 
     return NextResponse.json({
       success: true,
       tables: tableData,
     });
-  } catch (error) {
-    console.error("Snowflake connection error:", error);
+
+  } catch (error: any) {
+    console.error("Snowflake connection test failed:", error);
     return NextResponse.json(
-      { error: "Failed to connect to Snowflake", details: error },
+      { error: "Failed to connect to Snowflake", details: error.message || error.toString() },
       { status: 500 }
     );
   }

@@ -1114,7 +1114,7 @@ function OverridesTab({ overrides, setOverrides, users, menuPerms, protectedRout
                         ? "bg-cyan-500/20 border-cyan-500/40 text-cyan-300"
                         : "bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300"
                     }`}>
-                    {type === "route" ? "Route (URL block)" : "Menu (Sidebar hide)"}
+                    {type === "route" ? "Route (Page Access)" : "Menu (Sidebar Access)"}
                   </button>
                 ))}
               </div>
