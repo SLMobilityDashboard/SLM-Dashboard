@@ -1,10 +1,13 @@
+// utils/TableSelectorUtils.ts
 import { TableDescription } from "../models/TableDescription.js";
-import SnowflakeConnectionManager from "@/lib/snowflake_adhoc_prod";
 
 export default class TableSelectorUtils {
   /**
-   * Fetch table descriptions dynamically from Snowflake metadata.
-   * Calls Snowflake directly — no HTTP round-trip, no auth issues.
+   * Fetch table descriptions dynamically from Snowflake metadata
+   * Handles both raw array responses and { result: { rows: [...] } } responses
+   * 
+   * IMPORTANT: This should be called from server-side code (Server Components, 
+   * Server Actions, or API routes) to ensure authentication works properly.
    */
   static async fetchTableDescriptions(): Promise<TableDescription[]> {
     const sql = `
@@ -19,20 +22,44 @@ export default class TableSelectorUtils {
       ORDER BY DATABASE_NAME, SCHEMA_NAME, TABLE_NAME
     `;
 
-    // ✅ Call Snowflake directly — no fetch, no cookie issues
-    // Uses JWT fallback with SNOWFLAKE_USERNAME from .env
-    const result = await SnowflakeConnectionManager.executeQuery(
-      sql,
-      undefined,  // no user — uses env default
-      false,      // no audit comment needed for system queries
-      undefined   // no oauth token — uses JWT service account
-    );
+    // Use relative URL for server-side calls, absolute for client-side
+    const baseUrl = typeof window === 'undefined' 
+      ? process.env.NEXTAUTH_URL || 'http://localhost:3000'
+      : '';
 
-    const rows = result.rows;
+    const response = await fetch(`${baseUrl}/api/query`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-System-Request": "TableSelector", // Mark as system request
+      },
+      credentials: 'include', // Critical: Include cookies for authentication
+      body: JSON.stringify({ 
+        sql,
+        systemUser: 'SYSTEM' // Pass system user identifier
+      }),
+    });
+
+    if (!response.ok) {
+      // Check for authentication errors
+      if (response.status === 401) {
+        throw new Error("Unauthorized: Please sign in to access table metadata");
+      }
+      
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(
+        `Failed to fetch tables: ${response.status} ${response.statusText}\n${errorText}`
+      );
+    }
+
+    const json = await response.json();
+
+    // Handle both possible response formats
+    const rows = json?.result?.rows || (Array.isArray(json) ? json : null);
 
     if (!rows || !Array.isArray(rows)) {
-      console.error("Invalid metadata response format:", rows);
-      throw new Error("Invalid metadata response: expected array of rows");
+      console.error("Invalid metadata response format:", json);
+      throw new Error("Invalid metadata response: expected array or result.rows");
     }
 
     return rows
@@ -48,7 +75,7 @@ export default class TableSelectorUtils {
 
         const columns =
           typeof columnsRaw === "string"
-            ? columnsRaw.split(",").map((c: string) => c.trim())
+            ? columnsRaw.split(",").map((c) => c.trim())
             : Array.isArray(columnsRaw)
             ? columnsRaw
             : [];
@@ -84,6 +111,7 @@ export default class TableSelectorUtils {
 
   /**
    * Fetch tables with error handling and fallback
+   * Returns sample data if fetch fails
    */
   static async fetchTablesWithFallback(): Promise<{
     tables: TableDescription[];
@@ -126,7 +154,7 @@ export default class TableSelectorUtils {
     pattern: string
   ): TableDescription[] {
     const lowerPattern = pattern.toLowerCase();
-    return tables.filter(table =>
+    return tables.filter(table => 
       table.tableName.toLowerCase().includes(lowerPattern) ||
       table.comment.toLowerCase().includes(lowerPattern) ||
       table.columns.some(col => col.toLowerCase().includes(lowerPattern))
@@ -134,11 +162,12 @@ export default class TableSelectorUtils {
   }
 
   /**
-   * Get unique table categories
+   * Get unique table categories (useful for grouping)
    */
   static getTableCategories(tables: TableDescription[]): string[] {
     const categories = new Set<string>();
     tables.forEach(table => {
+      // Extract category from table name (e.g., "SALES_" prefix)
       const parts = table.tableName.split('_');
       if (parts.length > 1) {
         categories.add(parts[0]);

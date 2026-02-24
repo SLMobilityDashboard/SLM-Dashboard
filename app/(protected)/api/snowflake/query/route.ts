@@ -1,4 +1,3 @@
-// app/api/snowflake/query/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import SnowflakeConnectionManager from "@/lib/snowflake";
 import crypto from "crypto";
