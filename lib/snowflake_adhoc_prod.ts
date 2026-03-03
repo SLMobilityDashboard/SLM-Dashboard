@@ -10,17 +10,24 @@ interface QueryResult {
 
 /**
  * SnowflakeConnectionManager - Pool-based connection manager with per-user authentication
- * For ADHOC warehouse/database queries
+ * For ADHOC warehouse/database queries with JWT refresh support
  */
 class SnowflakeConnectionManager {
   private static connectionPool: Map<string, Connection> = new Map();
   private static connectingUsers: Set<string> = new Set();
-  private static connectedUsers: Set<string> = new Set();
+  private static connectedUsers: Map<string, number> = new Map(); // Store connection creation time
+  private static connectionLocks: Map<string, Promise<Connection>> = new Map();
   
   // Connection timeout settings
   private static readonly CONNECTION_TIMEOUT_MS = 60000; // 60 seconds
+  private static readonly REQUEST_TIMEOUT_MS = 300000; // 5 minutes for query execution
   private static readonly MAX_IDLE_TIME_MS = 300000; // 5 minutes
+  
+  // ✅ JWT SPECIFIC SETTINGS
+  private static readonly JWT_REFRESH_THRESHOLD_MS = 55 * 60 * 1000; // Refresh after 55 minutes (JWT expires in 60 min)
+  private static readonly MAX_CONNECTION_AGE_MS = 50 * 60 * 1000; // Max connection age 50 minutes
   private static lastUsedTime: Map<string, number> = new Map();
+  private static connectionCreationTime: Map<string, number> = new Map();
 
   /**
    * Map app username to Snowflake username
@@ -106,11 +113,52 @@ class SnowflakeConnectionManager {
       application: 'SLM_Dashboard_AdHoc',
       clientSessionKeepAlive: true,
       clientSessionKeepAliveHeartbeatFrequency: 3600,
+      sessionParameters: {
+        STATEMENT_TIMEOUT_IN_SECONDS: 3600,  // 1 hour
+        STATEMENT_QUEUED_TIMEOUT_IN_SECONDS: 0,
+      }
     });
   }
 
   /**
-   * Get or create connection for specific user
+   * Check if connection needs refresh (JWT expiration)
+   */
+  private static needsRefresh(connectionKey: string): boolean {
+    const creationTime = this.connectionCreationTime.get(connectionKey);
+    if (!creationTime) return true;
+    
+    const age = Date.now() - creationTime;
+    const needsRefresh = age > this.JWT_REFRESH_THRESHOLD_MS;
+    
+    if (needsRefresh) {
+      console.log(`⚠️ [ADHOC] Connection for ${connectionKey} is ${Math.round(age/1000/60)} minutes old, needs refresh`);
+    }
+    
+    return needsRefresh;
+  }
+
+  /**
+   * Validate connection with simple query
+   */
+  private static async validateConnection(connection: Connection, connectionKey: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      connection.execute({
+        sqlText: 'SELECT 1',
+        complete: (err: any) => {
+          if (err) {
+            console.log(`❌ [ADHOC] Connection validation failed for ${connectionKey}:`, err.message);
+            resolve(false);
+          } else {
+            console.log(`✅ [ADHOC] Connection validation passed for ${connectionKey}`);
+            resolve(true);
+          }
+        }
+      });
+    });
+  }
+
+  /**
+   * Get or create connection for specific user with JWT refresh
    */
   private static async getConnection(username?: string): Promise<Connection> {
     const snowflakeUsername = this.mapToSnowflakeUsername(username);
@@ -119,28 +167,118 @@ class SnowflakeConnectionManager {
     // Clean up idle connections periodically
     this.cleanupIdleConnections();
 
-    // Check if connection exists and is valid
-    if (this.connectionPool.has(connectionKey) && this.connectedUsers.has(connectionKey)) {
-      console.log(`♻️  [ADHOC] Reusing connection for user: ${snowflakeUsername}`);
-      this.lastUsedTime.set(connectionKey, Date.now());
-      return this.connectionPool.get(connectionKey)!;
+    // Check if there's an existing connection attempt
+    if (this.connectionLocks.has(connectionKey)) {
+      console.log(`⏳ [ADHOC] Waiting for existing connection attempt: ${snowflakeUsername}`);
+      return this.connectionLocks.get(connectionKey)!;
     }
 
-    // Wait if connection is in progress
-    if (this.connectingUsers.has(connectionKey)) {
-      console.log(`⏳ [ADHOC] Waiting for existing connection attempt: ${snowflakeUsername}`);
-      await this.waitForConnection(connectionKey);
-      return this.connectionPool.get(connectionKey)!;
+    // Check if existing connection needs refresh
+    const existingConnection = this.connectionPool.get(connectionKey);
+    if (existingConnection && this.connectedUsers.has(connectionKey)) {
+      if (this.needsRefresh(connectionKey)) {
+        console.log(`🔄 [ADHOC] Refreshing connection for ${snowflakeUsername} (JWT expiration)`);
+        
+        const refreshPromise = this.refreshConnection(connectionKey, username);
+        this.connectionLocks.set(connectionKey, refreshPromise);
+        
+        try {
+          const newConnection = await refreshPromise;
+          return newConnection;
+        } finally {
+          this.connectionLocks.delete(connectionKey);
+        }
+      } else {
+        // Validate connection before reuse
+        const isValid = await this.validateConnection(existingConnection, connectionKey);
+        if (!isValid) {
+          console.log(`🔄 [ADHOC] Connection invalid, refreshing for ${snowflakeUsername}`);
+          const refreshPromise = this.refreshConnection(connectionKey, username);
+          this.connectionLocks.set(connectionKey, refreshPromise);
+          
+          try {
+            const newConnection = await refreshPromise;
+            return newConnection;
+          } finally {
+            this.connectionLocks.delete(connectionKey);
+          }
+        }
+        
+        console.log(`♻️  [ADHOC] Reusing connection for user: ${snowflakeUsername}`);
+        this.lastUsedTime.set(connectionKey, Date.now());
+        return existingConnection;
+      }
     }
 
     // Create new connection
+    const connectionPromise = this.createNewConnection(connectionKey, username);
+    this.connectionLocks.set(connectionKey, connectionPromise);
+    
+    try {
+      const connection = await connectionPromise;
+      return connection;
+    } finally {
+      this.connectionLocks.delete(connectionKey);
+    }
+  }
+
+  /**
+   * Refresh existing connection
+   */
+  private static async refreshConnection(
+    connectionKey: string, 
+    username?: string
+  ): Promise<Connection> {
+    console.log(`🔄 [ADHOC] Refreshing connection for: ${connectionKey}`);
+    
+    // Close old connection
+    const oldConnection = this.connectionPool.get(connectionKey);
+    if (oldConnection) {
+      try {
+        await new Promise<void>((resolve) => {
+          oldConnection.destroy((err) => {
+            if (err) console.error(`Error closing old connection for ${connectionKey}:`, err);
+            else console.log(`✅ [ADHOC] Closed old connection: ${connectionKey}`);
+            resolve();
+          });
+        });
+      } catch (error) {
+        console.error(`Error during old connection cleanup:`, error);
+      }
+    }
+    
+    // Remove old entries
+    this.connectionPool.delete(connectionKey);
+    this.connectedUsers.delete(connectionKey);
+    this.connectionCreationTime.delete(connectionKey);
+    this.lastUsedTime.delete(connectionKey);
+    
+    // Create new connection
+    return this.createNewConnection(connectionKey, username);
+  }
+
+  /**
+   * Create new connection
+   */
+  private static async createNewConnection(
+    connectionKey: string,
+    username?: string
+  ): Promise<Connection> {
+    console.log(`🔌 [ADHOC] Creating new connection for: ${connectionKey}`);
+    
+    if (this.connectingUsers.has(connectionKey)) {
+      console.log(`⏳ [ADHOC] Connection already in progress for: ${connectionKey}`);
+      await this.waitForConnection(connectionKey);
+      return this.connectionPool.get(connectionKey)!;
+    }
+    
     this.connectingUsers.add(connectionKey);
     const connection = this.createConnection(username);
 
     try {
       await new Promise<void>((resolve, reject) => {
         const timeoutId = setTimeout(() => {
-          reject(new Error(`Connection timeout for user: ${snowflakeUsername}`));
+          reject(new Error(`Connection timeout for user: ${connectionKey}`));
         }, this.CONNECTION_TIMEOUT_MS);
 
         connection.connect((err) => {
@@ -148,7 +286,7 @@ class SnowflakeConnectionManager {
           this.connectingUsers.delete(connectionKey);
 
           if (err) {
-            console.error(`❌ [ADHOC] Failed to connect for user ${snowflakeUsername}:`, err.message);
+            console.error(`❌ [ADHOC] Failed to connect for user ${connectionKey}:`, err.message);
             console.error(`[ADHOC] Error details:`, {
               code: err.code,
               sqlState: err.sqlState,
@@ -157,10 +295,12 @@ class SnowflakeConnectionManager {
             return reject(err);
           }
 
-          this.connectedUsers.add(connectionKey);
+          const creationTime = Date.now();
+          this.connectedUsers.set(connectionKey, creationTime);
           this.connectionPool.set(connectionKey, connection);
-          this.lastUsedTime.set(connectionKey, Date.now());
-          console.log(`✅ [ADHOC] Connection established for user: ${snowflakeUsername}`);
+          this.connectionCreationTime.set(connectionKey, creationTime);
+          this.lastUsedTime.set(connectionKey, creationTime);
+          console.log(`✅ [ADHOC] Connection established for user: ${connectionKey} (JWT expires in 60 minutes)`);
           resolve();
         });
       });
@@ -170,6 +310,7 @@ class SnowflakeConnectionManager {
       this.connectingUsers.delete(connectionKey);
       this.connectionPool.delete(connectionKey);
       this.connectedUsers.delete(connectionKey);
+      this.connectionCreationTime.delete(connectionKey);
       throw error;
     }
   }
@@ -200,28 +341,47 @@ class SnowflakeConnectionManager {
     const now = Date.now();
     const connectionsToRemove: string[] = [];
 
+    // Check idle connections
     for (const [key, lastUsed] of this.lastUsedTime.entries()) {
       if (now - lastUsed > this.MAX_IDLE_TIME_MS) {
+        console.log(`🧹 [ADHOC] Cleaning up idle connection: ${key} (${Math.round((now - lastUsed)/1000)}s idle)`);
         connectionsToRemove.push(key);
       }
     }
 
-    for (const key of connectionsToRemove) {
-      console.log(`🧹 [ADHOC] Cleaning up idle connection: ${key}`);
-      const connection = this.connectionPool.get(key);
-      if (connection) {
-        try {
-          connection.destroy((err) => {
-            if (err) console.error(`[ADHOC] Error destroying connection ${key}:`, err);
-          });
-        } catch (error) {
-          console.error(`[ADHOC] Error destroying connection ${key}:`, error);
-        }
+    // Check connections older than max age
+    for (const [key, creationTime] of this.connectionCreationTime.entries()) {
+      const age = now - creationTime;
+      if (age > this.MAX_CONNECTION_AGE_MS) {
+        console.log(`🧹 [ADHOC] Cleaning up old connection: ${key} (${Math.round(age/1000/60)} minutes old)`);
+        connectionsToRemove.push(key);
       }
-      this.connectionPool.delete(key);
-      this.connectedUsers.delete(key);
-      this.lastUsedTime.delete(key);
     }
+
+    for (const key of [...new Set(connectionsToRemove)]) {
+      this.closeConnection(key);
+    }
+  }
+
+  /**
+   * Close specific connection
+   */
+  private static closeConnection(key: string): void {
+    const connection = this.connectionPool.get(key);
+    if (connection) {
+      try {
+        connection.destroy((err) => {
+          if (err) console.error(`[ADHOC] Error destroying connection ${key}:`, err);
+          else console.log(`✅ [ADHOC] Closed connection: ${key}`);
+        });
+      } catch (error) {
+        console.error(`[ADHOC] Error destroying connection ${key}:`, error);
+      }
+    }
+    this.connectionPool.delete(key);
+    this.connectedUsers.delete(key);
+    this.connectionCreationTime.delete(key);
+    this.lastUsedTime.delete(key);
   }
 
   /**
@@ -247,18 +407,17 @@ class SnowflakeConnectionManager {
 
       connection.execute({
         sqlText: finalSql,
+        timeout: this.REQUEST_TIMEOUT_MS,
         complete: (execErr: any, stmt: Statement, rows: any[]) => {
           if (execErr) {
             console.error(`❌ [ADHOC] Query execution failed for ${snowflakeUsername}:`, execErr.message);
             
-            // If connection error, remove from pool
+            // If JWT or connection error, remove from pool
             if (execErr.code === '390144' || execErr.message?.includes('JWT token is invalid') || 
                 execErr.code === '405503' || execErr.message?.includes('terminated')) {
-              console.log(`[ADHOC] Removing failed connection for ${snowflakeUsername}`);
+              console.log(`🔄 [ADHOC] JWT/Connection error detected, invalidating connection for ${snowflakeUsername}`);
               const connectionKey = snowflakeUsername;
-              this.connectionPool.delete(connectionKey);
-              this.connectedUsers.delete(connectionKey);
-              this.lastUsedTime.delete(connectionKey);
+              this.closeConnection(connectionKey);
             }
             
             return reject(execErr);
@@ -296,11 +455,13 @@ class SnowflakeConnectionManager {
     lastUsed: number;
     lastQueryTime: number;
     timeSinceLastQuery: number;
+    connectionAgeMinutes?: number;
   }> {
     const snowflakeUsername = this.mapToSnowflakeUsername(requestedUsername);
     const connectionKey = snowflakeUsername;
     const now = Date.now();
     const lastUsed = this.lastUsedTime.get(connectionKey) || 0;
+    const creationTime = this.connectionCreationTime.get(connectionKey);
 
     return {
       isConnected: this.connectedUsers.has(connectionKey),
@@ -311,6 +472,7 @@ class SnowflakeConnectionManager {
       lastUsed: lastUsed,
       lastQueryTime: lastUsed,
       timeSinceLastQuery: lastUsed ? now - lastUsed : 0,
+      connectionAgeMinutes: creationTime ? Math.round((now - creationTime) / 1000 / 60) : undefined,
     };
   }
 
@@ -338,6 +500,7 @@ class SnowflakeConnectionManager {
       connection.destroy((err) => {
         this.connectionPool.delete(connectionKey);
         this.connectedUsers.delete(connectionKey);
+        this.connectionCreationTime.delete(connectionKey);
         this.lastUsedTime.delete(connectionKey);
         
         if (err) {
@@ -375,7 +538,9 @@ class SnowflakeConnectionManager {
     this.connectionPool.clear();
     this.connectedUsers.clear();
     this.connectingUsers.clear();
+    this.connectionCreationTime.clear();
     this.lastUsedTime.clear();
+    this.connectionLocks.clear();
     
     console.log('[ADHOC] All connections closed.');
   }
@@ -393,17 +558,22 @@ class SnowflakeConnectionManager {
       lastUsed: number;
       lastQueryTime: number;
       timeSinceLastQuery: number;
+      ageMinutes: number;
     }>;
   } {
     const now = Date.now();
-    const connections = Array.from(this.connectionPool.keys()).map(key => ({
-      snowflakeUser: key,
-      isConnected: this.connectedUsers.has(key),
-      isConnecting: this.connectingUsers.has(key),
-      lastUsed: this.lastUsedTime.get(key) || 0,
-      lastQueryTime: this.lastUsedTime.get(key) || 0,
-      timeSinceLastQuery: this.lastUsedTime.has(key) ? now - this.lastUsedTime.get(key)! : 0,
-    }));
+    const connections = Array.from(this.connectionPool.keys()).map(key => {
+      const creationTime = this.connectionCreationTime.get(key) || 0;
+      return {
+        snowflakeUser: key,
+        isConnected: this.connectedUsers.has(key),
+        isConnecting: this.connectingUsers.has(key),
+        lastUsed: this.lastUsedTime.get(key) || 0,
+        lastQueryTime: this.lastUsedTime.get(key) || 0,
+        timeSinceLastQuery: this.lastUsedTime.has(key) ? now - this.lastUsedTime.get(key)! : 0,
+        ageMinutes: creationTime ? Math.round((now - creationTime) / 1000 / 60) : 0,
+      };
+    });
 
     return {
       totalConnections: this.connectionPool.size,

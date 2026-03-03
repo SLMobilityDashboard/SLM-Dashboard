@@ -22,21 +22,29 @@ export default class TableSelectorUtils {
       ORDER BY DATABASE_NAME, SCHEMA_NAME, TABLE_NAME
     `;
 
-    // Use relative URL for server-side calls, absolute for client-side
-    const baseUrl = typeof window === 'undefined' 
-      ? process.env.NEXTAUTH_URL || 'http://localhost:3000'
-      : '';
+    // ✅ Determine if running on server or client
+    const isServer = typeof window === 'undefined';
+    
+    // ✅ For server-side calls, we need to use absolute URL with NEXTAUTH_URL
+    // ✅ For client-side calls, use relative URL (cookies are sent automatically)
+    const baseUrl = isServer ? (process.env.NEXTAUTH_URL || 'http://localhost:3000') : '';
 
+    // ✅ IMPORTANT: On server-side, we need to forward cookies manually
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    // ✅ If this is called from an API route (server-side), we need to get cookies from the request
+    // This requires passing the request object - we'll need to modify the method signature
     const response = await fetch(`${baseUrl}/api/query`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-System-Request": "TableSelector", // Mark as system request
-      },
-      credentials: 'include', // Critical: Include cookies for authentication
+      headers,
+      // ✅ credentials: 'include' works for client-side, but on server we need to manually add cookies
+      ...(isServer ? {} : { credentials: 'include' }),
       body: JSON.stringify({ 
         sql,
-        systemUser: 'SYSTEM' // Pass system user identifier
+        // ✅ Don't use systemUser - let the API route extract the user from the session
+        // This ensures proper authentication
       }),
     });
 
@@ -55,6 +63,91 @@ export default class TableSelectorUtils {
     const json = await response.json();
 
     // Handle both possible response formats
+    const rows = json?.result?.rows || (Array.isArray(json) ? json : null);
+
+    if (!rows || !Array.isArray(rows)) {
+      console.error("Invalid metadata response format:", json);
+      throw new Error("Invalid metadata response: expected array or result.rows");
+    }
+
+    return rows
+      .map((row: any, index: number) => {
+        const tableName = row.TABLE_NAME;
+        const comment = row.COMMENT || "";
+        const columnsRaw = row.COLUMNS;
+
+        if (!tableName || typeof tableName !== "string") {
+          console.warn(`Skipping invalid table at index ${index}`, row);
+          return null;
+        }
+
+        const columns =
+          typeof columnsRaw === "string"
+            ? columnsRaw.split(",").map((c) => c.trim())
+            : Array.isArray(columnsRaw)
+            ? columnsRaw
+            : [];
+
+        return new TableDescription(tableName, comment, columns);
+      })
+      .filter(Boolean) as TableDescription[];
+  }
+
+  /**
+   * Alternative version that accepts request object (for API routes)
+   * This ensures proper cookie forwarding on server-side
+   */
+  static async fetchTableDescriptionsWithRequest(req?: Request): Promise<TableDescription[]> {
+    const sql = `
+      SELECT 
+        DATABASE_NAME, 
+        SCHEMA_NAME, 
+        TABLE_NAME, 
+        TABLE_TYPE, 
+        COMMENT, 
+        COLUMNS
+      FROM ADHOC.METADATA.META_DATA
+      ORDER BY DATABASE_NAME, SCHEMA_NAME, TABLE_NAME
+    `;
+
+    const isServer = typeof window === 'undefined';
+    const baseUrl = isServer ? (process.env.NEXTAUTH_URL || 'http://localhost:3000') : '';
+
+    // ✅ Build headers properly
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+
+    // ✅ If we have a request object (from API route), forward cookies
+    if (req) {
+      const cookie = req.headers.get('cookie');
+      if (cookie) {
+        headers.cookie = cookie;
+      }
+      
+      // Forward any auth headers
+      const authorization = req.headers.get('authorization');
+      if (authorization) {
+        headers.authorization = authorization;
+      }
+    }
+
+    const response = await fetch(`${baseUrl}/api/query`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ sql }),
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error("Unauthorized: Please sign in to access table metadata");
+      }
+      
+      const errorText = await response.text().catch(() => response.statusText);
+      throw new Error(`Failed to fetch tables: ${response.status} ${response.statusText}\n${errorText}`);
+    }
+
+    const json = await response.json();
     const rows = json?.result?.rows || (Array.isArray(json) ? json : null);
 
     if (!rows || !Array.isArray(rows)) {
@@ -113,13 +206,16 @@ export default class TableSelectorUtils {
    * Fetch tables with error handling and fallback
    * Returns sample data if fetch fails
    */
-  static async fetchTablesWithFallback(): Promise<{
+  static async fetchTablesWithFallback(req?: Request): Promise<{
     tables: TableDescription[];
     source: 'metadata' | 'sample';
     error?: string;
   }> {
     try {
-      const tables = await this.fetchTableDescriptions();
+      // ✅ Use the version that accepts request if provided
+      const tables = req 
+        ? await this.fetchTableDescriptionsWithRequest(req)
+        : await this.fetchTableDescriptions();
       return { tables, source: 'metadata' };
     } catch (error) {
       console.error("Failed to fetch table metadata:", error);
