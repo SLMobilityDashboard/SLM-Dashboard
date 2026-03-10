@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -484,38 +485,6 @@ const FilterPanel: React.FC<FilterPanelProps> = ({
           <>
             <div className="pt-4 border-t border-slate-700/50 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* <div className="space-y-2">
-                  <label className="text-sm text-slate-300">Country</label>
-                  <select
-                    value={tempFilters.countryFilter}
-                    onChange={(e) => updateTempFilters("countryFilter", e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-md text-slate-200"
-                  >
-                    <option value="all">All Countries</option>
-                    {countries.map((country) => (
-                      <option key={country} value={country}>
-                        {country}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm text-slate-300">City</label>
-                  <select
-                    value={tempFilters.cityFilter}
-                    onChange={(e) => updateTempFilters("cityFilter", e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-md text-slate-200"
-                  >
-                    <option value="all">All Cities</option>
-                    {cities.map((city) => (
-                      <option key={city} value={city}>
-                        {city}
-                      </option>
-                    ))}
-                  </select>
-                </div> */}
-
                 <div className="space-y-2">
                   <label className="text-sm text-slate-300">Location</label>
                   <select
@@ -669,8 +638,8 @@ const MaintenanceAlert: React.FC<MaintenanceAlertProps> = ({ station }) => {
       <div className="flex-1 space-y-1">
         <div className="flex items-center justify-between">
           <p className="font-medium text-sm">
-            {station.MAINTENANCE_STATUS === "OVERDUE" 
-              ? "Maintenance Overdue" 
+            {station.MAINTENANCE_STATUS === "OVERDUE"
+              ? "Maintenance Overdue"
               : "Maintenance Due Soon"}
           </p>
           <Wrench className="w-4 h-4" />
@@ -696,13 +665,13 @@ interface SwapStatsCardProps {
 const SwapStatsCard: React.FC<SwapStatsCardProps> = ({ station }) => {
   const totalSwaps = station.TOTAL_SWAPS || 0;
   const swapsSinceMaintenance = station.SWAPS_SINCE_MAINTENANCE || 0;
-  
+
   const swapProgress = Math.min((swapsSinceMaintenance / 100) * 100, 100);
 
-  const progressColor = swapProgress >= 100 
-    ? "bg-red-400" 
-    : swapProgress >= 80 
-    ? "bg-amber-400" 
+  const progressColor = swapProgress >= 100
+    ? "bg-red-400"
+    : swapProgress >= 80
+    ? "bg-amber-400"
     : "bg-green-400";
 
   return (
@@ -711,13 +680,13 @@ const SwapStatsCard: React.FC<SwapStatsCardProps> = ({ station }) => {
         <TrendingUp className="w-4 h-4 text-blue-400" />
         <span>Swap Statistics</span>
       </div>
-      
+
       <div className="grid grid-cols-2 gap-4">
         <div>
           <p className="text-xs text-slate-500 mb-1">Total Swaps</p>
           <p className="text-2xl font-bold text-blue-400">{totalSwaps.toLocaleString()}</p>
         </div>
-        
+
         <div>
           <p className="text-xs text-slate-500 mb-1">Since Maintenance</p>
           <div className="flex items-baseline gap-2">
@@ -735,7 +704,7 @@ const SwapStatsCard: React.FC<SwapStatsCardProps> = ({ station }) => {
           <span>{Math.round(swapProgress)}%</span>
         </div>
         <div className="h-2 bg-slate-700/50 rounded-full overflow-hidden">
-          <div 
+          <div
             className={`h-full ${progressColor} transition-all duration-500`}
             style={{ width: `${swapProgress}%` }}
           />
@@ -770,7 +739,7 @@ const VendorInfoCard: React.FC<VendorInfoCardProps> = ({ station }) => {
         <Building2 className="w-4 h-4 text-cyan-400" />
         <span>Vendor Details</span>
       </div>
-      
+
       <div className="grid grid-cols-2 gap-4 text-sm">
         {station.VENDOR_COMPANY_NAME && (
           <div className="flex items-start gap-2">
@@ -781,7 +750,7 @@ const VendorInfoCard: React.FC<VendorInfoCardProps> = ({ station }) => {
             </div>
           </div>
         )}
-        
+
         {station.VENDOR_COUNTRY && (
           <div className="flex items-start gap-2">
             <Globe className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
@@ -792,7 +761,7 @@ const VendorInfoCard: React.FC<VendorInfoCardProps> = ({ station }) => {
           </div>
         )}
       </div>
-      
+
       {(station.VENDOR_HAS_SWAPPING || station.VENDOR_HAS_CHARGING || station.VENDOR_HAS_BATTERY) && (
         <div className="pt-3 border-t border-slate-700/50">
           <p className="text-xs text-slate-500 mb-2">Products & Services</p>
@@ -829,8 +798,6 @@ const VendorInfoCard: React.FC<VendorInfoCardProps> = ({ station }) => {
   );
 };
 
-
-
 // ============================================================================
 // MAIN PAGE COMPONENT
 // ============================================================================
@@ -857,7 +824,6 @@ const BSSOverviewPage: React.FC = () => {
 
   const dataFetchedRef = useRef(false);
 
-  // Fetch data using single joined query
   const fetchBSSData = useCallback(async () => {
     if (dataFetchedRef.current) return;
 
@@ -865,14 +831,12 @@ const BSSOverviewPage: React.FC = () => {
     setError(null);
 
     try {
-      console.log("Fetching comprehensive BSS data with single query...");
-
       const response = await fetch("/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          sql: buildComprehensiveBSSQuery(), 
-          params: [] 
+        body: JSON.stringify({
+          sql: buildComprehensiveBSSQuery(),
+          params: []
         }),
       });
 
@@ -881,12 +845,8 @@ const BSSOverviewPage: React.FC = () => {
       }
 
       const data = await response.json();
-      console.log("FIrst record", data[0]);
-      console.log("BSS data loaded:", data.length, "records");
 
-      // Transform and enrich data
       const transformedStations: BatterySwappingStation[] = data.map((item: any) => {
-        // Generate mock maintenance data (replace with real data when available)
         const lastMaintenanceDate = generateMockMaintenanceDate();
         const swapsSinceMaintenance = Math.floor(Math.random() * 120);
         const maintenanceStatus = calculateMaintenanceStatus(lastMaintenanceDate, swapsSinceMaintenance);
@@ -925,7 +885,6 @@ const BSSOverviewPage: React.FC = () => {
           LOCATION_CREATED_AT: item.LOCATION_CREATED_AT ? new Date(item.LOCATION_CREATED_AT) : undefined,
           LOCATION_UPDATED_AT: item.LOCATION_UPDATED_AT ? new Date(item.LOCATION_UPDATED_AT) : undefined,
           LOCATION_DELETED_AT: item.LOCATION_DELETED_AT ? new Date(item.LOCATION_DELETED_AT) : undefined,
-          // Vendor information
           VENDOR_COMPANY_NAME: item.VENDOR_COMPANY_NAME,
           VENDOR_COUNTRY: item.VENDOR_COUNTRY,
           VENDOR_CONTACT_NAME: item.VENDOR_CONTACT_NAME,
@@ -938,11 +897,9 @@ const BSSOverviewPage: React.FC = () => {
           VENDOR_HAS_BATTERY: item.VENDOR_HAS_BATTERY,
           VENDOR_HAS_3W_PARTS: item.VENDOR_HAS_3W_PARTS,
           VENDOR_HAS_BIKE_PARTS: item.VENDOR_HAS_BIKE_PARTS,
-          // Swap statistics
           TOTAL_SWAPS: item.TOTAL_SWAPS || 0,
           LAST_SWAP_DATE: item.LAST_SWAP_DATE ? new Date(item.LAST_SWAP_DATE) : undefined,
           SWAPS_SINCE_MAINTENANCE: swapsSinceMaintenance,
-          // Maintenance information
           LAST_MAINTENANCE_DATE: lastMaintenanceDate,
           MAINTENANCE_STATUS: maintenanceStatus,
           MAINTENANCE_REASON: maintenanceReason,
@@ -956,14 +913,12 @@ const BSSOverviewPage: React.FC = () => {
       setDataLoaded(true);
       dataFetchedRef.current = true;
     } catch (err) {
-      console.error("Error fetching BSS data:", err);
       setError(`Failed to fetch data: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Extract unique values for filters
   const { vendorNames, models, locations, cities, countries } = useMemo(() => {
     const vendorNameSet = new Set(allStations.map((s) => s.VENDOR_COMPANY_NAME).filter(Boolean));
     const modelSet = new Set(allStations.map((s) => s.STATION_MODEL).filter(Boolean));
@@ -980,31 +935,28 @@ const BSSOverviewPage: React.FC = () => {
     };
   }, [allStations]);
 
-  // Apply filters
   const filteredStations = useMemo(() => {
     return allStations.filter((station) => {
+      const matchesSearch =
+        !filters.searchTerm ||
+        [
+          station.STATION_ID,
+          station.STATION_NAME,
+          station.VENDOR_ID,
+          station.VENDOR_COMPANY_NAME,
+          station.STATION_MODEL,
+          station.LOCATION_NAME,
+          station.LOCATION_CODE,
+          station.SERIAL_NO,
+          station.CITY_ID,
+          station.VENDOR_COUNTRY,
+        ].some((field) =>
+          field?.toString().toLowerCase().includes(filters.searchTerm.toLowerCase())
+        );
 
-  const matchesSearch =
-    !filters.searchTerm ||
-    [
-      station.STATION_ID,
-      station.STATION_NAME,
-      station.VENDOR_ID,
-      station.VENDOR_COMPANY_NAME,
-      station.STATION_MODEL,
-      station.LOCATION_NAME,
-      station.LOCATION_CODE,
-      station.SERIAL_NO,
-      station.CITY_ID,
-      station.VENDOR_COUNTRY,
-    ].some((field) => 
-      field?.toString().toLowerCase().includes(filters.searchTerm.toLowerCase())
-    );
-    
-      const matchesVendor = 
-        filters.vendorFilter === "all" || 
+      const matchesVendor =
+        filters.vendorFilter === "all" ||
         station.VENDOR_COMPANY_NAME === filters.vendorFilter;
-      
       const matchesStatus = filters.statusFilter === "all" || station.STATUS === filters.statusFilter;
       const matchesModel = filters.modelFilter === "all" || station.STATION_MODEL === filters.modelFilter;
       const matchesLocation = filters.locationFilter === "all" || station.LOCATION_NAME === filters.locationFilter;
@@ -1012,39 +964,26 @@ const BSSOverviewPage: React.FC = () => {
       const matchesCountry = filters.countryFilter === "all" || station.VENDOR_COUNTRY === filters.countryFilter;
       const matchesApproval =
         filters.approvalFilter === "all" || station.APPROVED_STATUS === filters.approvalFilter;
-      const matchesMaintenance = 
-        filters.maintenanceFilter === "all" || 
+      const matchesMaintenance =
+        filters.maintenanceFilter === "all" ||
         station.MAINTENANCE_STATUS === filters.maintenanceFilter;
 
       return (
-        matchesSearch &&
-        matchesVendor &&
-        matchesStatus &&
-        matchesModel &&
-        matchesLocation &&
-        matchesCity &&
-        matchesCountry &&
-        matchesApproval &&
-        matchesMaintenance
+        matchesSearch && matchesVendor && matchesStatus && matchesModel &&
+        matchesLocation && matchesCity && matchesCountry && matchesApproval && matchesMaintenance
       );
     });
   }, [allStations, filters]);
 
-  // Calculate KPIs
   const kpis = useMemo((): BSSKPIs => {
     const activeStations = filteredStations.filter((s) => s.STATUS === "ACTIVE").length;
     const maintenanceStations = filteredStations.filter((s) => s.STATUS === "MAINTENANCE").length;
     const inactiveStations = filteredStations.filter((s) => s.STATUS === "INACTIVE").length;
-    const uniqueLocations = new Set(
-      filteredStations.map((s) => s.LOCATION_ID).filter(Boolean)
-    ).size;
-    const uniqueVendors = new Set(
-      filteredStations.map((s) => s.VENDOR_ID).filter(Boolean)
-    ).size;
+    const uniqueLocations = new Set(filteredStations.map((s) => s.LOCATION_ID).filter(Boolean)).size;
+    const uniqueVendors = new Set(filteredStations.map((s) => s.VENDOR_ID).filter(Boolean)).size;
     const totalSwaps = filteredStations.reduce((sum, s) => sum + (s.TOTAL_SWAPS || 0), 0);
     const stationsDueMaintenance = filteredStations.filter(
-      (s) => s.MAINTENANCE_STATUS === "OVERDUE" || 
-             s.MAINTENANCE_STATUS === "DUE_SOON"
+      (s) => s.MAINTENANCE_STATUS === "OVERDUE" || s.MAINTENANCE_STATUS === "DUE_SOON"
     ).length;
 
     return {
@@ -1059,7 +998,6 @@ const BSSOverviewPage: React.FC = () => {
     };
   }, [filteredStations]);
 
-  // Pagination
   const paginatedStations = useMemo(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
     return filteredStations.slice(startIndex, startIndex + itemsPerPage);
@@ -1067,7 +1005,6 @@ const BSSOverviewPage: React.FC = () => {
 
   const totalPages = Math.ceil(filteredStations.length / itemsPerPage);
 
-  // Effects
   useEffect(() => {
     if (!dataFetchedRef.current) {
       fetchBSSData();
@@ -1084,6 +1021,7 @@ const BSSOverviewPage: React.FC = () => {
   return (
     <div className="min-h-screen">
       <div className="max-w-7xl mx-auto space-y-8">
+
         {/* Page Header */}
         <div className="text-center space-y-4">
           <div className="inline-flex items-center px-4 py-2 bg-cyan-500/10 border border-cyan-500/20 rounded-full">
@@ -1098,6 +1036,29 @@ const BSSOverviewPage: React.FC = () => {
           <p className="text-xl text-slate-400 max-w-2xl mx-auto">
             Monitor station performance, track swap counts, and manage preventive maintenance schedules across your network.
           </p>
+
+          {/* Station Map CTA */}
+          <div className="flex justify-center pt-1">
+            <Link
+              href="/bss/locations"
+              className="group inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 hover:scale-105 hover:shadow-lg"
+              style={{
+                background: "linear-gradient(135deg, rgba(6,255,165,0.12), rgba(14,165,233,0.12))",
+                border: "1px solid rgba(6,255,165,0.3)",
+                color: "#06ffa5",
+                boxShadow: "0 0 20px rgba(6,255,165,0.08)",
+              }}
+            >
+              <MapPin className="w-4 h-4 transition-transform duration-200 group-hover:-translate-y-0.5" />
+              View Station Map
+              <span
+                className="text-xs px-1.5 py-0.5 rounded font-mono"
+                style={{ background: "rgba(6,255,165,0.15)", color: "#06ffa5" }}
+              >
+                {allStations.length > 0 ? `${allStations.length} stations` : "Live"}
+              </span>
+            </Link>
+          </div>
         </div>
 
         {/* Data Summary */}
@@ -1134,6 +1095,7 @@ const BSSOverviewPage: React.FC = () => {
           totalStations={filteredStations.length}
           onPageChange={setCurrentPage}
         />
+
       </div>
     </div>
   );
