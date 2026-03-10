@@ -463,7 +463,7 @@ export default function StationAllocationPage() {
   const [analysisTab, setAnalysisTab] = useState("map");
 
   // ── Fixed stations state ──
-  const [lockThreshold, setLockThreshold] = useState(900);
+  const [lockThreshold, setLockThreshold] = useState(1200);
   const [stations, setStations] = useState<FixedStation[]>([]);
 
   // Populate stations when real data loads, respecting current threshold
