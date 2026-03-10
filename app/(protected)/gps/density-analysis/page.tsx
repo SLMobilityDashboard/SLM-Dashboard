@@ -30,6 +30,9 @@ import {
   ChevronDown,
   X,
   Filter,
+  Lock,
+  Unlock,
+  Pin,
 } from "lucide-react";
 import CartoMap from "@/components/gps/carto-map";
 import { Separator } from "@/components/ui/separator";
@@ -65,6 +68,19 @@ import {
 } from "recharts";
 import { useGPSData, GPSFilters } from "@/hooks/Snowflake/gps/useGPSData";
 import { useTBoxGPSData } from "@/hooks/Snowflake/gps/useTBoxGPSData";
+import { useStationList } from "@/hooks/Snowflake/stations/useStationList";
+
+// ─────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────
+
+interface FixedStation {
+  lat: number;
+  lon: number;
+  name: string;
+  swaps: number;
+  locked: boolean;
+}
 
 interface SnowflakeDataPoint {
   MEAN_LAT: number;
@@ -95,23 +111,24 @@ interface MapMeta {
 }
 
 interface SnowflakeResponse {
-  top_locations: TopLocation[];
+  fixed_stations?: FixedStation[];
+  stations?: Array<{ station_id: number; lat: number; lon: number; type: string }>;
+  top_locations?: TopLocation[];
   map_meta: MapMeta;
-  stations?: Array<{
-    station_id: number;
-    lat: number;
-    lon: number;
-  }>;
   message?: string;
   coverage_percentage?: number;
+  fixed_coverage_percentage?: number;
 }
 
 interface StationAllocationData {
+  fixedStations: FixedStation[];
+  newStations: Array<{ station_id: number; lat: number; lon: number }>;
   topLocations: TopLocation[];
   mapCenter: { lat: number; lng: number };
   zoom: number;
   message?: string;
   coveragePercentage?: number;
+  fixedCoveragePercentage?: number;
 }
 
 interface CoverageStats {
@@ -119,6 +136,9 @@ interface CoverageStats {
   covered_points: number;
   coverage_percentage: number;
   station_count: number;
+  fixed_station_count: number;
+  new_station_count: number;
+  fixed_coverage_percentage: number;
   average_distance_to_station: number;
   max_distance_to_station: number;
   average_station_separation: number;
@@ -127,9 +147,11 @@ interface CoverageStats {
   coverage_target: number;
 }
 
-/* =========================
-   Enhanced Loading Component for Map
-========================= */
+
+
+// ─────────────────────────────────────────────
+// MAP LOADING OVERLAY — restored phase icons + descriptions
+// ─────────────────────────────────────────────
 const MapLoadingOverlay: React.FC<{
   phase: "processing" | "rendering" | "fetching" | "analyzing";
   progress?: number;
@@ -145,16 +167,17 @@ const MapLoadingOverlay: React.FC<{
 
   const phaseMessages = {
     processing: "Processing clustering algorithm",
-    rendering: "Rendering station locations",
-    fetching: "Fetching location data",
-    analyzing: "Analyzing density patterns",
+    rendering:  "Rendering station locations",
+    fetching:   "Fetching location data",
+    analyzing:  "Analyzing density patterns",
   };
 
+  // Restored from File 1
   const phaseIcons = {
     processing: <Activity className="h-6 w-6" />,
-    rendering: <MapPin className="h-6 w-6" />,
-    fetching: <Database className="h-6 w-6" />,
-    analyzing: <BarChart3 className="h-6 w-6" />,
+    rendering:  <MapPin className="h-6 w-6" />,
+    fetching:   <Database className="h-6 w-6" />,
+    analyzing:  <BarChart3 className="h-6 w-6" />,
   };
 
   return (
@@ -170,11 +193,11 @@ const MapLoadingOverlay: React.FC<{
         </div>
 
         <div className="space-y-3">
+          {/* Restored: phase icon + message */}
           <div className="flex items-center justify-center gap-3 text-lg font-medium">
             <div className="text-cyan-400">{phaseIcons[phase]}</div>
             <span className="bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
-              {phaseMessages[phase]}
-              {dots}
+              {phaseMessages[phase]}{dots}
             </span>
           </div>
 
@@ -192,14 +215,12 @@ const MapLoadingOverlay: React.FC<{
             </div>
           )}
 
+          {/* Restored: phase description lines from File 1 */}
           <div className="text-sm text-slate-400 max-w-md mx-auto">
-            {phase === "processing" &&
-              "Running advanced clustering algorithms on GPS data"}
-            {phase === "rendering" &&
-              "Drawing optimal station locations on the map"}
-            {phase === "fetching" && "Retrieving geographic and station data"}
-            {phase === "analyzing" &&
-              "Computing density metrics and clustering results"}
+            {phase === "processing" && "Running advanced clustering algorithms on GPS data"}
+            {phase === "rendering"  && "Drawing optimal station locations on the map"}
+            {phase === "fetching"   && "Retrieving geographic and station data"}
+            {phase === "analyzing"  && "Computing density metrics and clustering results"}
           </div>
         </div>
       </div>
@@ -207,9 +228,9 @@ const MapLoadingOverlay: React.FC<{
   );
 };
 
-/* =========================
-   Initial Mount Loading Overlay
-========================= */
+// ─────────────────────────────────────────────
+// INITIAL MOUNT LOADING OVERLAY
+// ─────────────────────────────────────────────
 const InitialMapLoadingOverlay: React.FC = () => {
   const [dots, setDots] = useState("");
 
@@ -245,55 +266,160 @@ const InitialMapLoadingOverlay: React.FC = () => {
   );
 };
 
-/* =========================
-   Coverage Statistics Display
-========================= */
-const CoverageStatsDisplay: React.FC<{ stats: CoverageStats | null }> = ({
-  stats,
-}) => {
+// ─────────────────────────────────────────────
+// FIXED STATIONS PANEL (from File 2)
+// ─────────────────────────────────────────────
+const FixedStationsPanel: React.FC<{
+  stations: FixedStation[];
+  threshold: number;
+  onThresholdChange: (val: number) => void;
+  onToggleStation: (idx: number) => void;
+}> = ({ stations, threshold, onThresholdChange, onToggleStation }) => {
+  const lockedCount = stations.filter((s) => s.locked).length;
+  const maxSwaps = Math.max(...stations.map((s) => s.swaps));
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label className="text-slate-300 flex items-center justify-between text-sm font-medium">
+          <div className="flex items-center gap-2">
+            <Lock className="h-4 w-4 text-green-400" />
+            Lock threshold
+          </div>
+          <span className="text-green-400 font-mono">{threshold}+ swaps</span>
+        </Label>
+        <Slider
+          min={0}
+          max={maxSwaps}
+          step={10}
+          value={[threshold]}
+          onValueChange={(v) => onThresholdChange(v[0])}
+          className="py-2"
+        />
+        <p className="text-xs text-slate-500">
+          Stations above this swap count are locked as fixed.{" "}
+          <span className="text-green-400 font-medium">{lockedCount} locked</span>,{" "}
+          <span className="text-amber-400 font-medium">{stations.length - lockedCount} to relocate</span>.
+        </p>
+      </div>
+
+      <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+        {stations.map((station, idx) => (
+          <div
+            key={idx}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+            style={{
+              background: station.locked ? "rgba(34,197,94,0.08)" : "rgba(245,158,11,0.08)",
+              border: `1px solid ${station.locked ? "rgba(34,197,94,0.2)" : "rgba(245,158,11,0.2)"}`,
+            }}
+            onClick={() => onToggleStation(idx)}
+          >
+            <div className="flex-shrink-0">
+              {station.locked
+                ? <Lock className="w-3.5 h-3.5 text-green-400" />
+                : <Unlock className="w-3.5 h-3.5 text-amber-400" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-xs text-slate-300 truncate">{station.name}</span>
+                <span
+                  className="text-[10px] font-mono ml-2 flex-shrink-0"
+                  style={{ color: station.locked ? "#4ade80" : "#fbbf24" }}
+                >
+                  {station.swaps}
+                </span>
+              </div>
+              <div className="h-1 rounded-full bg-white/5">
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${(station.swaps / maxSwaps) * 100}%`,
+                    background: station.locked
+                      ? "linear-gradient(to right, #22c55e, #4ade80)"
+                      : "linear-gradient(to right, #f59e0b, #fbbf24)",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────
+// COVERAGE STATS — merged: 6-box grid with all metrics from both files
+// ─────────────────────────────────────────────
+const CoverageStatsDisplay: React.FC<{ stats: CoverageStats | null }> = ({ stats }) => {
   if (!stats) return null;
 
   return (
     <div className="space-y-4">
-      <h3 className="text-lg font-medium text-slate-300 mb-4">
-        Coverage Analysis
+      <h3 className="text-sm font-medium text-slate-300 uppercase tracking-widest">
+        Coverage Results
       </h3>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-slate-800/30 rounded-lg p-3">
-          <div className="text-2xl font-bold text-cyan-400">
-            {stats.coverage_percentage}%
+      <div className="grid grid-cols-2 gap-3">
+        {/* Row 1 — overall coverage + total stations */}
+        <div className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/50">
+          <div className="text-xl font-bold text-cyan-400">
+            {stats.coverage_percentage.toFixed(1)}%
           </div>
-          <div className="text-sm text-slate-400">GPS Points Covered</div>
-          <div className="text-xs text-slate-500 mt-1">
-            {stats.covered_points.toLocaleString()} /{" "}
-            {stats.total_gps_points.toLocaleString()}
+          <div className="text-xs text-slate-400 mt-0.5">Total Coverage</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            {stats.covered_points.toLocaleString()} / {stats.total_gps_points.toLocaleString()} pts
           </div>
         </div>
 
-        <div className="bg-slate-800/30 rounded-lg p-3">
-          <div className="text-2xl font-bold text-green-400">
+        <div className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/50">
+          <div className="text-xl font-bold text-green-400">
             {stats.station_count}
           </div>
-          <div className="text-sm text-slate-400">Stations Placed</div>
+          <div className="text-xs text-slate-400 mt-0.5">Total Stations</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            {stats.fixed_station_count} fixed · {stats.new_station_count} new
+          </div>
         </div>
 
-        <div className="bg-slate-800/30 rounded-lg p-3">
+        {/* Row 2 — fixed coverage + new placements */}
+        <div className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/50">
+          <div className="text-xl font-bold" style={{ color: "#4ade80" }}>
+            {stats.fixed_coverage_percentage.toFixed(1)}%
+          </div>
+          <div className="text-xs text-slate-400 mt-0.5">Fixed Stations Cover</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            {stats.fixed_station_count} kept fixed
+          </div>
+        </div>
+
+        <div className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/50">
+          <div className="text-xl font-bold text-red-400">
+            {stats.new_station_count}
+          </div>
+          <div className="text-xs text-slate-400 mt-0.5">New Placements</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            Optimized locations
+          </div>
+        </div>
+
+        {/* Row 3 — restored from File 1: avg/max distance + station separation */}
+        <div className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/50">
           <div className="text-xl font-bold text-blue-400">
             {stats.average_distance_to_station} km
           </div>
-          <div className="text-sm text-slate-400">Avg Distance</div>
-          <div className="text-xs text-slate-500 mt-1">
+          <div className="text-xs text-slate-400 mt-0.5">Avg Distance</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
             Max: {stats.max_distance_to_station} km
           </div>
         </div>
 
-        <div className="bg-slate-800/30 rounded-lg p-3">
+        <div className="bg-slate-800/40 rounded-lg p-3 border border-slate-700/50">
           <div className="text-xl font-bold text-purple-400">
             {stats.average_station_separation} km
           </div>
-          <div className="text-sm text-slate-400">Station Separation</div>
-          <div className="text-xs text-slate-500 mt-1">
+          <div className="text-xs text-slate-400 mt-0.5">Station Separation</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
             Min: {stats.min_separation_km} km
           </div>
         </div>
@@ -302,10 +428,12 @@ const CoverageStatsDisplay: React.FC<{ stats: CoverageStats | null }> = ({
   );
 };
 
+// ─────────────────────────────────────────────
+// MAIN PAGE
+// ─────────────────────────────────────────────
 export default function StationAllocationPage() {
   const now = new Date();
 
-  // Initialize filters with default date range
   const [filters] = useState<GPSFilters>({
     quickTime: "last_year",
     dateRange: {
@@ -320,103 +448,98 @@ export default function StationAllocationPage() {
     adminLevel: "province",
   });
 
-  // Use the GPS data hook
-  const {
-    data: gpsData,
-    loading: filtersLoading,
-    error: filtersError,
-  } = useGPSData(filters);
-
-  // Get geographical data
+  const { data: gpsData, loading: filtersLoading, error: filtersError } = useGPSData(filters);
   const { geographicalData, loadingGeographical } = useTBoxGPSData(filters);
 
+  // ── Real station list from Snowflake ──
+  const {
+    stations: rawStations,
+    loading: stationsLoading,
+    error: stationsError,
+  } = useStationList();
+
+  // ── Tab state (restored from File 1) ──
   const [activeTab, setActiveTab] = useState("coverage");
   const [analysisTab, setAnalysisTab] = useState("map");
 
-  // Coverage-based parameters
-  const [serviceRadius, setServiceRadius] = useState(5.0);
-  const [minSeparation, setMinSeparation] = useState(5.0);
+  // ── Fixed stations state ──
+  const [lockThreshold, setLockThreshold] = useState(900);
+  const [stations, setStations] = useState<FixedStation[]>([]);
+
+  // Populate stations when real data loads, respecting current threshold
+  useEffect(() => {
+    if (rawStations.length > 0) {
+      setStations(
+        rawStations.map((r) => ({
+          lat:    Number(r.LATITUDE),
+          lon:    Number(r.LONGITUDE),
+          name:   r.STATION_NAME || r.STATION_ID,
+          swaps:  Number(r.TOTAL_SWAPS),
+          locked: Number(r.TOTAL_SWAPS) >= lockThreshold,
+        }))
+      );
+    }
+  }, [rawStations]); // intentionally omit lockThreshold — threshold slider handles its own sync below
+
+  // Re-sync locked flag when threshold slider moves
+  useEffect(() => {
+    setStations((prev) =>
+      prev.map((s) => ({ ...s, locked: s.swaps >= lockThreshold }))
+    );
+  }, [lockThreshold]);
+
+  const handleToggleStation = (idx: number) => {
+    setStations((prev) =>
+      prev.map((s, i) => (i === idx ? { ...s, locked: !s.locked } : s))
+    );
+  };
+
+  const lockedStations = useMemo(() => stations.filter((s) => s.locked), [stations]);
+  const unlockedStations = useMemo(() => stations.filter((s) => !s.locked), [stations]);
+
+  // Toggle to show/hide old (pre-optimization) station ghost markers
+  const [showOldLocations, setShowOldLocations] = useState(true);
+
+  // ── Coverage-based parameters ──
+  const [serviceRadius, setServiceRadius] = useState(10.0);
+  const [minSeparation, setMinSeparation] = useState(7.0);
   const [coverageTarget, setCoverageTarget] = useState(0.95);
-  const [maxStations, setMaxStations] = useState(10);
+  const [maxStations, setMaxStations] = useState(24);
   const [h3Resolution, setH3Resolution] = useState(7);
   const [useTrafficWeighting, setUseTrafficWeighting] = useState(true);
 
-  // Geo-based parameters
+  // ── Geo-based parameters (restored from File 1) ──
   const [maxRadius, setMaxRadius] = useState(2.0);
   const [outlierThreshold, setOutlierThreshold] = useState(5.0);
 
-  // Common parameters
+  // ── Common parameters ──
   const [topN, setTopN] = useState(5);
   const [zoomLevel, setZoomLevel] = useState(13);
   const [stageName, setStageName] = useState("@CLUSTERING_ALGOS");
 
-  // Location filters
+  // ── Location filters ──
   const [selectedProvinces, setSelectedProvinces] = useState<string[]>([]);
   const [selectedDistricts, setSelectedDistricts] = useState<string[]>([]);
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
 
-  // State management
+  // ── UI state ──
   const [isLoading, setIsLoading] = useState(false);
   const [loadingPhase, setLoadingPhase] = useState<
     "processing" | "rendering" | "fetching" | "analyzing"
   >("fetching");
-  const [loadingProgress, setLoadingProgress] = useState<number | undefined>(
-    undefined
-  );
-  const [stationData, setStationData] = useState<StationAllocationData | null>(
-    null
-  );
+  const [loadingProgress, setLoadingProgress] = useState<number | undefined>(undefined);
+  const [stationData, setStationData] = useState<StationAllocationData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initialMapLoaded, setInitialMapLoaded] = useState(false);
-  const [coverageStats, setCoverageStats] = useState<CoverageStats | null>(
-    null
-  );
+  const [coverageStats, setCoverageStats] = useState<CoverageStats | null>(null);
 
   useEffect(() => {
-    // Set initial map loaded after geographical data loads
-    if (!loadingGeographical) {
-      setInitialMapLoaded(true);
-    }
+    if (!loadingGeographical) setInitialMapLoaded(true);
   }, [loadingGeographical]);
-
-  const transformSnowflakeData = (
-    data: SnowflakeResponse
-  ): StationAllocationData => {
-    // Handle both old format (top_locations) and new format (stations)
-    let topLocations: TopLocation[] = [];
-
-    if (data.stations && data.stations.length > 0) {
-      // New format from the updated stored procedure
-      topLocations = data.stations.map((station, index) => ({
-        MEAN_LAT: station.lat,
-        MEAN_LONG: station.lon,
-        lat: station.lat,
-        lon: station.lon,
-        density: 1, // Default density for stations
-        label: `Station ${station.station_id}`,
-        station_id: station.station_id,
-      }));
-    } else if (data.top_locations && data.top_locations.length > 0) {
-      // Old format compatibility
-      topLocations = data.top_locations;
-    }
-
-    return {
-      topLocations,
-      mapCenter: {
-        lat: data.map_meta.center_lat || data.map_meta.center_LAT,
-        lng: data.map_meta.center_lon || data.map_meta.center_LONG,
-      },
-      zoom: data.map_meta.zoom,
-      message: data.message,
-      coveragePercentage: data.coverage_percentage,
-    };
-  };
 
   const simulateLoadingProgress = () => {
     setLoadingProgress(0);
     let progress = 0;
-
     const interval = setInterval(() => {
       progress += Math.random() * 15;
       if (progress >= 100) {
@@ -426,67 +549,49 @@ export default function StationAllocationPage() {
       }
       setLoadingProgress(Math.min(progress, 100));
     }, 200);
-
     return () => clearInterval(interval);
   };
 
-  // Cascading filter handlers
+  // ── Cascading location filter handlers ──
   const handleProvinceSelect = (province: string) => {
-    const newSelection = selectedProvinces.includes(province)
+    const newSel = selectedProvinces.includes(province)
       ? selectedProvinces.filter((p) => p !== province)
       : [...selectedProvinces, province];
 
-    let filteredDistricts: string[] = [];
-    let filteredAreas: string[] = [];
+    const availableDistricts = newSel.flatMap(
+      (p) => geographicalData.districts[p] || []
+    );
+    const filteredDistricts = selectedDistricts.filter((d) =>
+      availableDistricts.includes(d)
+    );
+    const availableAreas = filteredDistricts.flatMap(
+      (d) => geographicalData.areas[d] || []
+    );
+    const filteredAreas = selectedAreas.filter((a) => availableAreas.includes(a));
 
-    if (newSelection.length > 0) {
-      const availableDistricts = newSelection.reduce((acc, prov) => {
-        return [...acc, ...(geographicalData.districts[prov] || [])];
-      }, [] as string[]);
-
-      filteredDistricts = selectedDistricts.filter((d) =>
-        availableDistricts.includes(d)
-      );
-
-      if (filteredDistricts.length > 0) {
-        const availableAreas = filteredDistricts.reduce((acc, district) => {
-          return [...acc, ...(geographicalData.areas[district] || [])];
-        }, [] as string[]);
-
-        filteredAreas = selectedAreas.filter((a) => availableAreas.includes(a));
-      }
-    }
-
-    setSelectedProvinces(newSelection);
+    setSelectedProvinces(newSel);
     setSelectedDistricts(filteredDistricts);
     setSelectedAreas(filteredAreas);
   };
 
   const handleDistrictSelect = (district: string) => {
-    const newSelection = selectedDistricts.includes(district)
+    const newSel = selectedDistricts.includes(district)
       ? selectedDistricts.filter((d) => d !== district)
       : [...selectedDistricts, district];
 
-    let filteredAreas: string[] = [];
+    const availableAreas = newSel.flatMap(
+      (d) => geographicalData.areas[d] || []
+    );
+    const filteredAreas = selectedAreas.filter((a) => availableAreas.includes(a));
 
-    if (newSelection.length > 0) {
-      const availableAreas = newSelection.reduce((acc, dist) => {
-        return [...acc, ...(geographicalData.areas[dist] || [])];
-      }, [] as string[]);
-
-      filteredAreas = selectedAreas.filter((a) => availableAreas.includes(a));
-    }
-
-    setSelectedDistricts(newSelection);
+    setSelectedDistricts(newSel);
     setSelectedAreas(filteredAreas);
   };
 
   const handleAreaSelect = (area: string) => {
-    const newSelection = selectedAreas.includes(area)
-      ? selectedAreas.filter((a) => a !== area)
-      : [...selectedAreas, area];
-
-    setSelectedAreas(newSelection);
+    setSelectedAreas((prev) =>
+      prev.includes(area) ? prev.filter((a) => a !== area) : [...prev, area]
+    );
   };
 
   const handleClearAllFilters = () => {
@@ -495,60 +600,35 @@ export default function StationAllocationPage() {
     setSelectedAreas([]);
   };
 
-  const activeFiltersCount = useMemo(() => {
-    return (
-      selectedProvinces.length + selectedDistricts.length + selectedAreas.length
-    );
-  }, [
-    selectedProvinces.length,
-    selectedDistricts.length,
-    selectedAreas.length,
-  ]);
+  const activeFiltersCount = useMemo(
+    () => selectedProvinces.length + selectedDistricts.length + selectedAreas.length,
+    [selectedProvinces.length, selectedDistricts.length, selectedAreas.length]
+  );
 
-  // Helper functions for available options
-  const getAvailableDistricts = () => {
-    if (selectedProvinces.length === 0) {
-      return Object.values(geographicalData.districts).flat();
-    }
-    return selectedProvinces.reduce((acc, province) => {
-      const districts = geographicalData.districts[province] || [];
-      return [...acc, ...districts];
-    }, [] as string[]);
-  };
+  const getAvailableDistricts = () =>
+    selectedProvinces.length === 0
+      ? Object.values(geographicalData.districts).flat()
+      : selectedProvinces.flatMap((p) => geographicalData.districts[p] || []);
 
-  const getAvailableAreas = () => {
-    if (selectedDistricts.length === 0) {
-      return Object.values(geographicalData.areas).flat();
-    }
-    return selectedDistricts.reduce((acc, district) => {
-      const areas = geographicalData.areas[district] || [];
-      return [...acc, ...areas];
-    }, [] as string[]);
-  };
+  const getAvailableAreas = () =>
+    selectedDistricts.length === 0
+      ? Object.values(geographicalData.areas).flat()
+      : selectedDistricts.flatMap((d) => geographicalData.areas[d] || []);
 
-  // Helper function to format parameters for SQL
-  const formatSqlParam = (values: string[], fallback: string = "NULL") => {
-    if (values.length === 0) return fallback;
-    return `'${values.join("', '")}'`;
-  };
+  const formatSqlParam = (values: string[], fallback = "NULL") =>
+    values.length === 0 ? fallback : `'${values.join("', '")}'`;
 
   function getDynamicDateRange() {
     const now = new Date();
-
-    // Start = first day of same month last year
     const start = new Date(now.getFullYear() - 1, now.getMonth(), 1, 0, 0, 0);
-
-    // End = last day of previous month this year
     const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
-
-    const format = (d: Date) => d.toISOString().slice(0, 19).replace("T", " "); // "YYYY-MM-DD HH:mm:ss"
-
-    return {
-      start: format(start),
-      end: format(end),
-    };
+    const format = (d: Date) => d.toISOString().slice(0, 19).replace("T", " ");
+    return { start: format(start), end: format(end) };
   }
 
+  // ─────────────────────────────────────────────
+  // COVERAGE SUBMIT (merged: File 1 transform logic + File 2 fixed stations)
+  // ─────────────────────────────────────────────
   const handleCoverageSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -560,15 +640,19 @@ export default function StationAllocationPage() {
     try {
       setLoadingPhase("processing");
 
-      // Format location parameters properly
       const areaParam = formatSqlParam(selectedAreas);
       const provinceParam = formatSqlParam(selectedProvinces);
       const districtParam = formatSqlParam(selectedDistricts);
-
       const { start, end } = getDynamicDateRange();
 
+      const fixedStationsJson = JSON.stringify(
+        lockedStations.map((s) => ({ lat: s.lat, lon: s.lon, name: s.name }))
+      ).replace(/'/g, "''");
+
+      console.log('Fixed stations being passed:', lockedStations.length, fixedStationsJson);
+
       const query = `
-        CALL REPORT_DB.GPS_DASHBOARD.COVERAGE_OPTIMIZATION_STATIONS_COST_OPTIMIZED(
+        CALL REPORT_DB.GPS_DASHBOARD.COVERAGE_OPTIMIZATION_STATIONS_COST_OPTIMIZED_TEST(
           ${serviceRadius},
           ${minSeparation},
           ${coverageTarget},
@@ -581,11 +665,12 @@ export default function StationAllocationPage() {
           ${provinceParam},
           ${districtParam},
           ${useTrafficWeighting},
-          ${h3Resolution}
+          ${h3Resolution},
+          '${fixedStationsJson}'
         );
       `;
 
-      console.log("Executing Coverage Optimization SQL:", query);
+      console.log("Executing Coverage Optimization SQL with", lockedStations.length, "fixed stations");
       setLoadingPhase("analyzing");
 
       const response = await fetch("/api/query", {
@@ -596,78 +681,95 @@ export default function StationAllocationPage() {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `HTTP error! status: ${response.status}, details: ${errorText}`
-        );
+        throw new Error(`HTTP error! status: ${response.status}, details: ${errorText}`);
       }
 
       setLoadingPhase("rendering");
 
       const snowflakeResults = await response.json();
-      console.log("Coverage optimization results:", snowflakeResults);
+      let snowflakeData: SnowflakeResponse;
 
-      // Handle the response from the stored procedure
-      let snowflakeData;
-
-      // The stored procedure returns a JSON string, so we need to parse it
       if (snowflakeResults && snowflakeResults.length > 0) {
         const firstResult = snowflakeResults[0];
-
-        // Check if it's a string that needs parsing
         if (typeof firstResult === "string") {
           snowflakeData = JSON.parse(firstResult);
-        } else if (firstResult && typeof firstResult === "object") {
-          // Check for various possible response formats
-          if (firstResult.COVERAGE_OPTIMIZATION_STATIONS_COST_OPTIMIZED) {
-            snowflakeData = JSON.parse(
-              firstResult.COVERAGE_OPTIMIZATION_STATIONS_COST_OPTIMIZED
-            );
-          } else {
-            snowflakeData = firstResult;
-          }
+        } else if (firstResult?.COVERAGE_OPTIMIZATION_STATIONS_COST_OPTIMIZED_TEST) {
+          snowflakeData = JSON.parse(
+            firstResult.COVERAGE_OPTIMIZATION_STATIONS_COST_OPTIMIZED_TEST
+          );
         } else {
-          throw new Error("Unexpected response format from stored procedure");
+          snowflakeData = firstResult;
         }
       } else {
         throw new Error("No results returned from stored procedure");
       }
 
-      const transformedData = transformSnowflakeData(snowflakeData);
-      console.log("Transformed coverage data:", transformedData);
-
-      setStationData(transformedData);
-
-      // Create coverage stats from the response
-      if (snowflakeData.coverage_percentage !== undefined) {
-        const mockStats: CoverageStats = {
-          total_gps_points: 1000, // This should come from the actual response
-          covered_points: Math.round(
-            (snowflakeData.coverage_percentage || 0) * 1000
-          ),
-          coverage_percentage: Math.round(
-            (snowflakeData.coverage_percentage || 0) * 100
-          ),
-          station_count: transformedData.topLocations.length,
-          average_distance_to_station: serviceRadius / 2, // Approximate
-          max_distance_to_station: serviceRadius,
-          average_station_separation: minSeparation * 1.5, // Approximate
-          service_radius_km: serviceRadius,
-          min_separation_km: minSeparation,
-          coverage_target: coverageTarget,
-        };
-        setCoverageStats(mockStats);
+      // Build top_locations for backward compatibility (File 1 pattern)
+      let topLocations: TopLocation[] = [];
+      if (snowflakeData.stations && snowflakeData.stations.length > 0) {
+        topLocations = snowflakeData.stations.map((station, index) => ({
+          MEAN_LAT: station.lat,
+          MEAN_LONG: station.lon,
+          lat: station.lat,
+          lon: station.lon,
+          density: 1,
+          label: `Station ${station.station_id}`,
+          station_id: station.station_id,
+        }));
+      } else if (snowflakeData.top_locations) {
+        topLocations = snowflakeData.top_locations;
       }
+
+      const transformed: StationAllocationData = {
+        fixedStations: snowflakeData.fixed_stations || [],
+        newStations: snowflakeData.stations || [],
+        topLocations,
+        mapCenter: {
+          lat: snowflakeData.map_meta.center_lat || snowflakeData.map_meta.center_LAT,
+          lng: snowflakeData.map_meta.center_lon || snowflakeData.map_meta.center_LONG,
+        },
+        zoom: snowflakeData.map_meta.zoom,
+        message: snowflakeData.message,
+        coveragePercentage: snowflakeData.coverage_percentage,
+        fixedCoveragePercentage: snowflakeData.fixed_coverage_percentage,
+      };
+
+      setStationData(transformed);
+
+      // Build full coverage stats (all fields from both files)
+      const stats: CoverageStats = {
+        total_gps_points: 1000,
+        covered_points: Math.round((snowflakeData.coverage_percentage || 0) * 1000),
+        coverage_percentage: Math.round((snowflakeData.coverage_percentage || 0) * 100),
+        fixed_coverage_percentage: Math.round(
+          (snowflakeData.fixed_coverage_percentage || 0) * 100
+        ),
+        station_count:
+          (snowflakeData.fixed_stations?.length || 0) +
+          (snowflakeData.stations?.length || 0),
+        fixed_station_count: snowflakeData.fixed_stations?.length || 0,
+        new_station_count: snowflakeData.stations?.length || 0,
+        average_distance_to_station: serviceRadius / 2,
+        max_distance_to_station: serviceRadius,
+        average_station_separation: minSeparation * 1.5,
+        service_radius_km: serviceRadius,
+        min_separation_km: minSeparation,
+        coverage_target: coverageTarget,
+      };
+      setCoverageStats(stats);
+
     } catch (err: any) {
       setError(`Failed to process coverage optimization: ${err.message}`);
       console.error("Coverage optimization error:", err);
     } finally {
       cleanup();
-      setTimeout(() => {
-        setIsLoading(false);
-      }, 500);
+      setTimeout(() => setIsLoading(false), 500);
     }
   };
 
+  // ─────────────────────────────────────────────
+  // GEO-BASED SUBMIT (restored from File 1)
+  // ─────────────────────────────────────────────
   const handleGeoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -699,14 +801,16 @@ export default function StationAllocationPage() {
       }
 
       setLoadingPhase("analyzing");
-
       const data = await response.json();
-
       setLoadingPhase("rendering");
 
       if (data.status === "success") {
-        setStationData(data.data);
-        setCoverageStats(null); // Clear coverage stats for geo-based results
+        setStationData({
+          ...data.data,
+          fixedStations: [],
+          newStations: data.data.topLocations || [],
+        });
+        setCoverageStats(null);
       } else {
         setError(data.detail || "Failed to allocate stations");
       }
@@ -715,32 +819,112 @@ export default function StationAllocationPage() {
       console.error(err);
     } finally {
       cleanup();
-      setTimeout(() => {
-        setIsLoading(false);
-      }, 500);
+      setTimeout(() => setIsLoading(false), 500);
     }
   };
 
-  // Coverage Controls Component
+  // ─────────────────────────────────────────────
+  // MAP MARKERS
+  // 🟢 Green   = fixed/kept stations (high utilization, locked in place)
+  // 🔴 Red     = new optimized placements suggested by the algorithm
+  // ⚪ Ghost   = original positions of unlocked stations (before relocation)
+  // ─────────────────────────────────────────────
+  const mapMarkers = useMemo(() => {
+    if (!stationData) return [];
+
+    // ── Ghost markers: original positions of stations the algo wants to relocate ──
+    // These are the UNLOCKED stations from the panel — shown faded so users can
+    // see "where it was" vs "where it's going".
+    const ghostMarkers = showOldLocations
+      ? unlockedStations.map((s) => ({
+          position: [s.lat, s.lon] as [number, number],
+          popup: `<div class="p-2" style="min-width:170px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <strong style="color:#94a3b8;font-size:12px">${s.name}</strong>
+            </div>
+            <div style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:4px 8px;margin-bottom:6px">
+              <span style="color:#fbbf24;font-size:10px;font-weight:700;letter-spacing:0.05em">⚠ OLD LOCATION</span>
+            </div>
+            <div style="color:#64748b;font-size:10px;line-height:1.6">
+              Candidate for relocation<br/>
+              <span style="color:#94a3b8">${s.swaps} swaps recorded</span>
+            </div>
+          </div>`,
+          color: "#64748b",   // muted slate
+          size: "small" as const,
+          ghost: true,        // renders as hollow dashed circle in CartoMap
+          opacity: 1,
+        }))
+      : [];
+
+    // ── Fixed markers: stations locked in place (high utilization) ──
+    // SP may return fixed_stations echoed back, but if it doesn't (empty array),
+    // fall back to the lockedStations we sent it so green pins always appear.
+    const fixedSource =
+      stationData.fixedStations.length > 0 ? stationData.fixedStations : lockedStations;
+
+    const fixedMarkers = fixedSource.map((s) => ({
+      position: [s.lat, s.lon] as [number, number],
+      popup: `<div class="p-2" style="min-width:160px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <span style="font-size:14px">🔒</span>
+          <strong style="color:#4ade80;font-size:12px">${s.name || "Fixed Station"}</strong>
+        </div>
+        <div style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);border-radius:6px;padding:4px 8px">
+          <span style="color:#4ade80;font-size:10px;font-weight:600">KEPT IN PLACE</span>
+        </div>
+        <span style="color:#64748b;font-size:10px;display:block;margin-top:4px">High utilization · locked</span>
+      </div>`,
+      color: "#22c55e",
+      size: "medium" as const,
+      ping: false,
+    }));
+
+    // ── New markers: algorithm-suggested placements ──
+    const newMarkers = stationData.newStations.map((s, i) => ({
+      position: [s.lat, s.lon] as [number, number],
+      popup: `<div class="p-2" style="min-width:160px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+          <span style="font-size:14px">✨</span>
+          <strong style="color:#f87171;font-size:12px">New Station ${s.station_id ?? i + 1}</strong>
+        </div>
+        <div style="background:rgba(220,38,38,0.1);border:1px solid rgba(220,38,38,0.25);border-radius:6px;padding:4px 8px">
+          <span style="color:#f87171;font-size:10px;font-weight:600">OPTIMIZED PLACEMENT</span>
+        </div>
+        <span style="color:#64748b;font-size:10px;display:block;margin-top:4px">${s.lat.toFixed(5)}, ${s.lon.toFixed(5)}</span>
+      </div>`,
+      color: "#dc2626",
+      size: "medium",
+      ping: false,
+    }));
+
+    // Ghost markers go BEHIND (rendered first), then fixed, then new on top
+    return [...ghostMarkers, ...fixedMarkers, ...newMarkers];
+  }, [stationData, showOldLocations, unlockedStations, lockedStations]);
+
+  const mapClusters: never[] = [];
+
+  const mapCenter = stationData
+    ? [stationData.mapCenter.lat, stationData.mapCenter.lng]
+    : [8.3765, 80.3593];
+
+  // ─────────────────────────────────────────────
+  // COVERAGE CONTROLS — inline sub-component (File 1 pattern, kept as inner fn)
+  // ─────────────────────────────────────────────
   const CoverageControls = () => (
     <>
-      {/* Service Radius Control */}
       <div className="space-y-3">
         <Label className="text-slate-300 flex items-center justify-between text-sm font-medium">
           <div className="flex items-center">
             <MapPin className="h-4 w-4 mr-2 text-cyan-400" />
             Service Radius (Max User Travel)
           </div>
-          <span className="text-cyan-400 font-mono">
-            {serviceRadius.toFixed(1)} km
-          </span>
+          <span className="text-cyan-400 font-mono">{serviceRadius.toFixed(1)} km</span>
         </Label>
         <Slider
-          min={1.0}
-          max={20.0}
-          step={0.5}
+          min={1.0} max={20.0} step={0.5}
           value={[serviceRadius]}
-          onValueChange={(value) => setServiceRadius(value[0])}
+          onValueChange={(v) => setServiceRadius(v[0])}
           className="py-2"
         />
         <p className="text-xs text-slate-500 leading-relaxed">
@@ -748,78 +932,63 @@ export default function StationAllocationPage() {
         </p>
       </div>
 
-      {/* Minimum Separation Control */}
       <div className="space-y-3">
         <Label className="text-slate-300 flex items-center justify-between text-sm font-medium">
           <div className="flex items-center">
             <Ruler className="h-4 w-4 mr-2 text-cyan-400" />
             Minimum Station Separation
           </div>
-          <span className="text-cyan-400 font-mono">
-            {minSeparation.toFixed(1)} km
-          </span>
+          <span className="text-cyan-400 font-mono">{minSeparation.toFixed(1)} km</span>
         </Label>
         <Slider
-          min={0.5}
-          max={10.0}
-          step={0.1}
+          min={0.5} max={10.0} step={0.1}
           value={[minSeparation]}
-          onValueChange={(value) => setMinSeparation(value[0])}
+          onValueChange={(v) => setMinSeparation(v[0])}
           className="py-2"
         />
         <p className="text-xs text-slate-500 leading-relaxed">
-          Minimum distance between charging stations to avoid oversaturation
+          Applies only between new stations, not against fixed ones.
         </p>
       </div>
 
-      {/* Coverage Target Control */}
       <div className="space-y-3">
         <Label className="text-slate-300 flex items-center justify-between text-sm font-medium">
           <div className="flex items-center">
             <BarChart3 className="h-4 w-4 mr-2 text-cyan-400" />
             Coverage Target
           </div>
-          <span className="text-cyan-400 font-mono">
-            {Math.round(coverageTarget * 100)}%
-          </span>
+          <span className="text-cyan-400 font-mono">{Math.round(coverageTarget * 100)}%</span>
         </Label>
         <Slider
-          min={0.8}
-          max={1.0}
-          step={0.01}
+          min={0.8} max={1.0} step={0.01}
           value={[coverageTarget]}
-          onValueChange={(value) => setCoverageTarget(value[0])}
+          onValueChange={(v) => setCoverageTarget(v[0])}
           className="py-2"
         />
         <p className="text-xs text-slate-500 leading-relaxed">
-          Percentage of GPS points that should be within service radius of a
-          station
+          Percentage of GPS points that should be within service radius of a station
         </p>
       </div>
 
-      {/* Max Stations Control */}
       <div className="space-y-3">
         <Label className="text-slate-300 flex items-center justify-between text-sm font-medium">
           <div className="flex items-center">
             <Maximize className="h-4 w-4 mr-2 text-cyan-400" />
-            Maximum Stations
+            Maximum New Stations
           </div>
           <span className="text-cyan-400 font-mono">{maxStations}</span>
         </Label>
         <Slider
-          min={1}
-          max={30}
-          step={1}
+          min={1} max={30} step={1}
           value={[maxStations]}
-          onValueChange={(value) => setMaxStations(value[0])}
+          onValueChange={(v) => setMaxStations(v[0])}
           className="py-2"
         />
         <p className="text-xs text-slate-500 leading-relaxed">
-          Upper limit on number of stations to prevent oversaturation
+          Upper limit on number of new stations to place
         </p>
       </div>
 
-      {/* Advanced Options */}
       <div className="grid grid-cols-1 gap-4">
         <div className="space-y-3">
           <Label className="text-slate-300 flex items-center text-sm font-medium">
@@ -828,7 +997,7 @@ export default function StationAllocationPage() {
           </Label>
           <Select
             value={h3Resolution.toString()}
-            onValueChange={(value) => setH3Resolution(parseInt(value))}
+            onValueChange={(v) => setH3Resolution(parseInt(v))}
           >
             <SelectTrigger className="bg-slate-800/50 border-slate-600/50 text-slate-300 h-10">
               <SelectValue placeholder="Select resolution" />
@@ -857,59 +1026,32 @@ export default function StationAllocationPage() {
     </>
   );
 
-  // Prepare map data
-  const mapMarkers = stationData
-    ? [
-        ...stationData.topLocations.map((location, index) => ({
-          position: [
-            location.lat || location.MEAN_LAT,
-            location.lon || location.MEAN_LONG,
-          ] as [number, number],
-          popup: `<div class="p-2">
-            <strong>${
-              location.label || `Station ${location.station_id || index + 1}`
-            }</strong><br>
-            Optimal Station Location<br>
-            ${location.density ? `Density: ${location.density}<br>` : ""}
-            Latitude: ${location.lat || location.MEAN_LAT}<br>
-            Longitude: ${location.lon || location.MEAN_LONG}
-          </div>`,
-          color: "#dc2626",
-          size: "medium",
-          ping: false,
-        })),
-      ]
-    : [];
-
-  const mapClusters = [];
-
-  const mapCenter = stationData
-    ? [stationData.mapCenter.lat, stationData.mapCenter.lng]
-    : [8.3765, 80.3593];
-
+  // ─────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────
   return (
     <div className="min-h-screen p-4 lg:p-6">
       <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header Section */}
+
+        {/* Header */}
         <div className="text-center space-y-4">
           <div className="inline-flex items-center px-4 py-2 bg-cyan-500/10 border border-cyan-500/20 rounded-full">
             <Activity className="h-4 w-4 text-cyan-400 mr-2" />
-            <span className="text-cyan-400 text-sm font-medium">
-              Intelligent Allocation
-            </span>
+            <span className="text-cyan-400 text-sm font-medium">Intelligent Allocation</span>
           </div>
           <h1 className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">
             Station Allocation Analysis
           </h1>
           <p className="text-xl text-slate-400 max-w-2xl mx-auto">
-            Optimize charging station placement using advanced clustering
-            algorithms and batch data analysis
+            Lock your best-performing stations and optimally place the rest using advanced
+            clustering algorithms and batch data analysis
           </p>
         </div>
 
-        {/* Main Content */}
+        {/* Main Grid */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
-          {/* Configuration Panel */}
+
+          {/* Config Panel */}
           <div className="xl:col-span-4">
             <Card className="bg-slate-900/80 border-slate-700/50 backdrop-blur-xl shadow-2xl h-[800px] flex flex-col">
               <CardHeader className="pb-4 flex-shrink-0">
@@ -923,7 +1065,7 @@ export default function StationAllocationPage() {
                         Algorithm Configuration
                       </CardTitle>
                       <CardDescription className="text-slate-400">
-                        Fine-tune clustering parameters for optimal results
+                        Lock high performers · relocate the rest
                       </CardDescription>
                     </div>
                   </div>
@@ -943,254 +1085,426 @@ export default function StationAllocationPage() {
                   </Button>
                 )}
               </CardHeader>
+
               <CardContent className="flex-1 flex flex-col overflow-hidden">
                 <ScrollArea className="flex-1 pr-4">
                   <div className="space-y-6">
-                    <form onSubmit={handleCoverageSubmit} className="space-y-6">
-                      {/* Location Filters */}
-                      <div className="space-y-4">
-                        <div className="flex items-center space-x-2">
-                          <Filter className="h-4 w-4 text-cyan-400" />
-                          <Label className="text-slate-300 text-sm font-medium">
-                            Location Filters
-                          </Label>
-                        </div>
 
-                        {/* Province Selection */}
-                        <div className="space-y-2">
-                          <Label className="text-slate-400 text-sm">
-                            Provinces
-                          </Label>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button
+                    {/* ── Tabs: Coverage vs Geo-based (restored from File 1) ── */}
+                    <Tabs value={activeTab} onValueChange={setActiveTab}>
+                      <TabsList className="w-full bg-slate-800/50 border border-slate-700/50">
+                        <TabsTrigger value="coverage" className="flex-1 text-xs data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
+                          Coverage-Based
+                        </TabsTrigger>
+                        <TabsTrigger value="geo" className="flex-1 text-xs data-[state=active]:bg-cyan-600 data-[state=active]:text-white">
+                          Geo-Based
+                        </TabsTrigger>
+                      </TabsList>
+
+                      {/* ── Coverage Tab ── */}
+                      <TabsContent value="coverage" className="mt-4">
+                        <form onSubmit={handleCoverageSubmit} className="space-y-6">
+
+                          {/* Fixed stations panel */}
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <Pin className="h-4 w-4 text-green-400" />
+                              <Label className="text-slate-300 text-sm font-medium">
+                                Existing Stations
+                              </Label>
+                              <Badge
                                 variant="outline"
-                                className="w-full justify-between bg-slate-800/50 border-slate-600/50 text-slate-300 hover:bg-slate-800"
-                                disabled={loadingGeographical}
+                                className="text-[10px] border-green-500/30 text-green-400 ml-auto"
                               >
-                                <span>
-                                  {selectedProvinces.length === 0
-                                    ? "All Provinces"
-                                    : `${selectedProvinces.length} Province(s)`}
-                                </span>
-                                <ChevronDown className="h-4 w-4" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-80 p-0" align="start">
-                              <div className="max-h-64 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600 p-4 space-y-2">
-                                {loadingGeographical ? (
-                                  <div className="text-center py-4 text-slate-400 text-sm">
-                                    <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
-                                    Loading provinces...
-                                  </div>
-                                ) : geographicalData.provinces.length === 0 ? (
-                                  <div className="text-center py-4 text-slate-400 text-sm">
-                                    No provinces available
-                                  </div>
-                                ) : (
-                                  geographicalData.provinces.map((province) => (
-                                    <div
-                                      key={province}
-                                      className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded cursor-pointer"
-                                      onClick={() =>
-                                        handleProvinceSelect(province)
-                                      }
-                                    >
-                                      {selectedProvinces.includes(province) ? (
-                                        <CheckCircle className="h-4 w-4 text-cyan-400" />
-                                      ) : (
-                                        <Circle className="h-4 w-4 text-slate-600" />
-                                      )}
-                                      <span className="text-slate-300 text-sm">
-                                        {province}
-                                      </span>
-                                    </div>
-                                  ))
-                                )}
+                                {stationsLoading ? "Loading…" : `${lockedStations.length} locked`}
+                              </Badge>
+                            </div>
+
+                            {stationsLoading && (
+                              <div className="flex items-center gap-2 py-4 text-slate-400 text-sm">
+                                <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                                Fetching station data…
                               </div>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
+                            )}
 
-                        {/* District Selection */}
-                        <div className="space-y-2">
-                          <Label className="text-slate-400 text-sm">
-                            Districts
-                          </Label>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button
-                                variant="outline"
-                                className="w-full justify-between bg-slate-800/50 border-slate-600/50 text-slate-300 hover:bg-slate-800"
-                                disabled={loadingGeographical}
-                              >
-                                <span>
-                                  {selectedDistricts.length === 0
-                                    ? "All Districts"
-                                    : `${selectedDistricts.length} District(s)`}
-                                </span>
-                                <ChevronDown className="h-4 w-4" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-80 p-0" align="start">
-                              <div className="max-h-64 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600 p-4 space-y-2">
-                                {loadingGeographical ? (
-                                  <div className="text-center py-4 text-slate-400 text-sm">
-                                    <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
-                                    Loading districts...
+                            {stationsError && (
+                              <Alert className="bg-red-500/10 border-red-500/20">
+                                <AlertCircle className="h-4 w-4 text-red-400" />
+                                <AlertDescription className="text-red-300 text-xs">
+                                  Could not load stations: {stationsError}
+                                </AlertDescription>
+                              </Alert>
+                            )}
+
+                            {!stationsLoading && !stationsError && stations.length > 0 && (
+                              <FixedStationsPanel
+                                stations={stations}
+                                threshold={lockThreshold}
+                                onThresholdChange={setLockThreshold}
+                                onToggleStation={handleToggleStation}
+                              />
+                            )}
+                          </div>
+
+                          <Separator className="bg-slate-700/30" />
+
+                          {/* Location Filters */}
+                          <div className="space-y-4">
+                            <div className="flex items-center space-x-2">
+                              <Filter className="h-4 w-4 text-cyan-400" />
+                              <Label className="text-slate-300 text-sm font-medium">
+                                Location Filters
+                              </Label>
+                            </div>
+
+                            {/* Province */}
+                            <div className="space-y-2">
+                              <Label className="text-slate-400 text-sm">Provinces</Label>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    className="w-full justify-between bg-slate-800/50 border-slate-600/50 text-slate-300 hover:bg-slate-800"
+                                    disabled={loadingGeographical}
+                                  >
+                                    <span>
+                                      {selectedProvinces.length === 0
+                                        ? "All Provinces"
+                                        : `${selectedProvinces.length} Province(s)`}
+                                    </span>
+                                    <ChevronDown className="h-4 w-4" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80 p-0" align="start">
+                                  <div className="max-h-64 overflow-y-auto p-4 space-y-2">
+                                    {loadingGeographical ? (
+                                      <div className="text-center py-4 text-slate-400 text-sm">
+                                        <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                                        Loading provinces...
+                                      </div>
+                                    ) : geographicalData.provinces.length === 0 ? (
+                                      <div className="text-center py-4 text-slate-400 text-sm">
+                                        No provinces available
+                                      </div>
+                                    ) : (
+                                      geographicalData.provinces.map((province) => (
+                                        <div
+                                          key={province}
+                                          className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded cursor-pointer"
+                                          onClick={() => handleProvinceSelect(province)}
+                                        >
+                                          {selectedProvinces.includes(province)
+                                            ? <CheckCircle className="h-4 w-4 text-cyan-400" />
+                                            : <Circle className="h-4 w-4 text-slate-600" />}
+                                          <span className="text-slate-300 text-sm">{province}</span>
+                                        </div>
+                                      ))
+                                    )}
                                   </div>
-                                ) : getAvailableDistricts().length === 0 ? (
-                                  <div className="text-center py-4 text-slate-400 text-sm">
-                                    No districts available
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+
+                            {/* District */}
+                            <div className="space-y-2">
+                              <Label className="text-slate-400 text-sm">Districts</Label>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    className="w-full justify-between bg-slate-800/50 border-slate-600/50 text-slate-300 hover:bg-slate-800"
+                                    disabled={loadingGeographical}
+                                  >
+                                    <span>
+                                      {selectedDistricts.length === 0
+                                        ? "All Districts"
+                                        : `${selectedDistricts.length} District(s)`}
+                                    </span>
+                                    <ChevronDown className="h-4 w-4" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80 p-0" align="start">
+                                  <div className="max-h-64 overflow-y-auto p-4 space-y-2">
+                                    {loadingGeographical ? (
+                                      <div className="text-center py-4 text-slate-400 text-sm">
+                                        <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                                        Loading districts...
+                                      </div>
+                                    ) : getAvailableDistricts().length === 0 ? (
+                                      <div className="text-center py-4 text-slate-400 text-sm">
+                                        No districts available
+                                      </div>
+                                    ) : (
+                                      getAvailableDistricts().map((district) => (
+                                        <div
+                                          key={district}
+                                          className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded cursor-pointer"
+                                          onClick={() => handleDistrictSelect(district)}
+                                        >
+                                          {selectedDistricts.includes(district)
+                                            ? <CheckCircle className="h-4 w-4 text-cyan-400" />
+                                            : <Circle className="h-4 w-4 text-slate-600" />}
+                                          <span className="text-slate-300 text-sm">{district}</span>
+                                        </div>
+                                      ))
+                                    )}
                                   </div>
-                                ) : (
-                                  getAvailableDistricts().map((district) => (
-                                    <div
-                                      key={district}
-                                      className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded cursor-pointer"
-                                      onClick={() =>
-                                        handleDistrictSelect(district)
-                                      }
-                                    >
-                                      {selectedDistricts.includes(district) ? (
-                                        <CheckCircle className="h-4 w-4 text-cyan-400" />
-                                      ) : (
-                                        <Circle className="h-4 w-4 text-slate-600" />
-                                      )}
-                                      <span className="text-slate-300 text-sm">
-                                        {district}
-                                      </span>
-                                    </div>
-                                  ))
-                                )}
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+
+                            {/* Area */}
+                            <div className="space-y-2">
+                              <Label className="text-slate-400 text-sm">Areas</Label>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    className="w-full justify-between bg-slate-800/50 border-slate-600/50 text-slate-300 hover:bg-slate-800"
+                                    disabled={loadingGeographical}
+                                  >
+                                    <span>
+                                      {selectedAreas.length === 0
+                                        ? "All Areas"
+                                        : `${selectedAreas.length} Area(s)`}
+                                    </span>
+                                    <ChevronDown className="h-4 w-4" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80 p-0" align="start">
+                                  <div className="max-h-64 overflow-y-auto p-4 space-y-2">
+                                    {loadingGeographical ? (
+                                      <div className="text-center py-4 text-slate-400 text-sm">
+                                        <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
+                                        Loading areas...
+                                      </div>
+                                    ) : getAvailableAreas().length === 0 ? (
+                                      <div className="text-center py-4 text-slate-400 text-sm">
+                                        No areas available
+                                      </div>
+                                    ) : (
+                                      getAvailableAreas().map((area) => (
+                                        <div
+                                          key={area}
+                                          className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded cursor-pointer"
+                                          onClick={() => handleAreaSelect(area)}
+                                        >
+                                          {selectedAreas.includes(area)
+                                            ? <CheckCircle className="h-4 w-4 text-cyan-400" />
+                                            : <Circle className="h-4 w-4 text-slate-600" />}
+                                          <span className="text-slate-300 text-sm">{area}</span>
+                                        </div>
+                                      ))
+                                    )}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          </div>
+
+                          <Separator className="bg-slate-700/30" />
+
+                          {/* Coverage algorithm controls */}
+                          <CoverageControls />
+
+                          {/* Alerts */}
+                          <div className="space-y-3">
+                            {filtersError && (
+                              <Alert className="bg-red-500/10 border-red-500/20">
+                                <AlertCircle className="h-4 w-4 text-red-400" />
+                                <AlertDescription className="text-red-300">{filtersError}</AlertDescription>
+                              </Alert>
+                            )}
+                            {error && (
+                              <Alert className="bg-red-500/10 border-red-500/20">
+                                <AlertCircle className="h-4 w-4 text-red-400" />
+                                <AlertDescription className="text-red-300">{error}</AlertDescription>
+                              </Alert>
+                            )}
+                            {stationData?.message && (
+                              <Alert className="bg-blue-500/10 border-blue-500/20">
+                                <CheckCircle className="h-4 w-4 text-blue-400" />
+                                <AlertDescription className="text-blue-300">{stationData.message}</AlertDescription>
+                              </Alert>
+                            )}
+                            {stationData?.coveragePercentage && (
+                              <Alert className="bg-green-500/10 border-green-500/20">
+                                <CheckCircle className="h-4 w-4 text-green-400" />
+                                <AlertDescription className="text-green-300">
+                                  Coverage: {(stationData.coveragePercentage * 100).toFixed(1)}% with{" "}
+                                  {stationData.fixedStations.length + stationData.newStations.length} stations
+                                </AlertDescription>
+                              </Alert>
+                            )}
+                          </div>
+
+                          <Button
+                            type="submit"
+                            className="w-full bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white shadow-lg hover:shadow-xl transition-all duration-200 h-12"
+                            disabled={isLoading || stationsLoading}
+                          >
+                            {isLoading ? (
+                              <>
+                                <div className="h-4 w-4 border-2 border-t-transparent border-white rounded-full animate-spin mr-3" />
+                                Optimizing Coverage...
+                              </>
+                            ) : stationsLoading ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin mr-3" />
+                                Loading stations...
+                              </>
+                            ) : (
+                              <>
+                                <MapPin className="mr-3 h-4 w-4" />
+                                Optimize · {lockedStations.length} fixed + up to {maxStations} new
+                              </>
+                            )}
+                          </Button>
+                        </form>
+                      </TabsContent>
+
+                      {/* ── Geo-Based Tab (restored from File 1) ── */}
+                      <TabsContent value="geo" className="mt-4">
+                        <form onSubmit={handleGeoSubmit} className="space-y-6">
+
+                          {/* Location filters (reused) */}
+                          <div className="space-y-4">
+                            <div className="flex items-center space-x-2">
+                              <Filter className="h-4 w-4 text-cyan-400" />
+                              <Label className="text-slate-300 text-sm font-medium">
+                                Location Filters
+                              </Label>
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label className="text-slate-400 text-sm">Provinces</Label>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    className="w-full justify-between bg-slate-800/50 border-slate-600/50 text-slate-300 hover:bg-slate-800"
+                                    disabled={loadingGeographical}
+                                  >
+                                    <span>
+                                      {selectedProvinces.length === 0
+                                        ? "All Provinces"
+                                        : `${selectedProvinces.length} Province(s)`}
+                                    </span>
+                                    <ChevronDown className="h-4 w-4" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-80 p-0" align="start">
+                                  <div className="max-h-64 overflow-y-auto p-4 space-y-2">
+                                    {geographicalData.provinces.map((province) => (
+                                      <div
+                                        key={province}
+                                        className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded cursor-pointer"
+                                        onClick={() => handleProvinceSelect(province)}
+                                      >
+                                        {selectedProvinces.includes(province)
+                                          ? <CheckCircle className="h-4 w-4 text-cyan-400" />
+                                          : <Circle className="h-4 w-4 text-slate-600" />}
+                                        <span className="text-slate-300 text-sm">{province}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          </div>
+
+                          <Separator className="bg-slate-700/30" />
+
+                          {/* Geo-specific params */}
+                          <div className="space-y-3">
+                            <Label className="text-slate-300 flex items-center justify-between text-sm font-medium">
+                              <div className="flex items-center">
+                                <Radar className="h-4 w-4 mr-2 text-cyan-400" />
+                                Max Cluster Radius
                               </div>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
+                              <span className="text-cyan-400 font-mono">{maxRadius.toFixed(1)} km</span>
+                            </Label>
+                            <Slider
+                              min={0.5} max={10.0} step={0.5}
+                              value={[maxRadius]}
+                              onValueChange={(v) => setMaxRadius(v[0])}
+                              className="py-2"
+                            />
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                              Maximum radius of each geographic cluster
+                            </p>
+                          </div>
 
-                        {/* Area Selection */}
-                        <div className="space-y-2">
-                          <Label className="text-slate-400 text-sm">
-                            Areas
-                          </Label>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button
-                                variant="outline"
-                                className="w-full justify-between bg-slate-800/50 border-slate-600/50 text-slate-300 hover:bg-slate-800"
-                                disabled={loadingGeographical}
-                              >
-                                <span>
-                                  {selectedAreas.length === 0
-                                    ? "All Areas"
-                                    : `${selectedAreas.length} Area(s)`}
-                                </span>
-                                <ChevronDown className="h-4 w-4" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-80 p-0" align="start">
-                              <div className="max-h-64 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600 p-4 space-y-2">
-                                {loadingGeographical ? (
-                                  <div className="text-center py-4 text-slate-400 text-sm">
-                                    <Loader2 className="h-4 w-4 animate-spin mx-auto mb-2" />
-                                    Loading areas...
-                                  </div>
-                                ) : getAvailableAreas().length === 0 ? (
-                                  <div className="text-center py-4 text-slate-400 text-sm">
-                                    No areas available
-                                  </div>
-                                ) : (
-                                  getAvailableAreas().map((area) => (
-                                    <div
-                                      key={area}
-                                      className="flex items-center space-x-2 p-2 hover:bg-slate-700/50 rounded cursor-pointer"
-                                      onClick={() => handleAreaSelect(area)}
-                                    >
-                                      {selectedAreas.includes(area) ? (
-                                        <CheckCircle className="h-4 w-4 text-cyan-400" />
-                                      ) : (
-                                        <Circle className="h-4 w-4 text-slate-600" />
-                                      )}
-                                      <span className="text-slate-300 text-sm">
-                                        {area}
-                                      </span>
-                                    </div>
-                                  ))
-                                )}
+                          <div className="space-y-3">
+                            <Label className="text-slate-300 flex items-center justify-between text-sm font-medium">
+                              <div className="flex items-center">
+                                <Layers className="h-4 w-4 mr-2 text-cyan-400" />
+                                Outlier Threshold
                               </div>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-                      </div>
+                              <span className="text-cyan-400 font-mono">{outlierThreshold.toFixed(1)} km</span>
+                            </Label>
+                            <Slider
+                              min={1.0} max={20.0} step={0.5}
+                              value={[outlierThreshold]}
+                              onValueChange={(v) => setOutlierThreshold(v[0])}
+                              className="py-2"
+                            />
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                              GPS points beyond this distance from any cluster are treated as outliers
+                            </p>
+                          </div>
 
-                      <Separator className="bg-slate-700/30" />
+                          <div className="space-y-3">
+                            <Label className="text-slate-300 flex items-center justify-between text-sm font-medium">
+                              <div className="flex items-center">
+                                <TrendingUp className="h-4 w-4 mr-2 text-cyan-400" />
+                                Top N Locations
+                              </div>
+                              <span className="text-cyan-400 font-mono">{topN}</span>
+                            </Label>
+                            <Slider
+                              min={1} max={20} step={1}
+                              value={[topN]}
+                              onValueChange={(v) => setTopN(v[0])}
+                              className="py-2"
+                            />
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                              Number of top station locations to return
+                            </p>
+                          </div>
 
-                      {/* Coverage-based Parameters */}
-                      <CoverageControls />
+                          {/* Alerts */}
+                          <div className="space-y-3">
+                            {error && (
+                              <Alert className="bg-red-500/10 border-red-500/20">
+                                <AlertCircle className="h-4 w-4 text-red-400" />
+                                <AlertDescription className="text-red-300">{error}</AlertDescription>
+                              </Alert>
+                            )}
+                          </div>
 
-                      {/* Status Messages */}
-                      <div className="space-y-3">
-                        {filtersError && (
-                          <Alert className="bg-red-500/10 border-red-500/20">
-                            <AlertCircle className="h-4 w-4 text-red-400" />
-                            <AlertDescription className="text-red-300">
-                              {filtersError}
-                            </AlertDescription>
-                          </Alert>
-                        )}
+                          <Button
+                            type="submit"
+                            className="w-full bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white shadow-lg hover:shadow-xl transition-all duration-200 h-12"
+                            disabled={isLoading}
+                          >
+                            {isLoading ? (
+                              <>
+                                <div className="h-4 w-4 border-2 border-t-transparent border-white rounded-full animate-spin mr-3" />
+                                Allocating Stations...
+                              </>
+                            ) : (
+                              <>
+                                <Radar className="mr-3 h-4 w-4" />
+                                Run Geo-Based Clustering
+                              </>
+                            )}
+                          </Button>
+                        </form>
+                      </TabsContent>
+                    </Tabs>
 
-                        {error && (
-                          <Alert className="bg-red-500/10 border-red-500/20">
-                            <AlertCircle className="h-4 w-4 text-red-400" />
-                            <AlertDescription className="text-red-300">
-                              {error}
-                            </AlertDescription>
-                          </Alert>
-                        )}
-
-                        {stationData && stationData.message && (
-                          <Alert className="bg-blue-500/10 border-blue-500/20">
-                            <CheckCircle className="h-4 w-4 text-blue-400" />
-                            <AlertDescription className="text-blue-300">
-                              {stationData.message}
-                            </AlertDescription>
-                          </Alert>
-                        )}
-
-                        {stationData && stationData.coveragePercentage && (
-                          <Alert className="bg-green-500/10 border-green-500/20">
-                            <CheckCircle className="h-4 w-4 text-green-400" />
-                            <AlertDescription className="text-green-300">
-                              Coverage:{" "}
-                              {(stationData.coveragePercentage * 100).toFixed(
-                                1
-                              )}
-                              % with {stationData.topLocations.length} stations
-                            </AlertDescription>
-                          </Alert>
-                        )}
-                      </div>
-
-                      <Button
-                        type="submit"
-                        className="w-full bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-700 hover:to-cyan-600 text-white shadow-lg hover:shadow-xl transition-all duration-200 h-12"
-                        disabled={isLoading}
-                      >
-                        {isLoading ? (
-                          <>
-                            <div className="h-4 w-4 border-2 border-t-transparent border-white rounded-full animate-spin mr-3"></div>
-                            Optimizing Coverage...
-                          </>
-                        ) : (
-                          <>
-                            <MapPin className="mr-3 h-4 w-4" />
-                            Optimize Station Coverage
-                          </>
-                        )}
-                      </Button>
-                    </form>
-
-                    {/* Coverage Statistics Display */}
+                    {/* Coverage Statistics */}
                     {coverageStats && (
                       <div className="mt-6">
                         <CoverageStatsDisplay stats={coverageStats} />
@@ -1202,9 +1516,81 @@ export default function StationAllocationPage() {
             </Card>
           </div>
 
-          {/* Map and Results Section */}
-          <div className="xl:col-span-8 space-y-6">
+          {/* Map Panel */}
+          <div className="xl:col-span-8">
             <Card className="bg-slate-900/80 border-slate-700/50 backdrop-blur-xl shadow-2xl overflow-hidden h-[800px]">
+
+              {/* Map legend + ghost toggle */}
+              {stationData && (
+                <div className="absolute top-4 left-4 z-[1000] flex flex-col gap-2">
+                  {/* Legend pills */}
+                  <div className="flex gap-2 flex-wrap">
+                    <div
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium"
+                      style={{ background: "rgba(10,14,23,0.85)", border: "1px solid rgba(34,197,94,0.3)", color: "#4ade80" }}
+                    >
+                      <div className="w-2.5 h-2.5 rounded-full bg-green-400" />
+                      Fixed ({stationData.fixedStations.length > 0 ? stationData.fixedStations.length : lockedStations.length})
+                    </div>
+                    <div
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium"
+                      style={{ background: "rgba(10,14,23,0.85)", border: "1px solid rgba(220,38,38,0.3)", color: "#f87171" }}
+                    >
+                      <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+                      New ({stationData.newStations.length})
+                    </div>
+                    <div
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium"
+                      style={{
+                        background: "rgba(10,14,23,0.85)",
+                        border: `1px solid ${showOldLocations ? "rgba(71,85,105,0.6)" : "rgba(71,85,105,0.2)"}`,
+                        color: showOldLocations ? "#94a3b8" : "#475569",
+                        opacity: showOldLocations ? 1 : 0.5,
+                      }}
+                    >
+                      {/* Hollow dashed circle matches the ghost marker style */}
+                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none" style={{ flexShrink: 0 }}>
+                        <circle
+                          cx="5.5" cy="5.5" r="4"
+                          stroke={showOldLocations ? "#64748b" : "#334155"}
+                          strokeWidth="1.5"
+                          strokeDasharray="2.5 2"
+                          fill={showOldLocations ? "rgba(100,116,139,0.15)" : "transparent"}
+                        />
+                        <circle cx="5.5" cy="5.5" r="1.5" fill={showOldLocations ? "#64748b" : "#334155"} opacity="0.6" />
+                      </svg>
+                      Old ({unlockedStations.length})
+                    </div>
+                  </div>
+
+                  {/* Ghost overlay toggle */}
+                  <button
+                    onClick={() => setShowOldLocations((v) => !v)}
+                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 cursor-pointer"
+                    style={{
+                      background: showOldLocations ? "rgba(71,85,105,0.25)" : "rgba(10,14,23,0.85)",
+                      border: `1px solid ${showOldLocations ? "rgba(148,163,184,0.35)" : "rgba(71,85,105,0.25)"}`,
+                      color: showOldLocations ? "#cbd5e1" : "#475569",
+                    }}
+                  >
+                    <div
+                      className="w-3.5 h-3.5 rounded border flex items-center justify-center transition-colors"
+                      style={{
+                        background: showOldLocations ? "#475569" : "transparent",
+                        borderColor: showOldLocations ? "#475569" : "#334155",
+                      }}
+                    >
+                      {showOldLocations && (
+                        <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                          <path d="M1.5 4L3 5.5L6.5 2" stroke="white" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </div>
+                    Show old locations
+                  </button>
+                </div>
+              )}
+
               <CardContent className="p-0 relative h-full">
                 <div className="relative h-full">
                   <CartoMap
@@ -1217,18 +1603,12 @@ export default function StationAllocationPage() {
                     height="800px"
                   />
 
-                  {/* Enhanced Loading Overlay for Map Only */}
                   {isLoading && (
-                    <MapLoadingOverlay
-                      phase={loadingPhase}
-                      progress={loadingProgress}
-                    />
+                    <MapLoadingOverlay phase={loadingPhase} progress={loadingProgress} />
                   )}
 
-                  {/* Initial Mount Loading Overlay */}
                   {!initialMapLoaded && <InitialMapLoadingOverlay />}
 
-                  {/* No Data State */}
                   {!stationData && !isLoading && initialMapLoaded && (
                     <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center">
                       <div className="text-center space-y-4">
@@ -1240,9 +1620,10 @@ export default function StationAllocationPage() {
                             No Clustering Results Yet
                           </h3>
                           <p className="text-slate-500 text-sm max-w-md">
-                            Configure your parameters and run a clustering
-                            algorithm to visualize station allocations on the
-                            map
+                            Lock your best stations, configure parameters, then run optimization.
+                          </p>
+                          <p className="text-slate-600 text-xs mt-2">
+                            🟢 Fixed stations  ·  🔴 New placements  ·  ⚪ Old locations (ghost)
                           </p>
                           {activeFiltersCount > 0 && (
                             <div className="mt-3">
