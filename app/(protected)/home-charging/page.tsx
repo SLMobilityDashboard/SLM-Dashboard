@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Card,
   CardContent,
+  CardHeader,
+  CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,86 +18,290 @@ import {
   ChevronDown,
   ChevronUp,
   Check,
+  ShieldAlert,
+  Shield,
+  Zap,
+  TrendingUp,
+  Activity,
+  Users,
+  RefreshCw,
+  Download,
+  Eye,
+  ChevronsUpDown,
+  Calendar,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import BatteryHistory from "@/components/home-charging/BatteryHistory";
 import { BatteryFilters } from "@/hooks/useHomeCharging";
 
-// Types
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface VehicleListItem {
   VEHICLE_ID: string;
   TBOX_IMEI_NO: string;
   CHASSIS_NUMBER: string;
 }
 
+interface SuspiciousRecord {
+  TBOXID: string;
+  CUSTOMER_ID: string;
+  CUSTOMER_NAME: string;
+  YESTERDAY_FIRST_CTIME: string;
+  YESTERDAY_FIRST_BATPERCENT: number;
+  BEFORE_YESTERDAY_MAX_CTIME: string;
+  BEFORE_YESTERDAY_MAX_BATPERCENT: number;
+  BATPERCENT_DIFFERENCE: number;
+}
+
+type SortField = keyof SuspiciousRecord;
+type SortDir = "asc" | "desc";
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const THRESHOLD_CRITICAL = 30;
+const THRESHOLD_WARNING = 15;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const getSeverity = (diff: number): "critical" | "warning" | "low" => {
+  if (diff >= THRESHOLD_CRITICAL) return "critical";
+  if (diff >= THRESHOLD_WARNING) return "warning";
+  return "low";
+};
+
+const severityConfig = {
+  critical: {
+    label: "Critical",
+    color: "text-red-400",
+    bg: "bg-red-500/10",
+    border: "border-red-500/30",
+    badge: "bg-red-500/20 text-red-300 border-red-500/30",
+    bar: "bg-red-500",
+    glow: "shadow-red-500/20",
+  },
+  warning: {
+    label: "Warning",
+    color: "text-amber-400",
+    bg: "bg-amber-500/10",
+    border: "border-amber-500/30",
+    badge: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+    bar: "bg-amber-500",
+    glow: "shadow-amber-500/20",
+  },
+  low: {
+    label: "Suspicious",
+    color: "text-sky-400",
+    bg: "bg-sky-500/10",
+    border: "border-sky-500/30",
+    badge: "bg-sky-500/20 text-sky-300 border-sky-500/30",
+    bar: "bg-sky-500",
+    glow: "shadow-sky-500/20",
+  },
+};
+
+function formatDateTime(ts: string) {
+  if (!ts) return "—";
+  try {
+    return new Date(ts).toLocaleString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return ts;
+  }
+}
+
+function BatteryBar({ pct, color }: { pct: number; color: string }) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${color}`}
+          style={{ width: `${clamped}%` }}
+        />
+      </div>
+      <span className="text-xs font-mono text-slate-300 w-9 text-right">
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
+// ─── Detail Modal ─────────────────────────────────────────────────────────────
+
+function DetailModal({
+  record,
+  onClose,
+}: {
+  record: SuspiciousRecord;
+  onClose: () => void;
+}) {
+  const severity = getSeverity(record.BATPERCENT_DIFFERENCE);
+  const cfg = severityConfig[severity];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <div
+        className={`relative z-10 w-full max-w-lg rounded-2xl border ${cfg.border} bg-slate-900 shadow-2xl`}
+      >
+        <div className={`p-5 border-b ${cfg.border} flex items-start justify-between`}>
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-xl ${cfg.bg}`}>
+              <ShieldAlert className={`w-5 h-5 ${cfg.color}`} />
+            </div>
+            <div>
+              <h2 className="font-bold text-slate-100 text-lg">
+                Illegal Charge Detected
+              </h2>
+              <p className="text-sm text-slate-400">{record.TBOXID}</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-slate-800/50 rounded-xl p-3">
+              <p className="text-xs text-slate-500 mb-1">Customer ID</p>
+              <p className="text-sm font-mono text-slate-200">{record.CUSTOMER_ID}</p>
+            </div>
+            <div className="bg-slate-800/50 rounded-xl p-3">
+              <p className="text-xs text-slate-500 mb-1">Customer Name</p>
+              <p className="text-sm font-medium text-slate-200 truncate">
+                {record.CUSTOMER_NAME || "—"}
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+              Battery Timeline
+            </p>
+            <div className="space-y-3">
+              <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/50">
+                <div className="flex justify-between text-xs text-slate-400 mb-2">
+                  <span>Day Before Yesterday (max)</span>
+                  <span>{formatDateTime(record.BEFORE_YESTERDAY_MAX_CTIME)}</span>
+                </div>
+                <BatteryBar pct={record.BEFORE_YESTERDAY_MAX_BATPERCENT} color="bg-slate-500" />
+              </div>
+              <div className="flex items-center justify-center gap-2">
+                <div className="h-px flex-1 bg-slate-700" />
+                <div className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold ${cfg.badge} border`}>
+                  <TrendingUp className="w-3 h-3" />
+                  +{record.BATPERCENT_DIFFERENCE}% jump
+                </div>
+                <div className="h-px flex-1 bg-slate-700" />
+              </div>
+              <div className={`rounded-xl p-3 border ${cfg.border} ${cfg.bg}`}>
+                <div className="flex justify-between text-xs text-slate-400 mb-2">
+                  <span>Yesterday (first recorded)</span>
+                  <span>{formatDateTime(record.YESTERDAY_FIRST_CTIME)}</span>
+                </div>
+                <BatteryBar pct={record.YESTERDAY_FIRST_BATPERCENT} color={cfg.bar} />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-slate-400">Severity</span>
+            <span className={`text-sm font-semibold px-3 py-1 rounded-full border ${cfg.badge}`}>
+              {cfg.label} (+{record.BATPERCENT_DIFFERENCE}%)
+            </span>
+          </div>
+        </div>
+
+        <div className={`p-4 border-t ${cfg.border}`}>
+          <Button className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
 export default function BatteryAnalysisPage() {
-  // Vehicle list for selection
+
+  // ── Battery History filter state ───────────────────────────────────────────
+
   const [availableVehicles, setAvailableVehicles] = useState<VehicleListItem[]>([]);
   const [loadingVehicles, setLoadingVehicles] = useState(false);
   const [vehicleLoadError, setVehicleLoadError] = useState<string | null>(null);
-  
-  // Filter panel state
   const [isFilterExpanded, setIsFilterExpanded] = useState(true);
-  
-  // Vehicle dropdown state
   const [isVehicleDropdownOpen, setIsVehicleDropdownOpen] = useState(false);
   const vehicleDropdownRef = useRef<HTMLDivElement>(null);
 
-  const getDefaultEndDate = () => {
-    const date = new Date();
-    return date.toISOString().split("T")[0];
-  };
-
+  const getDefaultEndDate = () => new Date().toISOString().split("T")[0];
   const getDefaultStartDate = () => {
-    const date = new Date();
-    date.setDate(date.getDate() - 3); // Changed from 7 to 3
-    return date.toISOString().split("T")[0];
+    const d = new Date();
+    d.setDate(d.getDate() - 3);
+    return d.toISOString().split("T")[0];
   };
 
-  // Temporary filter state (before applying)
   const [tempSelectedVehicle, setTempSelectedVehicle] = useState<string | null>(null);
-  const [tempStartDate, setTempStartDate] = useState<string>(getDefaultStartDate());
-  const [tempEndDate, setTempEndDate] = useState<string>(getDefaultEndDate());
-  const [dateRangeError, setDateRangeError] = useState<string>("");
-  const [vehicleSearch, setVehicleSearch] = useState<string>("");
+  const [tempStartDate, setTempStartDate] = useState(getDefaultStartDate());
+  const [tempEndDate, setTempEndDate] = useState(getDefaultEndDate());
+  const [dateRangeError, setDateRangeError] = useState("");
+  const [vehicleSearch, setVehicleSearch] = useState("");
 
-  // Applied filters (actually used for fetching data)
   const [batteryFilters, setBatteryFilters] = useState<BatteryFilters>({
-    timeRange: 72, // Changed from 168 (7 days) to 72 (3 days)
+    timeRange: 72,
     includeIdleData: true,
     selectedVehicleImei: null,
     startTimestamp: Math.floor(new Date(getDefaultStartDate() + "T00:00:00").getTime() / 1000),
     endTimestamp: Math.floor(new Date(getDefaultEndDate() + "T23:59:59").getTime() / 1000),
   });
 
-  // Auto-fetch vehicles on mount
-  useEffect(() => {
-    fetchVehicleList();
-  }, []);
+  // ── Illegal charging state ─────────────────────────────────────────────────
 
-  // Close dropdown when clicking outside
+  const [fraudRecords, setFraudRecords] = useState<SuspiciousRecord[]>([]);
+  const [fraudLoading, setFraudLoading] = useState(false);
+  const [fraudError, setFraudError] = useState<string | null>(null);
+  const [fraudLastRefreshed, setFraudLastRefreshed] = useState<Date | null>(null);
+  const [isFraudSectionExpanded, setIsFraudSectionExpanded] = useState(true);
+
+  const [fraudSearch, setFraudSearch] = useState("");
+  const [fraudSeverityFilter, setFraudSeverityFilter] = useState<"all" | "critical" | "warning" | "low">("all");
+  const [fraudMinThreshold, setFraudMinThreshold] = useState(5);
+  const [fraudSortField, setFraudSortField] = useState<SortField>("BATPERCENT_DIFFERENCE");
+  const [fraudSortDir, setFraudSortDir] = useState<SortDir>("desc");
+  const [selectedFraudRecord, setSelectedFraudRecord] = useState<SuspiciousRecord | null>(null);
+
+  // ── Vehicle list fetch ─────────────────────────────────────────────────────
+
+  useEffect(() => { fetchVehicleList(); }, []);
+
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (vehicleDropdownRef.current && !vehicleDropdownRef.current.contains(event.target as Node)) {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (vehicleDropdownRef.current && !vehicleDropdownRef.current.contains(e.target as Node))
         setIsVehicleDropdownOpen(false);
-      }
     };
-
     document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch vehicle list
   const fetchVehicleList = async () => {
     if (loadingVehicles) return;
-    
     try {
       setLoadingVehicles(true);
       setVehicleLoadError(null);
-
       const sql = `
         SELECT DISTINCT
           TBOX_ID as TBOX_IMEI_NO,
@@ -109,27 +315,15 @@ export default function BatteryAnalysisPage() {
         ORDER BY CHASSIS_NUMBER
         LIMIT 1000
       `;
-
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_BASE_URL}/api/query`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ sql }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const results = await response.json();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql }),
+      });
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const results = await res.json();
       setAvailableVehicles(results || []);
-      setVehicleLoadError(null);
     } catch (err) {
-      console.error("Error fetching vehicle list:", err);
       setVehicleLoadError(err instanceof Error ? err.message : "Failed to load vehicles");
       setAvailableVehicles([]);
     } finally {
@@ -137,63 +331,81 @@ export default function BatteryAnalysisPage() {
     }
   };
 
-  const calculateDaysDifference = (start: string, end: string): number => {
-    const startTime = new Date(start).getTime();
-    const endTime = new Date(end).getTime();
-    return Math.ceil((endTime - startTime) / (1000 * 60 * 60 * 24));
-  };
+  // ── Fraud data fetch ───────────────────────────────────────────────────────
 
-  const handleStartDateChange = (newStartDate: string) => {
-    setTempStartDate(newStartDate);
+  const fetchFraudData = useCallback(async () => {
+    setFraudLoading(true);
+    setFraudError(null);
+    const sql = `
+      SELECT
+        TBOXID, CUSTOMER_ID, CUSTOMER_NAME,
+        YESTERDAY_FIRST_CTIME, YESTERDAY_FIRST_BATPERCENT,
+        BEFORE_YESTERDAY_MAX_CTIME, BEFORE_YESTERDAY_MAX_BATPERCENT,
+        BATPERCENT_DIFFERENCE
+      FROM REPORT_DB.GPS_DASHBOARD.TBOX_BATPERCENT_SUMMARY
+      WHERE BATPERCENT_DIFFERENCE >= ${fraudMinThreshold}
+      ORDER BY BATPERCENT_DIFFERENCE DESC
+      LIMIT 500
+    `;
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sql }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setFraudRecords(data || []);
+      setFraudLastRefreshed(new Date());
+    } catch (err) {
+      setFraudError(err instanceof Error ? err.message : "Failed to load data");
+    } finally {
+      setFraudLoading(false);
+    }
+  }, [fraudMinThreshold]);
+
+  useEffect(() => { fetchFraudData(); }, [fetchFraudData]);
+
+  // ── Battery History helpers ────────────────────────────────────────────────
+
+  const calculateDaysDifference = (start: string, end: string) =>
+    Math.ceil((new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24));
+
+  const handleStartDateChange = (val: string) => {
+    setTempStartDate(val);
     setDateRangeError("");
-
-    const start = new Date(newStartDate);
-    const maxEnd = new Date(start);
-    maxEnd.setDate(maxEnd.getDate() + 3); // Changed from 7 to 3
-    const currentEnd = new Date(tempEndDate);
-    const daysDiff = calculateDaysDifference(newStartDate, tempEndDate);
-
-    if (daysDiff > 3) { // Changed from 7 to 3
-      const adjustedEnd = maxEnd.toISOString().split("T")[0];
-      setTempEndDate(adjustedEnd);
-      setDateRangeError("End date adjusted to maintain 3-day maximum range"); // Updated message
-    } else if (currentEnd < start) {
-      setTempEndDate(newStartDate);
+    const maxEnd = new Date(val);
+    maxEnd.setDate(maxEnd.getDate() + 3);
+    if (calculateDaysDifference(val, tempEndDate) > 3) {
+      setTempEndDate(maxEnd.toISOString().split("T")[0]);
+      setDateRangeError("End date adjusted to maintain 3-day maximum range");
+    } else if (new Date(tempEndDate) < new Date(val)) {
+      setTempEndDate(val);
     }
   };
 
-  const handleEndDateChange = (newEndDate: string) => {
+  const handleEndDateChange = (val: string) => {
     setDateRangeError("");
-    const start = new Date(tempStartDate);
-    const end = new Date(newEndDate);
-    const maxEnd = new Date(start);
-    maxEnd.setDate(maxEnd.getDate() + 3); // Changed from 7 to 3
-    const daysDiff = calculateDaysDifference(tempStartDate, newEndDate);
-
-    if (daysDiff > 3) { // Changed from 7 to 3
-      const adjustedEnd = maxEnd.toISOString().split("T")[0];
-      setTempEndDate(adjustedEnd);
-      setDateRangeError("Maximum date range is 3 days"); // Updated message
+    if (calculateDaysDifference(tempStartDate, val) > 3) {
+      const maxEnd = new Date(tempStartDate);
+      maxEnd.setDate(maxEnd.getDate() + 3);
+      setTempEndDate(maxEnd.toISOString().split("T")[0]);
+      setDateRangeError("Maximum date range is 3 days");
       return;
     }
-
-    if (end < start) {
+    if (new Date(val) < new Date(tempStartDate)) {
       setTempEndDate(tempStartDate);
       setDateRangeError("End date cannot be before start date");
       return;
     }
-
-    setTempEndDate(newEndDate);
+    setTempEndDate(val);
   };
 
   const getMaxEndDate = () => {
-    const start = new Date(tempStartDate);
-    const maxEnd = new Date(start);
-    maxEnd.setDate(maxEnd.getDate() + 3); // Changed from 7 to 3
+    const maxEnd = new Date(tempStartDate);
+    maxEnd.setDate(maxEnd.getDate() + 3);
     const today = new Date();
-    return maxEnd < today
-      ? maxEnd.toISOString().split("T")[0]
-      : today.toISOString().split("T")[0];
+    return maxEnd < today ? maxEnd.toISOString().split("T")[0] : today.toISOString().split("T")[0];
   };
 
   const handleVehicleSelect = (imei: string) => {
@@ -205,10 +417,8 @@ export default function BatteryAnalysisPage() {
   const handleApplyFilters = () => {
     const startTime = new Date(tempStartDate + "T00:00:00").getTime() / 1000;
     const endTime = new Date(tempEndDate + "T23:59:59").getTime() / 1000;
-    const hours = Math.ceil((endTime - startTime) / 3600);
-
     setBatteryFilters({
-      timeRange: hours,
+      timeRange: Math.ceil((endTime - startTime) / 3600),
       startTimestamp: startTime,
       endTimestamp: endTime,
       includeIdleData: true,
@@ -217,87 +427,436 @@ export default function BatteryAnalysisPage() {
   };
 
   const handleClearFilters = () => {
-    const defaultStart = getDefaultStartDate();
-    const defaultEnd = getDefaultEndDate();
-    
-    setTempStartDate(defaultStart);
-    setTempEndDate(defaultEnd);
+    const s = getDefaultStartDate();
+    const e = getDefaultEndDate();
+    setTempStartDate(s);
+    setTempEndDate(e);
     setTempSelectedVehicle(null);
     setDateRangeError("");
     setVehicleSearch("");
-
-    const startTime = new Date(defaultStart + "T00:00:00").getTime() / 1000;
-    const endTime = new Date(defaultEnd + "T23:59:59").getTime() / 1000;
-
     setBatteryFilters({
-      timeRange: 72, // Changed from 168 to 72
-      startTimestamp: startTime,
-      endTimestamp: endTime,
+      timeRange: 72,
+      startTimestamp: new Date(s + "T00:00:00").getTime() / 1000,
+      endTimestamp: new Date(e + "T23:59:59").getTime() / 1000,
       includeIdleData: true,
       selectedVehicleImei: null,
     });
   };
 
-  const daysDifference = calculateDaysDifference(tempStartDate, tempEndDate);
-
-  // Filter vehicles based on search
-  const filteredVehicles = availableVehicles.filter(vehicle => 
-    vehicle.CHASSIS_NUMBER?.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
-    vehicle.TBOX_IMEI_NO?.includes(vehicleSearch) ||
-    vehicle.VEHICLE_ID?.toLowerCase().includes(vehicleSearch.toLowerCase())
-  );
-
-  const selectedVehicle = availableVehicles.find(
-    v => v.TBOX_IMEI_NO === tempSelectedVehicle
-  );
-
-  const appliedVehicle = availableVehicles.find(
-    v => v.TBOX_IMEI_NO === batteryFilters.selectedVehicleImei
-  );
-
-  const getActiveFiltersCount = () => {
-    let count = 0;
-    if (batteryFilters.selectedVehicleImei) count++;
-    if (batteryFilters.timeRange !== 72) count++; // Changed from 168 to 72
-    if (batteryFilters.includeIdleData) count++;
-    return count;
-  };
-
-  // Check if filters have changed (to show Apply button state)
   const hasUnappliedChanges = () => {
-    const tempStartTime = new Date(tempStartDate + "T00:00:00").getTime() / 1000;
-    const tempEndTime = new Date(tempEndDate + "T23:59:59").getTime() / 1000;
-    
     return (
       tempSelectedVehicle !== batteryFilters.selectedVehicleImei ||
-      tempStartTime !== batteryFilters.startTimestamp ||
-      tempEndTime !== batteryFilters.endTimestamp
+      new Date(tempStartDate + "T00:00:00").getTime() / 1000 !== batteryFilters.startTimestamp ||
+      new Date(tempEndDate + "T23:59:59").getTime() / 1000 !== batteryFilters.endTimestamp
     );
   };
 
+  const getActiveFiltersCount = () => {
+    let n = 0;
+    if (batteryFilters.selectedVehicleImei) n++;
+    if (batteryFilters.timeRange !== 72) n++;
+    if (batteryFilters.includeIdleData) n++;
+    return n;
+  };
+
+  // ── Fraud table derived data ───────────────────────────────────────────────
+
+  const filteredFraud = fraudRecords
+    .filter((r) => {
+      const sev = getSeverity(r.BATPERCENT_DIFFERENCE);
+      if (fraudSeverityFilter !== "all" && sev !== fraudSeverityFilter) return false;
+      if (fraudSearch) {
+        const q = fraudSearch.toLowerCase();
+        return (
+          r.TBOXID?.toLowerCase().includes(q) ||
+          r.CUSTOMER_ID?.toLowerCase().includes(q) ||
+          r.CUSTOMER_NAME?.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const av = a[fraudSortField], bv = b[fraudSortField];
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return fraudSortDir === "asc" ? cmp : -cmp;
+    });
+
+  const fraudStats = {
+    critical: fraudRecords.filter((r) => getSeverity(r.BATPERCENT_DIFFERENCE) === "critical").length,
+    warning: fraudRecords.filter((r) => getSeverity(r.BATPERCENT_DIFFERENCE) === "warning").length,
+    low: fraudRecords.filter((r) => getSeverity(r.BATPERCENT_DIFFERENCE) === "low").length,
+    uniqueCustomers: new Set(fraudRecords.map((r) => r.CUSTOMER_ID)).size,
+    maxJump: fraudRecords.length > 0 ? Math.max(...fraudRecords.map((r) => r.BATPERCENT_DIFFERENCE)) : 0,
+    avgJump: fraudRecords.length > 0
+      ? Math.round(fraudRecords.reduce((s, r) => s + r.BATPERCENT_DIFFERENCE, 0) / fraudRecords.length)
+      : 0,
+  };
+
+  const handleFraudSort = (field: SortField) => {
+    if (fraudSortField === field) setFraudSortDir((d) => d === "asc" ? "desc" : "asc");
+    else { setFraudSortField(field); setFraudSortDir("desc"); }
+  };
+
+  const FraudSortIcon = ({ field }: { field: SortField }) => {
+    if (fraudSortField !== field) return <ChevronsUpDown className="w-3 h-3 text-slate-600" />;
+    return fraudSortDir === "asc"
+      ? <ChevronUp className="w-3 h-3 text-purple-400" />
+      : <ChevronDown className="w-3 h-3 text-purple-400" />;
+  };
+
+  const exportFraudCSV = () => {
+    if (!filteredFraud.length) return;
+    const header = Object.keys(filteredFraud[0]).join(",");
+    const rows = filteredFraud.map((r) => Object.values(r).join(","));
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `illegal_charges_${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const selectedVehicle = availableVehicles.find((v) => v.TBOX_IMEI_NO === tempSelectedVehicle);
+  const appliedVehicle = availableVehicles.find((v) => v.TBOX_IMEI_NO === batteryFilters.selectedVehicleImei);
+  const filteredVehicles = availableVehicles.filter((v) =>
+    v.CHASSIS_NUMBER?.toLowerCase().includes(vehicleSearch.toLowerCase()) ||
+    v.TBOX_IMEI_NO?.includes(vehicleSearch) ||
+    v.VEHICLE_ID?.toLowerCase().includes(vehicleSearch.toLowerCase())
+  );
+  const daysDifference = calculateDaysDifference(tempStartDate, tempEndDate);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div className="min-h-screen">
+      {selectedFraudRecord && (
+        <DetailModal record={selectedFraudRecord} onClose={() => setSelectedFraudRecord(null)} />
+      )}
+
       <div className="max-w-7xl mx-auto space-y-6 p-6">
-        {/* Header Section */}
+
+        {/* ── Page Header ───────────────────────────────────────────────── */}
         <div className="text-center space-y-4">
           <div className="inline-flex items-center px-4 py-2 bg-cyan-500/10 border border-cyan-500/20 rounded-full">
             <Car className="h-4 w-4 text-cyan-400 mr-2" />
-            <span className="text-cyan-400 text-sm font-medium">
-              Battery Analytics
-            </span>
+            <span className="text-cyan-400 text-sm font-medium">Battery Analytics</span>
           </div>
           <h1 className="text-4xl lg:text-5xl font-bold bg-gradient-to-r from-slate-100 to-slate-300 bg-clip-text text-transparent">
             Battery History & Diagnostics
           </h1>
           <p className="text-xl text-slate-400 max-w-2xl mx-auto">
-            Comprehensive battery performance and health insights
+            Comprehensive battery performance, health insights, and fraud detection
           </p>
         </div>
 
-        {/* Collapsible Filters Card */}
+        {/* ════════════════════════════════════════════════════════════════
+            SECTION 1 — ILLEGAL CHARGING DETECTION
+        ════════════════════════════════════════════════════════════════ */}
+
+        {/* Section divider */}
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-800" />
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20">
+            <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
+            <span className="text-xs font-semibold text-red-400 uppercase tracking-wider">Fraud Detection</span>
+          </div>
+          <div className="h-px flex-1 bg-slate-800" />
+        </div>
+
+        {/* Fraud Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          {[
+            { label: "Critical", value: fraudStats.critical, icon: <AlertTriangle className="w-4 h-4" />, color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", filter: "critical" as const },
+            { label: "Warning", value: fraudStats.warning, icon: <Zap className="w-4 h-4" />, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20", filter: "warning" as const },
+            { label: "Suspicious", value: fraudStats.low, icon: <Shield className="w-4 h-4" />, color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/20", filter: "low" as const },
+            { label: "Customers", value: fraudStats.uniqueCustomers, icon: <Users className="w-4 h-4" />, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20", filter: null },
+            { label: "Max Jump", value: `+${fraudStats.maxJump}%`, icon: <TrendingUp className="w-4 h-4" />, color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20", filter: null },
+            { label: "Avg Jump", value: `+${fraudStats.avgJump}%`, icon: <Activity className="w-4 h-4" />, color: "text-teal-400", bg: "bg-teal-500/10", border: "border-teal-500/20", filter: null },
+          ].map((s, i) => (
+            <button
+              key={i}
+              onClick={() => s.filter && setFraudSeverityFilter(fraudSeverityFilter === s.filter ? "all" : s.filter)}
+              className={`rounded-xl border p-3 text-left transition-all duration-200 ${s.border} ${s.bg}
+                ${s.filter ? "cursor-pointer hover:scale-105 hover:shadow-lg" : "cursor-default"}
+                ${s.filter && fraudSeverityFilter === s.filter ? "ring-2 ring-white/20 scale-105" : ""}
+              `}
+            >
+              <div className={`flex items-center gap-1.5 mb-1 ${s.color}`}>
+                {s.icon}
+                <span className="text-xs font-medium">{s.label}</span>
+              </div>
+              <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+            </button>
+          ))}
+        </div>
+
+        {/* Fraud Collapsible Section */}
         <Card className="transition-all duration-300">
           <CardContent className="p-0">
-            {/* Filter Header - Always Visible */}
+            {/* Section toggle header */}
+            <button
+              onClick={() => setIsFraudSectionExpanded(!isFraudSectionExpanded)}
+              className="w-full p-4 flex justify-between items-center hover:bg-slate-800/30 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-red-400" />
+                <span className="font-medium">Illegal Charging Alerts</span>
+                {fraudStats.critical > 0 && (
+                  <Badge className="bg-red-500/20 text-red-300 border border-red-500/30">
+                    {fraudStats.critical} critical
+                  </Badge>
+                )}
+                {fraudLastRefreshed && !isFraudSectionExpanded && (
+                  <span className="text-xs text-slate-500 ml-1">
+                    · {filteredFraud.length} records
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={(e) => { e.stopPropagation(); fetchFraudData(); }}
+                  disabled={fraudLoading}
+                >
+                  {fraudLoading
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : <RefreshCw className="w-4 h-4" />
+                  }
+                </Button>
+                {isFraudSectionExpanded
+                  ? <ChevronUp className="h-5 w-5 text-slate-400" />
+                  : <ChevronDown className="h-5 w-5 text-slate-400" />
+                }
+              </div>
+            </button>
+
+            <div className={`transition-all duration-300 ease-in-out ${isFraudSectionExpanded ? "opacity-100" : "max-h-0 opacity-0 overflow-hidden"}`}>
+              <div className="border-t border-slate-700">
+
+                {/* Fraud Filters Bar */}
+                <div className="p-4 border-b border-slate-800">
+                  <div className="flex flex-wrap items-end gap-4">
+                    {/* Search */}
+                    <div className="flex-1 min-w-48 space-y-1">
+                      <Label className="text-xs">Search</Label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input
+                          type="text"
+                          placeholder="TBOX ID, Customer ID or Name…"
+                          value={fraudSearch}
+                          onChange={(e) => setFraudSearch(e.target.value)}
+                          className="w-full bg-slate-700 border border-slate-600 text-slate-200 pl-9 pr-3 py-2 rounded text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                        />
+                        {fraudSearch && (
+                          <button onClick={() => setFraudSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Min threshold */}
+                    <div className="space-y-1 w-44">
+                      <Label className="text-xs">Min. Battery Jump (%)</Label>
+                      <input
+                        type="number"
+                        min={1} max={100}
+                        value={fraudMinThreshold}
+                        onChange={(e) => setFraudMinThreshold(Number(e.target.value))}
+                        className="w-full bg-slate-700 border border-slate-600 text-slate-200 px-3 py-2 rounded text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                      />
+                    </div>
+
+                    {/* Severity pills */}
+                    <div className="space-y-1">
+                      <Label className="text-xs">Severity</Label>
+                      <div className="flex items-center gap-2">
+                        {(["all", "critical", "warning", "low"] as const).map((s) => (
+                          <button
+                            key={s}
+                            onClick={() => setFraudSeverityFilter(s)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                              fraudSeverityFilter === s
+                                ? "bg-purple-600 text-white border-purple-500"
+                                : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700"
+                            }`}
+                          >
+                            {s.charAt(0).toUpperCase() + s.slice(1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Export */}
+                    <div className="flex gap-2 ml-auto">
+                      <Button variant="outline" size="sm" onClick={exportFraudCSV} disabled={!filteredFraud.length} className="border-slate-600">
+                        <Download className="w-4 h-4 mr-1.5" />
+                        Export CSV
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Fraud Table */}
+                {fraudError ? (
+                  <div className="p-10 text-center">
+                    <AlertTriangle className="w-10 h-10 text-red-400 mx-auto mb-3" />
+                    <p className="text-red-400 font-medium">Failed to load data</p>
+                    <p className="text-slate-500 text-sm mt-1">{fraudError}</p>
+                    <Button variant="outline" size="sm" onClick={fetchFraudData} className="mt-4">Retry</Button>
+                  </div>
+                ) : fraudLoading && fraudRecords.length === 0 ? (
+                  <div className="p-10 text-center">
+                    <Loader2 className="w-8 h-8 text-purple-400 animate-spin mx-auto mb-3" />
+                    <p className="text-slate-400">Loading suspicious records…</p>
+                  </div>
+                ) : filteredFraud.length === 0 ? (
+                  <div className="p-10 text-center">
+                    <Shield className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                    <p className="text-slate-400 font-medium">No suspicious records found</p>
+                    <p className="text-slate-500 text-sm mt-1">Try lowering the minimum battery jump threshold</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="px-4 py-2 border-b border-slate-800 flex items-center justify-between">
+                      <span className="text-xs text-slate-500">
+                        {filteredFraud.length} of {fraudRecords.length} records
+                        {fraudLastRefreshed && ` · refreshed ${fraudLastRefreshed.toLocaleTimeString()}`}
+                      </span>
+                      {fraudLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-800 bg-slate-900/50">
+                            {[
+                              { key: "TBOXID", label: "TBOX ID" },
+                              { key: "CUSTOMER_NAME", label: "Customer" },
+                              { key: "BEFORE_YESTERDAY_MAX_BATPERCENT", label: "Before Yesterday" },
+                              { key: "YESTERDAY_FIRST_BATPERCENT", label: "Yesterday" },
+                              { key: "BATPERCENT_DIFFERENCE", label: "Jump" },
+                              { key: "YESTERDAY_FIRST_CTIME", label: "Detected At" },
+                            ].map((col) => (
+                              <th
+                                key={col.key}
+                                onClick={() => handleFraudSort(col.key as SortField)}
+                                className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-200 transition-colors select-none"
+                              >
+                                <div className="flex items-center gap-1">
+                                  {col.label}
+                                  <FraudSortIcon field={col.key as SortField} />
+                                </div>
+                              </th>
+                            ))}
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Severity</th>
+                            <th className="px-4 py-3" />
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/50">
+                          {filteredFraud.map((record, idx) => {
+                            const severity = getSeverity(record.BATPERCENT_DIFFERENCE);
+                            const cfg = severityConfig[severity];
+                            return (
+                              <tr key={`${record.TBOXID}-${idx}`} className="hover:bg-slate-800/30 transition-colors group">
+                                <td className="px-4 py-3">
+                                  <span className="font-mono text-slate-200 text-xs bg-slate-800 px-2 py-1 rounded">
+                                    {record.TBOXID}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="text-slate-200 font-medium text-xs">{record.CUSTOMER_NAME || "—"}</div>
+                                  <div className="text-slate-500 text-xs">{record.CUSTOMER_ID}</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="w-28">
+                                    <BatteryBar pct={record.BEFORE_YESTERDAY_MAX_BATPERCENT} color="bg-slate-500" />
+                                    <div className="text-xs text-slate-500 mt-0.5">
+                                      {formatDateTime(record.BEFORE_YESTERDAY_MAX_CTIME)}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="w-28">
+                                    <BatteryBar pct={record.YESTERDAY_FIRST_BATPERCENT} color={cfg.bar} />
+                                    <div className="text-xs text-slate-500 mt-0.5">
+                                      {formatDateTime(record.YESTERDAY_FIRST_CTIME)}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className={`inline-flex items-center gap-1 font-bold text-sm ${cfg.color}`}>
+                                    <TrendingUp className="w-3.5 h-3.5" />
+                                    +{record.BATPERCENT_DIFFERENCE}%
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-xs text-slate-400">
+                                  <div className="flex items-center gap-1">
+                                    <Calendar className="w-3 h-3" />
+                                    {formatDateTime(record.YESTERDAY_FIRST_CTIME)}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${cfg.badge}`}>
+                                    {cfg.label}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <button
+                                    onClick={() => setSelectedFraudRecord(record)}
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200"
+                                    title="View details"
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+
+                {/* Legend */}
+                <div className="p-4 border-t border-slate-800">
+                  <div className="flex flex-wrap items-center gap-6 text-xs text-slate-500">
+                    <span className="font-semibold text-slate-400">Detection Logic:</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /><b className="text-slate-400">Critical</b> ≥ {THRESHOLD_CRITICAL}% jump</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /><b className="text-slate-400">Warning</b> {THRESHOLD_WARNING}–{THRESHOLD_CRITICAL - 1}%</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-500 inline-block" /><b className="text-slate-400">Suspicious</b> below {THRESHOLD_WARNING}%</span>
+                    <span className="ml-auto">Compares day-before-yesterday max vs yesterday first reading</span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* ════════════════════════════════════════════════════════════════
+            SECTION 2 — BATTERY HISTORY
+        ════════════════════════════════════════════════════════════════ */}
+
+        {/* Section divider */}
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-slate-800" />
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20">
+            <Car className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">Battery History</span>
+          </div>
+          <div className="h-px flex-1 bg-slate-800" />
+        </div>
+
+        {/* Battery History Filters Card */}
+        <Card className="transition-all duration-300">
+          <CardContent className="p-0">
             <button
               onClick={() => setIsFilterExpanded(!isFilterExpanded)}
               className="w-full p-4 flex justify-between items-center hover:bg-slate-800/30 transition-colors"
@@ -306,74 +865,48 @@ export default function BatteryAnalysisPage() {
                 <Filter className="h-4 w-4" />
                 <span className="font-medium">Battery Filters</span>
                 {getActiveFiltersCount() > 0 && (
-                  <Badge variant="secondary">
-                    {getActiveFiltersCount()} active
-                  </Badge>
+                  <Badge variant="secondary">{getActiveFiltersCount()} active</Badge>
                 )}
                 {appliedVehicle && !isFilterExpanded && (
-                  <Badge variant="outline" className="ml-2">
-                    {appliedVehicle.CHASSIS_NUMBER}
-                  </Badge>
+                  <Badge variant="outline" className="ml-2">{appliedVehicle.CHASSIS_NUMBER}</Badge>
                 )}
                 {hasUnappliedChanges() && (
-                  <Badge variant="default" className="ml-2 bg-orange-600">
-                    Unapplied changes
-                  </Badge>
+                  <Badge variant="default" className="ml-2 bg-orange-600">Unapplied changes</Badge>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 {getActiveFiltersCount() > 0 && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleClearFilters();
-                    }}
-                  >
-                    <X className="h-4 w-4 mr-1" />
-                    Clear All
+                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); handleClearFilters(); }}>
+                    <X className="h-4 w-4 mr-1" />Clear All
                   </Button>
                 )}
-                {isFilterExpanded ? (
-                  <ChevronUp className="h-5 w-5 text-slate-400" />
-                ) : (
-                  <ChevronDown className="h-5 w-5 text-slate-400" />
-                )}
+                {isFilterExpanded
+                  ? <ChevronUp className="h-5 w-5 text-slate-400" />
+                  : <ChevronDown className="h-5 w-5 text-slate-400" />
+                }
               </div>
             </button>
 
-            {/* Expandable Filter Content */}
-            <div
-              className={`transition-all duration-300 ease-in-out ${
-                isFilterExpanded ? 'max-h-[600px] opacity-100' : 'max-h-0 opacity-0 overflow-hidden'
-              }`}
-            >
+            <div className={`transition-all duration-300 ease-in-out ${isFilterExpanded ? "max-h-[600px] opacity-100" : "max-h-0 opacity-0 overflow-hidden"}`}>
               <div className="p-4 pt-4 space-y-4 border-t border-slate-700">
-                {/* Main Filter Grid - 3 columns */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {/* Vehicle Selection with Dropdown */}
+
+                  {/* Vehicle dropdown */}
                   <div className="space-y-2 relative" ref={vehicleDropdownRef}>
                     <Label>Select Vehicle</Label>
-                    
-                    {/* Dropdown Button */}
                     <button
                       onClick={() => setIsVehicleDropdownOpen(!isVehicleDropdownOpen)}
                       className="w-full bg-slate-700 border border-slate-600 text-slate-200 px-3 py-2 rounded text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 flex items-center justify-between hover:bg-slate-600 transition-colors"
                     >
                       <span className="truncate">
-                        {selectedVehicle 
-                          ? selectedVehicle.CHASSIS_NUMBER 
-                          : "Click to select vehicle..."}
+                        {selectedVehicle ? selectedVehicle.CHASSIS_NUMBER : "Click to select vehicle..."}
                       </span>
-                      <ChevronDown className={`w-4 h-4 ml-2 transition-transform ${isVehicleDropdownOpen ? 'rotate-180' : ''}`} />
+                      <ChevronDown className={`w-4 h-4 ml-2 transition-transform ${isVehicleDropdownOpen ? "rotate-180" : ""}`} />
                     </button>
 
-                    {/* Dropdown Content */}
                     {isVehicleDropdownOpen && (
                       <div className="absolute top-full left-0 right-0 z-50 mt-2">
                         <div className="bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-80 overflow-hidden">
-                          {/* Search Input */}
                           <div className="p-2 border-b border-slate-700 sticky top-0 bg-slate-800">
                             <div className="relative">
                               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -387,8 +920,6 @@ export default function BatteryAnalysisPage() {
                               />
                             </div>
                           </div>
-
-                          {/* Vehicle List */}
                           <div className="max-h-60 overflow-y-auto p-2">
                             {loadingVehicles ? (
                               <div className="flex items-center justify-center py-4">
@@ -400,16 +931,13 @@ export default function BatteryAnalysisPage() {
                                 <AlertTriangle className="w-8 h-8 text-red-400 mx-auto mb-2" />
                                 <p className="text-sm text-red-400 mb-2">Failed to load vehicles</p>
                                 <p className="text-xs text-slate-500 mb-3">{vehicleLoadError}</p>
-                                <button
-                                  onClick={fetchVehicleList}
-                                  className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1 rounded"
-                                >
+                                <button onClick={fetchVehicleList} className="text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1 rounded">
                                   Retry
                                 </button>
                               </div>
                             ) : filteredVehicles.length === 0 ? (
                               <div className="text-center py-4 text-sm text-slate-400">
-                                {vehicleSearch ? 'No vehicles found' : 'No vehicles available'}
+                                {vehicleSearch ? "No vehicles found" : "No vehicles available"}
                               </div>
                             ) : (
                               <div className="space-y-1">
@@ -419,8 +947,8 @@ export default function BatteryAnalysisPage() {
                                     onClick={() => handleVehicleSelect(vehicle.TBOX_IMEI_NO)}
                                     className={`w-full text-left px-3 py-2 rounded transition-colors ${
                                       tempSelectedVehicle === vehicle.TBOX_IMEI_NO
-                                        ? 'bg-purple-600 text-white'
-                                        : 'hover:bg-slate-700 text-slate-300'
+                                        ? "bg-purple-600 text-white"
+                                        : "hover:bg-slate-700 text-slate-300"
                                     }`}
                                   >
                                     <div className="text-sm font-medium">{vehicle.CHASSIS_NUMBER}</div>
@@ -434,16 +962,12 @@ export default function BatteryAnalysisPage() {
                       </div>
                     )}
 
-                    {/* Selected Vehicle Badge */}
                     {selectedVehicle && (
                       <Badge variant="secondary" className="w-full justify-between mt-2">
                         <span className="truncate">{selectedVehicle.CHASSIS_NUMBER}</span>
                         <X
                           className="h-3 w-3 ml-1 cursor-pointer hover:text-red-400"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleVehicleSelect('');
-                          }}
+                          onClick={(e) => { e.stopPropagation(); handleVehicleSelect(""); }}
                         />
                       </Badge>
                     )}
@@ -475,17 +999,11 @@ export default function BatteryAnalysisPage() {
                   </div>
                 </div>
 
-                {/* Additional Row for Date Info and Apply Button */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-700">
-                  {/* Date Range Summary */}
                   <div className="space-y-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-slate-400">Selected Range:</span>
-                      <span
-                        className={`font-medium ${
-                          daysDifference === 3 ? "text-purple-400" : "text-blue-400"
-                        }`}
-                      >
+                      <span className={`font-medium ${daysDifference === 3 ? "text-purple-400" : "text-blue-400"}`}>
                         {daysDifference} day{daysDifference !== 1 ? "s" : ""}
                       </span>
                     </div>
@@ -495,8 +1013,6 @@ export default function BatteryAnalysisPage() {
                       </div>
                     )}
                   </div>
-
-                  {/* Apply Button */}
                   <div className="flex items-end justify-end">
                     <Button
                       onClick={handleApplyFilters}
@@ -513,35 +1029,27 @@ export default function BatteryAnalysisPage() {
           </CardContent>
         </Card>
 
-        {/* Battery History Component - Only show if vehicle is selected */}
+        {/* Battery History Component */}
         {batteryFilters.selectedVehicleImei ? (
-          <BatteryHistory
-            IMEI={batteryFilters.selectedVehicleImei}
-            filters={batteryFilters}
-          />
+          <BatteryHistory IMEI={batteryFilters.selectedVehicleImei} filters={batteryFilters} />
         ) : (
           <Card className="bg-slate-900/50 border-slate-800">
             <CardContent className="p-12 text-center">
               <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Car className="w-10 h-10 text-slate-600" />
               </div>
-              <h3 className="text-xl font-medium text-slate-300 mb-2">
-                No Vehicle Selected
-              </h3>
+              <h3 className="text-xl font-medium text-slate-300 mb-2">No Vehicle Selected</h3>
               <p className="text-slate-400 mb-6">
                 Please select a vehicle from the filters above and click "Apply Filters" to view its battery history
               </p>
-              <Button
-                variant="outline"
-                onClick={() => setIsFilterExpanded(true)}
-                className="mx-auto"
-              >
+              <Button variant="outline" onClick={() => setIsFilterExpanded(true)} className="mx-auto">
                 <Filter className="h-4 w-4 mr-2" />
                 Open Filters
               </Button>
             </CardContent>
           </Card>
         )}
+
       </div>
     </div>
   );

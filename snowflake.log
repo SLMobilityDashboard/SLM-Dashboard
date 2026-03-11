@@ -61852,3 +61852,70 @@
 {"level":"INFO","message":"[11:46:55.186 AM]: Connection[id: fb8ee56d-136c-4bd9-ae88-fe8afc675d49] - authentication successful using: SNOWFLAKE_JWT"}
 {"level":"INFO","message":"[11:46:55.200 AM]: Connection[id: fb8ee56d-136c-4bd9-ae88-fe8afc675d49] - connected successfully after 62.02180000022054 milliseconds"}
 {"level":"ERROR","message":"[12:05:24.984 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[12:06:44.106 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"INFO","message":"[12:07:48.201 PM]: Creating new connection object"}
+{"level":"INFO","message":"[12:07:48.220 PM]: Creating Connection[id: 23d6d016-a0bc-419c-b65c-ee9cd518981b] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26200"}
+{"level":"INFO","message":"[12:07:48.223 PM]: Connection[id: 23d6d016-a0bc-419c-b65c-ee9cd518981b] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[12:07:48.225 PM]: Connection[id: 23d6d016-a0bc-419c-b65c-ee9cd518981b] - connection object created successfully."}
+{"level":"INFO","message":"[12:07:48.226 PM]: Connection[id: 23d6d016-a0bc-419c-b65c-ee9cd518981b] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[12:07:48.256 PM]: Connection[id: 23d6d016-a0bc-419c-b65c-ee9cd518981b] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[12:07:48.266 PM]: Connection[id: 23d6d016-a0bc-419c-b65c-ee9cd518981b] - connected successfully after 39.97829999960959 milliseconds"}
+{"level":"INFO","message":"[12:08:24.229 PM]: Creating new connection object"}
+{"level":"INFO","message":"[12:08:24.234 PM]: Creating Connection[id: 8a9a7807-d38d-463c-9bd7-4de4c335cfcb] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26200"}
+{"level":"INFO","message":"[12:08:24.235 PM]: Connection[id: 8a9a7807-d38d-463c-9bd7-4de4c335cfcb] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[12:08:24.245 PM]: Connection[id: 8a9a7807-d38d-463c-9bd7-4de4c335cfcb] - connection object created successfully."}
+{"level":"INFO","message":"[12:08:24.247 PM]: Connection[id: 8a9a7807-d38d-463c-9bd7-4de4c335cfcb] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[12:08:24.264 PM]: Connection[id: 8a9a7807-d38d-463c-9bd7-4de4c335cfcb] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[12:08:24.275 PM]: Connection[id: 8a9a7807-d38d-463c-9bd7-4de4c335cfcb] - connected successfully after 28.461200000718236 milliseconds"}
+{"level":"ERROR","message":"[12:09:38.099 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"INFO","message":"[12:15:05.549 PM]: Creating new connection object"}
+{"level":"INFO","message":"[12:15:05.566 PM]: Creating Connection[id: 00411e3c-73ae-49d3-8bb8-331fee8d5478] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26200"}
+{"level":"INFO","message":"[12:15:05.569 PM]: Connection[id: 00411e3c-73ae-49d3-8bb8-331fee8d5478] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[12:15:05.571 PM]: Connection[id: 00411e3c-73ae-49d3-8bb8-331fee8d5478] - connection object created successfully."}
+{"level":"INFO","message":"[12:15:05.574 PM]: Connection[id: 00411e3c-73ae-49d3-8bb8-331fee8d5478] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[12:15:05.617 PM]: Connection[id: 00411e3c-73ae-49d3-8bb8-331fee8d5478] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[12:15:05.627 PM]: Connection[id: 00411e3c-73ae-49d3-8bb8-331fee8d5478] - connected successfully after 53.26249999925494 milliseconds"}
+{"level":"INFO","message":"[12:34:51.866 PM]: Creating new connection object"}
+{"level":"INFO","message":"[12:34:51.874 PM]: Creating Connection[id: cd70b359-6189-46a5-b03c-36a358a2a2f2] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: Safnas, role: NOTIFICATION_ROLE, database: ADHOC, schema: PUBLIC, warehouse: LOG_WH, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26200"}
+{"level":"INFO","message":"[12:34:51.875 PM]: Connection[id: cd70b359-6189-46a5-b03c-36a358a2a2f2] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[12:34:51.876 PM]: Connection[id: cd70b359-6189-46a5-b03c-36a358a2a2f2] - connection object created successfully."}
+{"level":"INFO","message":"[12:34:51.877 PM]: Connection[id: cd70b359-6189-46a5-b03c-36a358a2a2f2] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[12:34:51.889 PM]: Connection[id: cd70b359-6189-46a5-b03c-36a358a2a2f2] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[12:34:51.892 PM]: Connection[id: cd70b359-6189-46a5-b03c-36a358a2a2f2] - connected successfully after 14.521599998697639 milliseconds"}
+{"level":"INFO","message":"[12:40:22.665 PM]: Creating new connection object"}
+{"level":"INFO","message":"[12:40:22.673 PM]: Creating Connection[id: 0596e79a-e702-49a9-87e1-c094f64a2aab] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26200"}
+{"level":"INFO","message":"[12:40:22.674 PM]: Connection[id: 0596e79a-e702-49a9-87e1-c094f64a2aab] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[12:40:22.675 PM]: Connection[id: 0596e79a-e702-49a9-87e1-c094f64a2aab] - connection object created successfully."}
+{"level":"INFO","message":"[12:40:22.676 PM]: Connection[id: 0596e79a-e702-49a9-87e1-c094f64a2aab] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[12:40:22.690 PM]: Connection[id: 0596e79a-e702-49a9-87e1-c094f64a2aab] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[12:40:22.693 PM]: Connection[id: 0596e79a-e702-49a9-87e1-c094f64a2aab] - connected successfully after 16.71089999936521 milliseconds"}
+{"level":"ERROR","message":"[1:05:25.011 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[1:06:44.120 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[1:09:38.101 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[1:34:52.165 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[2:05:25.035 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[2:06:44.123 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[2:09:38.107 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[2:34:52.200 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[3:05:25.035 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[3:06:44.140 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[3:09:38.124 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"ERROR","message":"[3:34:52.183 PM]: Error issuing heartbeat call: Unable to perform operation using terminated connection."}
+{"level":"INFO","message":"[9:40:36.659 AM]: Creating new connection object"}
+{"level":"INFO","message":"[9:40:37.040 AM]: Creating Connection[id: f9c8637f-2b27-4ab6-a2a6-d9b827130b0f] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26200"}
+{"level":"INFO","message":"[9:40:37.042 AM]: Connection[id: f9c8637f-2b27-4ab6-a2a6-d9b827130b0f] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[9:40:37.045 AM]: Connection[id: f9c8637f-2b27-4ab6-a2a6-d9b827130b0f] - connection object created successfully."}
+{"level":"INFO","message":"[9:40:37.048 AM]: Connection[id: f9c8637f-2b27-4ab6-a2a6-d9b827130b0f] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[9:40:37.072 AM]: Connection[id: f9c8637f-2b27-4ab6-a2a6-d9b827130b0f] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[9:40:37.077 AM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[9:40:37.118 AM]: No client config detected."}
+{"level":"INFO","message":"[9:40:37.119 AM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[9:40:37.121 AM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[9:40:37.130 AM]: Connection[id: f9c8637f-2b27-4ab6-a2a6-d9b827130b0f] - connected successfully after 82.46629999997094 milliseconds"}
+{"level":"INFO","message":"[9:43:56.233 AM]: Creating new connection object"}
+{"level":"INFO","message":"[9:43:56.238 AM]: Creating Connection[id: 108559f1-cfa0-45dc-a455-6cd724e60149] with host: BQSPVDD-GP91871.snowflakecomputing.com, account: BQSPVDD-GP91871, accessUrl: https://BQSPVDD-GP91871.snowflakecomputing.com, user: SAFNAS, role: SYSADMIN, database: DB_DUMP, schema: PUBLIC, warehouse: AIDASHBOARD, proxy was not configured, password is not provided, region: undefined, authenticator: SNOWFLAKE_JWT, ocsp mode: FAIL_OPEN, os: win32, os version: 10.0.26200"}
+{"level":"INFO","message":"[9:43:56.239 AM]: Connection[id: 108559f1-cfa0-45dc-a455-6cd724e60149] additional details: passcode in password is provided, passcode is not provided, private key is provided, application: undefined, client name: snowflake-sdk, client version: 2.1.3, retry timeout: 300, private key path: undefined, private key pass is not provided, client store temporary credential: false, browser response timeout: 120000"}
+{"level":"INFO","message":"[9:43:56.239 AM]: Connection[id: 108559f1-cfa0-45dc-a455-6cd724e60149] - connection object created successfully."}
+{"level":"INFO","message":"[9:43:56.240 AM]: Connection[id: 108559f1-cfa0-45dc-a455-6cd724e60149] - connecting. Associated Snowflake domain: GLOBAL"}
+{"level":"INFO","message":"[9:43:56.245 AM]: Connection[id: 108559f1-cfa0-45dc-a455-6cd724e60149] - authentication successful using: SNOWFLAKE_JWT"}
+{"level":"INFO","message":"[9:43:56.249 AM]: Connection[id: 108559f1-cfa0-45dc-a455-6cd724e60149] - connected successfully after 8.90749999997206 milliseconds"}
