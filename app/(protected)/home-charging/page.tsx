@@ -44,9 +44,11 @@ interface VehicleListItem {
 }
 
 interface SuspiciousRecord {
+  REPORT_DATE: string;
   TBOXID: string;
   CUSTOMER_ID: string;
   CUSTOMER_NAME: string;
+  CHASSIS_NUMBER: string;
   YESTERDAY_FIRST_CTIME: string;
   YESTERDAY_FIRST_BATPERCENT: number;
   BEFORE_YESTERDAY_MAX_CTIME: string;
@@ -183,6 +185,18 @@ function DetailModal({
               <p className="text-xs text-slate-500 mb-1">Customer Name</p>
               <p className="text-sm font-medium text-slate-200 truncate">
                 {record.CUSTOMER_NAME || "—"}
+              </p>
+            </div>
+            <div className="bg-slate-800/50 rounded-xl p-3">
+              <p className="text-xs text-slate-500 mb-1">Chassis Number</p>
+              <p className="text-sm font-mono text-slate-200">{record.CHASSIS_NUMBER || "—"}</p>
+            </div>
+            <div className="bg-slate-800/50 rounded-xl p-3">
+              <p className="text-xs text-slate-500 mb-1">Report Date</p>
+              <p className="text-sm font-mono text-slate-200">
+                {record.REPORT_DATE
+                  ? new Date(record.REPORT_DATE).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                  : "—"}
               </p>
             </div>
           </div>
@@ -338,14 +352,15 @@ export default function BatteryAnalysisPage() {
     setFraudError(null);
     const sql = `
       SELECT
-        TBOXID, CUSTOMER_ID, CUSTOMER_NAME,
+        REPORT_DATE, TBOXID, CUSTOMER_ID, CUSTOMER_NAME, CHASSIS_NUMBER,
         YESTERDAY_FIRST_CTIME, YESTERDAY_FIRST_BATPERCENT,
         BEFORE_YESTERDAY_MAX_CTIME, BEFORE_YESTERDAY_MAX_BATPERCENT,
         BATPERCENT_DIFFERENCE
       FROM REPORT_DB.GPS_DASHBOARD.TBOX_BATPERCENT_SUMMARY
       WHERE BATPERCENT_DIFFERENCE >= ${fraudMinThreshold}
-      ORDER BY BATPERCENT_DIFFERENCE DESC
-      LIMIT 500
+        AND REPORT_DATE >= DATEADD(day, -7, CURRENT_DATE())
+      ORDER BY REPORT_DATE DESC, BATPERCENT_DIFFERENCE DESC
+      LIMIT 1000
     `;
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/query`, {
@@ -470,7 +485,8 @@ export default function BatteryAnalysisPage() {
         return (
           r.TBOXID?.toLowerCase().includes(q) ||
           r.CUSTOMER_ID?.toLowerCase().includes(q) ||
-          r.CUSTOMER_NAME?.toLowerCase().includes(q)
+          r.CUSTOMER_NAME?.toLowerCase().includes(q) ||
+          r.CHASSIS_NUMBER?.toLowerCase().includes(q)
         );
       }
       return true;
@@ -487,7 +503,8 @@ export default function BatteryAnalysisPage() {
     critical: fraudRecords.filter((r) => getSeverity(r.BATPERCENT_DIFFERENCE) === "critical").length,
     warning: fraudRecords.filter((r) => getSeverity(r.BATPERCENT_DIFFERENCE) === "warning").length,
     low: fraudRecords.filter((r) => getSeverity(r.BATPERCENT_DIFFERENCE) === "low").length,
-    uniqueCustomers: new Set(fraudRecords.map((r) => r.CUSTOMER_ID)).size,
+    // unique vehicles across all 7 days (same TBOXID can appear on multiple days)
+    uniqueVehicles: new Set(fraudRecords.map((r) => r.TBOXID)).size,
     maxJump: fraudRecords.length > 0 ? Math.max(...fraudRecords.map((r) => r.BATPERCENT_DIFFERENCE)) : 0,
     avgJump: fraudRecords.length > 0
       ? Math.round(fraudRecords.reduce((s, r) => s + r.BATPERCENT_DIFFERENCE, 0) / fraudRecords.length)
@@ -529,6 +546,26 @@ export default function BatteryAnalysisPage() {
   );
   const daysDifference = calculateDaysDifference(tempStartDate, tempEndDate);
 
+  // ── Compute fraud events for the currently selected vehicle ───────────────
+  const selectedVehicleFraudEvents = batteryFilters.selectedVehicleImei
+    ? (() => {
+        const appliedChassis = availableVehicles.find(
+          (v) => v.TBOX_IMEI_NO === batteryFilters.selectedVehicleImei
+        )?.CHASSIS_NUMBER;
+
+        if (!appliedChassis) return [];
+
+        return fraudRecords
+          .filter((r) => r.CHASSIS_NUMBER === appliedChassis)
+          .map((r) => ({
+            timestamp: r.YESTERDAY_FIRST_CTIME,
+            beforePct: r.BEFORE_YESTERDAY_MAX_BATPERCENT,
+            afterPct: r.YESTERDAY_FIRST_BATPERCENT,
+            diff: r.BATPERCENT_DIFFERENCE,
+          }));
+      })()
+    : [];
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -553,27 +590,13 @@ export default function BatteryAnalysisPage() {
           </p>
         </div>
 
-        {/* ════════════════════════════════════════════════════════════════
-            SECTION 1 — ILLEGAL CHARGING DETECTION
-        ════════════════════════════════════════════════════════════════ */}
-
-        {/* Section divider */}
-        <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-slate-800" />
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20">
-            <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-            <span className="text-xs font-semibold text-red-400 uppercase tracking-wider">Fraud Detection</span>
-          </div>
-          <div className="h-px flex-1 bg-slate-800" />
-        </div>
-
         {/* Fraud Stats */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           {[
             { label: "Critical", value: fraudStats.critical, icon: <AlertTriangle className="w-4 h-4" />, color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", filter: "critical" as const },
             { label: "Warning", value: fraudStats.warning, icon: <Zap className="w-4 h-4" />, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20", filter: "warning" as const },
             { label: "Suspicious", value: fraudStats.low, icon: <Shield className="w-4 h-4" />, color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/20", filter: "low" as const },
-            { label: "Customers", value: fraudStats.uniqueCustomers, icon: <Users className="w-4 h-4" />, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20", filter: null },
+            { label: "Vehicles", value: fraudStats.uniqueVehicles, icon: <Car className="w-4 h-4" />, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20", filter: null },
             { label: "Max Jump", value: `+${fraudStats.maxJump}%`, icon: <TrendingUp className="w-4 h-4" />, color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20", filter: null },
             { label: "Avg Jump", value: `+${fraudStats.avgJump}%`, icon: <Activity className="w-4 h-4" />, color: "text-teal-400", bg: "bg-teal-500/10", border: "border-teal-500/20", filter: null },
           ].map((s, i) => (
@@ -597,7 +620,6 @@ export default function BatteryAnalysisPage() {
         {/* Fraud Collapsible Section */}
         <Card className="transition-all duration-300">
           <CardContent className="p-0">
-            {/* Section toggle header */}
             <button
               onClick={() => setIsFraudSectionExpanded(!isFraudSectionExpanded)}
               className="w-full p-4 flex justify-between items-center hover:bg-slate-800/30 transition-colors"
@@ -641,14 +663,13 @@ export default function BatteryAnalysisPage() {
                 {/* Fraud Filters Bar */}
                 <div className="p-4 border-b border-slate-800">
                   <div className="flex flex-wrap items-end gap-4">
-                    {/* Search */}
                     <div className="flex-1 min-w-48 space-y-1">
                       <Label className="text-xs">Search</Label>
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                         <input
                           type="text"
-                          placeholder="TBOX ID, Customer ID or Name…"
+                          placeholder="TBOX ID, Chassis, Customer ID or Name…"
                           value={fraudSearch}
                           onChange={(e) => setFraudSearch(e.target.value)}
                           className="w-full bg-slate-700 border border-slate-600 text-slate-200 pl-9 pr-3 py-2 rounded text-sm focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
@@ -661,7 +682,6 @@ export default function BatteryAnalysisPage() {
                       </div>
                     </div>
 
-                    {/* Min threshold */}
                     <div className="space-y-1 w-44">
                       <Label className="text-xs">Min. Battery Jump (%)</Label>
                       <input
@@ -673,7 +693,6 @@ export default function BatteryAnalysisPage() {
                       />
                     </div>
 
-                    {/* Severity pills */}
                     <div className="space-y-1">
                       <Label className="text-xs">Severity</Label>
                       <div className="flex items-center gap-2">
@@ -693,7 +712,6 @@ export default function BatteryAnalysisPage() {
                       </div>
                     </div>
 
-                    {/* Export */}
                     <div className="flex gap-2 ml-auto">
                       <Button variant="outline" size="sm" onClick={exportFraudCSV} disabled={!filteredFraud.length} className="border-slate-600">
                         <Download className="w-4 h-4 mr-1.5" />
@@ -736,12 +754,13 @@ export default function BatteryAnalysisPage() {
                         <thead>
                           <tr className="border-b border-slate-800 bg-slate-900/50">
                             {[
+                              { key: "REPORT_DATE", label: "Date" },
                               { key: "TBOXID", label: "TBOX ID" },
+                              { key: "CHASSIS_NUMBER", label: "Chassis" },
                               { key: "CUSTOMER_NAME", label: "Customer" },
                               { key: "BEFORE_YESTERDAY_MAX_BATPERCENT", label: "Before Yesterday" },
                               { key: "YESTERDAY_FIRST_BATPERCENT", label: "Yesterday" },
                               { key: "BATPERCENT_DIFFERENCE", label: "Jump" },
-                              { key: "YESTERDAY_FIRST_CTIME", label: "Detected At" },
                             ].map((col) => (
                               <th
                                 key={col.key}
@@ -763,12 +782,29 @@ export default function BatteryAnalysisPage() {
                             const severity = getSeverity(record.BATPERCENT_DIFFERENCE);
                             const cfg = severityConfig[severity];
                             return (
-                              <tr key={`${record.TBOXID}-${idx}`} className="hover:bg-slate-800/30 transition-colors group">
+                              <tr key={`${record.TBOXID}-${record.REPORT_DATE}-${idx}`} className="hover:bg-slate-800/30 transition-colors group">
+                                {/* Report Date */}
+                                <td className="px-4 py-3 text-xs text-slate-300 whitespace-nowrap">
+                                  <div className="flex items-center gap-1">
+                                    <Calendar className="w-3 h-3 text-slate-500" />
+                                    {record.REPORT_DATE
+                                      ? new Date(record.REPORT_DATE).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+                                      : "—"}
+                                  </div>
+                                </td>
+                                {/* TBOX ID */}
                                 <td className="px-4 py-3">
                                   <span className="font-mono text-slate-200 text-xs bg-slate-800 px-2 py-1 rounded">
                                     {record.TBOXID}
                                   </span>
                                 </td>
+                                {/* Chassis */}
+                                <td className="px-4 py-3">
+                                  <span className="font-mono text-slate-300 text-xs">
+                                    {record.CHASSIS_NUMBER || "—"}
+                                  </span>
+                                </td>
+                                {/* Customer */}
                                 <td className="px-4 py-3">
                                   <div className="text-slate-200 font-medium text-xs">{record.CUSTOMER_NAME || "—"}</div>
                                   <div className="text-slate-500 text-xs">{record.CUSTOMER_ID}</div>
@@ -793,12 +829,6 @@ export default function BatteryAnalysisPage() {
                                   <div className={`inline-flex items-center gap-1 font-bold text-sm ${cfg.color}`}>
                                     <TrendingUp className="w-3.5 h-3.5" />
                                     +{record.BATPERCENT_DIFFERENCE}%
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-xs text-slate-400">
-                                  <div className="flex items-center gap-1">
-                                    <Calendar className="w-3 h-3" />
-                                    {formatDateTime(record.YESTERDAY_FIRST_CTIME)}
                                   </div>
                                 </td>
                                 <td className="px-4 py-3">
@@ -831,7 +861,7 @@ export default function BatteryAnalysisPage() {
                     <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /><b className="text-slate-400">Critical</b> ≥ {THRESHOLD_CRITICAL}% jump</span>
                     <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /><b className="text-slate-400">Warning</b> {THRESHOLD_WARNING}–{THRESHOLD_CRITICAL - 1}%</span>
                     <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-500 inline-block" /><b className="text-slate-400">Suspicious</b> below {THRESHOLD_WARNING}%</span>
-                    <span className="ml-auto">Compares day-before-yesterday max vs yesterday first reading</span>
+                    <span className="ml-auto">Last 7 days · Compares day-before-yesterday max vs yesterday first reading</span>
                   </div>
                 </div>
 
@@ -839,20 +869,6 @@ export default function BatteryAnalysisPage() {
             </div>
           </CardContent>
         </Card>
-
-        {/* ════════════════════════════════════════════════════════════════
-            SECTION 2 — BATTERY HISTORY
-        ════════════════════════════════════════════════════════════════ */}
-
-        {/* Section divider */}
-        <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-slate-800" />
-          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20">
-            <Car className="w-3.5 h-3.5 text-cyan-400" />
-            <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">Battery History</span>
-          </div>
-          <div className="h-px flex-1 bg-slate-800" />
-        </div>
 
         {/* Battery History Filters Card */}
         <Card className="transition-all duration-300">
@@ -1029,9 +1045,14 @@ export default function BatteryAnalysisPage() {
           </CardContent>
         </Card>
 
-        {/* Battery History Component */}
+        {/* ── Battery History Component ──────────────────────────────────── */}
         {batteryFilters.selectedVehicleImei ? (
-          <BatteryHistory IMEI={batteryFilters.selectedVehicleImei} filters={batteryFilters} />
+          // ✅ THE FIX: illegalChargeEvents now passed so BatteryHistory can highlight fraud regions
+          <BatteryHistory
+            IMEI={batteryFilters.selectedVehicleImei}
+            filters={batteryFilters}
+            illegalChargeEvents={selectedVehicleFraudEvents}
+          />
         ) : (
           <Card className="bg-slate-900/50 border-slate-800">
             <CardContent className="p-12 text-center">

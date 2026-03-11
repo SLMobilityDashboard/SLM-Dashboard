@@ -8,6 +8,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  ReferenceArea,
   AreaChart,
   Area,
   ComposedChart,
@@ -25,6 +26,8 @@ import {
   Target,
   FileText,
   Loader2,
+  ShieldAlert,
+  TrendingUp,
 } from "lucide-react";
 
 // Import the optimized hook and types
@@ -42,9 +45,18 @@ interface ProcessedDataPoint extends TboxData {
   swapTransition?: boolean;
 }
 
+// ─── Illegal charge event type (passed in from parent) ───────────────────────
+export interface IllegalChargeEvent {
+  timestamp: string;
+  beforePct: number;
+  afterPct: number;
+  diff: number;
+}
+
 interface BatteryHistoryProps {
   IMEI: string;
   filters: BatteryFilters;
+  illegalChargeEvents?: IllegalChargeEvent[];
 }
 
 // Helper function to safely convert values to numbers
@@ -53,6 +65,24 @@ const safeNumber = (value: any, defaultValue: number = 0): number => {
   const num = Number(value);
   return isNaN(num) ? defaultValue : num;
 };
+
+// Convert event timestamp → Unix epoch seconds
+const toEpochSec = (ts: string): number => {
+  if (!ts) return 0;
+  const n = Number(ts);
+  if (!isNaN(n) && n > 1_000_000_000) return n;
+  return Math.floor(new Date(ts).getTime() / 1000);
+};
+
+// Severity colour lookup
+const getFraudColor = (diff: number) => {
+  if (diff >= 30) return { stroke: "#ef4444", fill: "#ef444418" };
+  if (diff >= 15) return { stroke: "#f59e0b", fill: "#f59e0b18" };
+  return { stroke: "#38bdf8", fill: "#38bdf818" };
+};
+
+const getFraudLabel = (diff: number) =>
+  diff >= 30 ? "Critical" : diff >= 15 ? "Warning" : "Suspicious";
 
 // Function to create continuous data with smooth battery swap transitions
 const createContinuousData = (data: TboxData[]): ProcessedDataPoint[] => {
@@ -204,7 +234,11 @@ const ScooterTooltip: React.FC<any> = ({ active, payload, label }) => {
   return null;
 };
 
-const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
+const BatteryHistory: React.FC<BatteryHistoryProps> = ({
+  IMEI,
+  filters,
+  illegalChargeEvents = [],
+}) => {
   // Use the optimized hook
   const {
     batteryData,
@@ -268,6 +302,42 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
   }, [processedData]);
 
   const uniqueBMSIds = [...new Set(batteryData.map((d) => d.BMS_ID))];
+
+  // ── THE FIX: snap each fraud event's timestamp to the nearest real CTIME
+  // in the dataset. Recharts ReferenceArea/ReferenceLine on a numeric X axis
+  // only renders when x / x1 / x2 fall within the actual data domain — if the
+  // fraud timestamp doesn't land on an existing data point it is silently
+  // skipped. Snapping guarantees the marker always renders.
+  const fraudEpochs = useMemo(() => {
+    if (!illegalChargeEvents.length || !processedData.length) return [];
+
+    const ctimes = processedData.map((d) => safeNumber(d.CTIME));
+    const dataMin = Math.min(...ctimes);
+    const dataMax = Math.max(...ctimes);
+
+    return illegalChargeEvents.map((e) => {
+      const epochSec = toEpochSec(e.timestamp);
+
+      // Find the closest real CTIME to the fraud event timestamp
+      const snappedCtime = ctimes.reduce((prev, curr) =>
+        Math.abs(curr - epochSec) < Math.abs(prev - epochSec) ? curr : prev
+      );
+
+      console.log(
+        "[FraudMarker] ts:", e.timestamp,
+        "→ epochSec:", epochSec,
+        "→ snappedCtime:", snappedCtime,
+        "| dataRange:", dataMin, "–", dataMax,
+        "| inRange:", epochSec >= dataMin && epochSec <= dataMax
+      );
+
+      return { ...e, epochSec, snappedCtime };
+    });
+  }, [illegalChargeEvents, processedData]);
+
+  console.log("CTIME sample:", processedData[0]?.CTIME, processedData[1]?.CTIME);
+  console.log("illegalChargeEvents raw:", illegalChargeEvents);
+  console.log("fraudEpochs computed:", fraudEpochs);
 
   // Loading state
   if (loading) {
@@ -438,12 +508,60 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
         </div>
       )}
 
+      {/* Illegal charge warning banner */}
+      {fraudEpochs.length > 0 && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-300 mb-2">
+                {fraudEpochs.length} Illegal Charge Event{fraudEpochs.length > 1 ? "s" : ""} Detected for This Vehicle
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {fraudEpochs.map((e, i) => {
+                  const { stroke } = getFraudColor(e.diff);
+                  return (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 text-xs text-slate-300 bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700"
+                    >
+                      <TrendingUp className="w-3 h-3" style={{ color: stroke }} />
+                      <span style={{ color: stroke }} className="font-bold">+{e.diff}%</span>
+                      <span className="text-slate-400">{e.beforePct}% → {e.afterPct}%</span>
+                      <span className="text-slate-500">·</span>
+                      <span className="text-slate-400">
+                        {new Date(e.epochSec * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                      </span>
+                      <span
+                        className="px-1.5 py-0.5 rounded text-xs font-medium"
+                        style={{ background: stroke + "22", color: stroke, border: `1px solid ${stroke}55` }}
+                      >
+                        {getFraudLabel(e.diff)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Battery Usage Timeline */}
       <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
-          <Activity className="w-5 h-5 text-purple-400" />
-          Battery Usage Timeline
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+            <Activity className="w-5 h-5 text-purple-400" />
+            Battery Usage Timeline
+          </h3>
+
+          {fraudEpochs.length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-lg">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              {fraudEpochs.length} illegal charge{fraudEpochs.length > 1 ? "s" : ""} marked
+            </div>
+          )}
+        </div>
 
         {/* BMS Legend */}
         <div className="flex flex-wrap gap-3 mb-4 p-3 bg-slate-800/50 rounded-lg">
@@ -456,6 +574,15 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
               <span className="text-sm text-slate-300 font-mono">{bmsId}</span>
             </div>
           ))}
+          {fraudEpochs.length > 0 && (
+            <>
+              <div className="w-px h-5 bg-slate-600 mx-1" />
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-3 rounded-sm bg-red-500/25 border border-red-500/60" />
+                <span className="text-sm text-red-400">Illegal Charge</span>
+              </div>
+            </>
+          )}
         </div>
 
         <ResponsiveContainer width="100%" height={400}>
@@ -496,6 +623,22 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
               }}
             />
             <Tooltip content={<ScooterTooltip />} />
+
+            {/* Shaded ±4h band — centred on snappedCtime so it always renders */}
+            {fraudEpochs.map((e, i) => {
+              const { fill } = getFraudColor(e.diff);
+              const WINDOW = 3600 * 4;
+              return (
+                <ReferenceArea
+                  key={`fraud-area-${i}`}
+                  yAxisId="percent"
+                  x1={e.snappedCtime - WINDOW}
+                  x2={e.snappedCtime + WINDOW}
+                  fill={fill}
+                  strokeOpacity={0}
+                />
+              );
+            })}
 
             <Area
               yAxisId="percent"
@@ -541,6 +684,7 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
               <ReferenceLine
                 key={idx}
                 x={safeNumber(swap.TIMESTAMP)}
+                yAxisId="percent"
                 stroke="#a855f7"
                 strokeDasharray="2 2"
                 strokeWidth={2}
@@ -552,6 +696,28 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
                 }}
               />
             ))}
+
+            {/* Vertical dashed line — uses snappedCtime to guarantee render */}
+            {fraudEpochs.map((e, i) => {
+              const { stroke } = getFraudColor(e.diff);
+              return (
+                <ReferenceLine
+                  key={`fraud-line-${i}`}
+                  x={e.snappedCtime}
+                  yAxisId="percent"
+                  stroke={stroke}
+                  strokeWidth={2}
+                  strokeDasharray="4 3"
+                  label={{
+                    value: `⚠ +${e.diff}%`,
+                    position: "insideTopRight",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    fill: stroke,
+                  }}
+                />
+              );
+            })}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -636,6 +802,22 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
                   opacity={0.5}
                 />
               ))}
+
+              {/* Fraud markers on temp chart — snappedCtime */}
+              {fraudEpochs.map((e, i) => {
+                const { stroke } = getFraudColor(e.diff);
+                return (
+                  <ReferenceLine
+                    key={`fraud-temp-${i}`}
+                    x={e.snappedCtime}
+                    stroke={stroke}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                    opacity={0.8}
+                    label={{ value: "⚠", position: "top", fontSize: 10, fill: stroke }}
+                  />
+                );
+              })}
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -719,10 +901,26 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
                   opacity={0.5}
                 />
               ))}
+
+              {/* Fraud markers on voltage chart — snappedCtime */}
+              {fraudEpochs.map((e, i) => {
+                const { stroke } = getFraudColor(e.diff);
+                return (
+                  <ReferenceLine
+                    key={`fraud-volt-${i}`}
+                    x={e.snappedCtime}
+                    stroke={stroke}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                    opacity={0.8}
+                    label={{ value: "⚠", position: "top", fontSize: 10, fill: stroke }}
+                  />
+                );
+              })}
             </AreaChart>
           </ResponsiveContainer>
         </div>
-       </div>
+      </div>
 
       {/* Footer Status */}
       <div className="text-center text-slate-500 text-sm py-4 border-t border-slate-800">
@@ -751,6 +949,15 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
                 }`}
               >
                 {diagnostics.overallHealth.toUpperCase()}
+              </span>
+            </>
+          )}
+          {fraudEpochs.length > 0 && (
+            <>
+              <span>•</span>
+              <span className="px-2 py-1 rounded bg-red-900/50 text-red-400 flex items-center gap-1">
+                <ShieldAlert className="w-3 h-3" />
+                {fraudEpochs.length} Illegal Charge{fraudEpochs.length > 1 ? "s" : ""}
               </span>
             </>
           )}
