@@ -124,9 +124,16 @@ function CustomerRow({
 
           {/* Right: stats */}
           <div className="flex flex-col items-end gap-1.5 shrink-0">
-            <Badge className={cn("text-[11px]", SEGMENT_BG[c.segment])}>
-              {c.segment}
-            </Badge>
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              <Badge className={cn("text-[11px]", SEGMENT_BG[c.segment])}>
+                {c.segment}
+              </Badge>
+              {c.dayPattern && (
+                <Badge variant="outline" className="text-[11px] font-normal">
+                  {c.dayPattern}
+                </Badge>
+              )}
+            </div>
 
             <div className="flex flex-wrap justify-end items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
               <Tooltip>

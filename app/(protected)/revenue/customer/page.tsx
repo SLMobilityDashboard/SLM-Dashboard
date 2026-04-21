@@ -12,18 +12,16 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RefreshCw } from "lucide-react";
 
-import { SwapMetrics } from "@/components/swap/swap-metrics";
-import { SwapTrendChart } from "@/components/swap/swap-trend-chart";
+import { SwapMetrics }       from "@/components/swap/swap-metrics";
+import { SwapDowChart }      from "@/components/swap/swap-dow-chart";   // ← replaces SwapTrendChart
 import { SwapCustomerTable } from "@/components/swap/swap-customer-table";
-import { SwapSegmentChart } from "@/components/swap/swap-segment-chart";
-import { SwapScatterChart } from "@/components/swap/swap-scatter-chart"; // 👈 new
+import { SwapSegmentChart }  from "@/components/swap/swap-segment-chart";
+import { SwapSegmentChart as SwapBeeswarmMatrix } from "@/components/swap/swap-scatter-chart";
 import { SwapFilters, type SwapFilters as SwapFiltersType } from "@/components/swap/swap-filters";
 
 import { useSwapAnalytics } from "@/hooks/useSwapAnalytics";
 
-// ---------------------------------------------------------------------------
-// Skeleton helpers
-// ---------------------------------------------------------------------------
+// ─── Skeleton helpers ─────────────────────────────────────────────────────────
 
 function MetricCardSkeleton() {
   return (
@@ -39,22 +37,70 @@ function MetricCardSkeleton() {
   );
 }
 
-function ChartSkeleton({ className }: { className?: string }) {
+function DowSkeleton() {
   return (
-    <Card className={className}>
+    <Card>
       <CardHeader className="space-y-1">
-        <Skeleton className="h-5 w-44" />
-        <Skeleton className="h-3 w-64" />
+        <Skeleton className="h-5 w-52" />
+        <Skeleton className="h-3 w-72" />
       </CardHeader>
-      <CardContent>
-        <div className="flex items-end gap-1 h-[220px] pt-4">
-          {Array.from({ length: 12 }).map((_, i) => (
+      <CardContent className="space-y-4">
+        {/* Fleet bar chart skeleton */}
+        <div className="flex items-end gap-2 h-[180px]">
+          {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((d) => (
             <Skeleton
-              key={i}
+              key={d}
               className="flex-1 rounded-sm"
-              style={{ height: `${30 + Math.round(Math.random() * 60)}%` }}
+              style={{ height: `${40 + Math.random() * 50}%` }}
             />
           ))}
+        </div>
+        {/* Filter pills skeleton */}
+        <div className="flex gap-2">
+          {[80, 110, 120, 90, 80].map((w, i) => (
+            <Skeleton key={i} className="h-7 rounded-full" style={{ width: w }} />
+          ))}
+        </div>
+        {/* Table skeleton */}
+        <div className="rounded-lg border overflow-hidden">
+          <div className="flex gap-3 p-3 border-b bg-muted/40">
+            {[130, 110, 60, 60, 110, 45, 45, 45, 45, 45, 45, 45].map((w, i) => (
+              <Skeleton key={i} className="h-3" style={{ width: w }} />
+            ))}
+          </div>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="flex gap-3 p-3 border-b last:border-0 items-center">
+              <Skeleton className="h-4 w-[130px]" />
+              <Skeleton className="h-5 w-[110px] rounded-full" />
+              <Skeleton className="h-4 w-[60px]" />
+              <Skeleton className="h-4 w-[60px]" />
+              <Skeleton className="h-4 w-[110px]" />
+              {Array.from({ length: 7 }).map((_, j) => (
+                <Skeleton key={j} className="h-6 w-[45px]" />
+              ))}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BeeswarmSkeleton() {
+  return (
+    <Card className="col-span-2">
+      <CardHeader className="space-y-1">
+        <Skeleton className="h-5 w-52" />
+        <Skeleton className="h-3 w-80" />
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 280px" }}>
+          <Skeleton className="h-[400px] w-full rounded-lg" />
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-[180px] w-full rounded-lg" />
+            <Skeleton className="h-[180px] w-full rounded-lg" />
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -112,29 +158,31 @@ function TableSkeleton() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function SwapAnalyticsPage() {
   const [filters, setFilters] = useState<SwapFiltersType>({
-    search: "",
-    segment: "all",
-    sortBy: "score",
+    search:            "",
+    segment:           "all",
+    sortBy:            "score",
     selectedProvinces: [],
     selectedDistricts: [],
-    selectedAreas: [],
-    selectedStations: [],
+    selectedAreas:     [],
+    selectedStations:  [],
     dateRange: {
       from: new Date(new Date().setFullYear(new Date().getFullYear() - 1)),
-      to: new Date(),
+      to:   new Date(),
     },
   });
 
+  const [chartFilterIds, setChartFilterIds] = useState<string[] | null>(null);
+
   const { customers, kpi, loading, error, refetch } = useSwapAnalytics(filters);
 
+  // ── Table filtering ────────────────────────────────────────────────────────
   const filteredCustomers = useMemo(() => {
     let list = [...customers];
+
     if (filters.search) {
       const q = filters.search.toLowerCase();
       list = list.filter(
@@ -143,15 +191,27 @@ export default function SwapAnalyticsPage() {
           c.customerId.toLowerCase().includes(q)
       );
     }
+
     if (filters.segment !== "all") {
       list = list.filter((c) => c.segment === filters.segment);
     }
+
+    if (chartFilterIds !== null) {
+      const idSet = new Set(chartFilterIds);
+      list = list.filter((c) => idSet.has(c.customerId));
+    }
+
     return list;
-  }, [customers, filters.search, filters.segment]);
+  }, [customers, filters.search, filters.segment, chartFilterIds]);
 
   const handleFiltersChange = (newFilters: SwapFiltersType) => {
     if (JSON.stringify(newFilters) === JSON.stringify(filters)) return;
+    setChartFilterIds(null);
     setFilters(newFilters);
+  };
+
+  const handleChartFilter = (ids: string[] | null) => {
+    setChartFilterIds(ids);
   };
 
   const isDateRangeSet =
@@ -170,7 +230,7 @@ export default function SwapAnalyticsPage() {
             Customer swap analytics
           </h2>
           <p className="text-muted-foreground">
-            Historical behavioral scoring — volume · trend · consistency · stability
+            Behavioral scoring — volume · trend · consistency · stability · day pattern
           </p>
         </div>
         {isDateRangeSet && (
@@ -190,7 +250,7 @@ export default function SwapAnalyticsPage() {
       {/* Filters */}
       <SwapFilters onFiltersChange={handleFiltersChange} />
 
-      {/* Error */}
+      {/* Error banner */}
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           Failed to load data: {error}
@@ -199,7 +259,7 @@ export default function SwapAnalyticsPage() {
 
       {isDateRangeSet && (
         <>
-          {/* KPI metric cards */}
+          {/* KPI cards */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             {isInitialLoad ? (
               <>
@@ -217,45 +277,50 @@ export default function SwapAnalyticsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             {isInitialLoad ? (
               <>
-                <ChartSkeleton className="col-span-2" />
-                <ChartSkeleton />
+                <BeeswarmSkeleton />
+                <DowSkeleton />
                 <DonutSkeleton />
               </>
             ) : (
               <>
-                {/* 1. Scatter plot — full width */}
+                {/* ── 1. Beeswarm + action matrix — full width ─────────── */}
                 <Card className="col-span-2">
                   <CardHeader>
                     <CardTitle>Customer segment map</CardTitle>
                     <CardDescription>
-                      Health score vs swap trend — dot size = total swaps. Click legend to filter segments.
+                      Grouped by segment · Y = health score · colour = trend direction ·
+                      size = total swaps. Click a dot or action quadrant to filter the
+                      table below.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <SwapScatterChart
+                    <SwapBeeswarmMatrix
                       customers={customers}
                       loading={loading}
+                      onFilter={handleChartFilter}
                     />
                   </CardContent>
                 </Card>
 
-                {/* 2. Monthly trend chart */}
+                {/* ── 2. Day-of-week pattern — replaces monthly trend ───── */}
                 <Card>
                   <CardHeader>
-                    <CardTitle>Monthly swap volume</CardTitle>
+                    <CardTitle>Weekday vs weekend swap patterns</CardTitle>
                     <CardDescription>
-                      Fleet total with 3-month rolling average
+                      Fleet swap volume by day · per-customer pattern classification ·
+                      filter by Fleet operator, Weekend warrior, Balanced, or Sporadic
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <SwapTrendChart
-                      fleetMonthly={kpi?.fleetMonthly}
+                    <SwapDowChart
+                      customers={customers}
+                      dowFleet={kpi?.dowFleet}
                       loading={loading}
                     />
                   </CardContent>
                 </Card>
 
-                {/* 3. Segment donut */}
+                {/* ── 3. Segment donut ─────────────────────────────────── */}
                 <Card>
                   <CardHeader>
                     <CardTitle>Segment breakdown</CardTitle>
@@ -266,6 +331,7 @@ export default function SwapAnalyticsPage() {
                   <CardContent>
                     <SwapSegmentChart
                       segmentCounts={kpi?.segmentCounts}
+                      dayPatternCounts={kpi?.dayPatternCounts}
                       loading={loading}
                     />
                   </CardContent>
@@ -274,19 +340,44 @@ export default function SwapAnalyticsPage() {
             )}
           </div>
 
-          {/* Customer table */}
+          {/* ── Customer table ─────────────────────────────────────────── */}
           {isInitialLoad ? (
             <TableSkeleton />
           ) : (
             <Card>
               <CardHeader>
-                <CardTitle>Customer swap intelligence</CardTitle>
-                <CardDescription>
-                  Scored 0–100 per customer from{" "}
-                  <code className="text-xs">DB_DUMP.PUBLIC.SWAP_OVERALL</code>.
-                  Score = volume (30) + trend (25) + consistency (25) + stability (20).
-                  Trend compares last 3 months vs first 3 months of the selected period.
-                </CardDescription>
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <CardTitle>Customer swap intelligence</CardTitle>
+                    <CardDescription className="mt-1">
+                      Scored 0–100 from{" "}
+                      <code className="text-xs">DB_DUMP.PUBLIC.SWAP_OVERALL</code>.
+                      Score = volume (30 pts) + trend (25 pts) + consistency (25 pts) +
+                      stability (20 pts). Trend uses weighted regression over all active
+                      months — recent months weighted 2×.
+                    </CardDescription>
+                  </div>
+
+                  {chartFilterIds !== null && (
+                    <div className="flex items-center gap-2 text-sm shrink-0">
+                      <span className="text-muted-foreground">
+                        Showing{" "}
+                        <span className="font-medium text-foreground">
+                          {filteredCustomers.length}
+                        </span>{" "}
+                        of {customers.length} customers
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={() => setChartFilterIds(null)}
+                      >
+                        ✕ Clear chart filter
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </CardHeader>
               <CardContent>
                 <SwapCustomerTable
