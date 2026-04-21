@@ -217,7 +217,7 @@ export default function CoverageAreaDashboard() {
 
     try {
       const response = await fetch(
-        "http://127.0.0.1:8000/coverage-area-optimized",
+        `${process.env.NEXT_PUBLIC_FAST_API_URL}/coverage-area-optimized`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

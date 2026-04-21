@@ -307,7 +307,7 @@ export default function LandingPage() {
               <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 rounded-3xl blur-3xl" />
               <Card className="relative h-full bg-gradient-to-br from-gray-900/50 to-black/50 border-white/10 backdrop-blur-sm">
                 <CardContent className="p-0 h-full">
-                  <ScooterModel3D />
+                  {/* <ScooterModel3D /> */}
                 </CardContent>
               </Card>
             </div>

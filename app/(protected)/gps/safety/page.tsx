@@ -58,7 +58,7 @@ const fetchFleetProximityAlerts = async (scooterIds) => {
       last_update: new Date().toISOString(),
     }));
 
-    const response = await fetch("http://127.0.0.1:8000/single-scooter-alert", {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_FAST_API_URL}/ev-route-plan`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -107,7 +107,7 @@ const fetchScooterSafetyData = async (scooterId) => {
     };
 
     // Call your proximity alert API
-    const response = await fetch("http://127.0.0.1:8000/single-scooter-alert", {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_FAST_API_URL}/ev-route-plan`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
