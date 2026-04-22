@@ -73,28 +73,32 @@ declare module "next-auth/jwt" {
 }
 
 // types/next-auth.d.ts
-import { DefaultSession } from "next-auth";
-import { Role } from "@/lib/auth/role-mappings";
+import NextAuth, { DefaultSession } from "next-auth";
+import { JWT } from "next-auth/jwt";
 
 declare module "next-auth" {
   interface Session {
+    accessToken?:        string;
+    cognitoAccessToken?: string; // ✅ NEW — explicitly typed
     user: {
-      name?: string | null;
-      email?: string | null;
-      image?: string | null;
-      roles: string[];
-      username?: string;
-      givenName?: string;
-      middleName?: string;
+      roles:      string[];
+      username:   string;
+      givenName:  string;
+      middleName: string;
     } & DefaultSession["user"];
-    accessToken?: string;
   }
+}
 
-  interface User {
-    roles?: string[];
-    username?: string;
-    givenName?: string;
-    middleName?: string;
+declare module "next-auth/jwt" {
+  interface JWT {
+    accessToken?:        string;
+    cognitoAccessToken?: string; // ✅ NEW
+    refreshToken?:       string; // ✅ NEW
+    cognitoTokenExpiry?: number; // ✅ NEW — epoch seconds
+    username?:           string;
+    givenName?:          string;
+    middleName?:         string;
+    roles?:              string[];
   }
 }
 

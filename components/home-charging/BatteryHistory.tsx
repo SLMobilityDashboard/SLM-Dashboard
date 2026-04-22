@@ -1,6 +1,5 @@
 import React, { useMemo } from "react";
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,
@@ -8,6 +7,7 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
+  ReferenceArea,
   AreaChart,
   Area,
   ComposedChart,
@@ -19,15 +19,13 @@ import {
   AlertTriangle,
   XCircle,
   Activity,
-  Gauge,
   RefreshCw,
-  ArrowUpDown,
   Target,
-  FileText,
   Loader2,
+  ShieldAlert,
+  TrendingUp,
 } from "lucide-react";
 
-// Import the optimized hook and types
 import useBatteryData, {
   TboxData,
   BatteryFilters,
@@ -42,19 +40,46 @@ interface ProcessedDataPoint extends TboxData {
   swapTransition?: boolean;
 }
 
+// ─── Illegal charge event type (passed in from parent) ───────────────────────
+export interface IllegalChargeEvent {
+  timestamp: string;
+  beforePct: number;
+  afterPct: number;
+  diff: number;
+}
+
 interface BatteryHistoryProps {
   IMEI: string;
   filters: BatteryFilters;
+  illegalChargeEvents?: IllegalChargeEvent[];
 }
 
-// Helper function to safely convert values to numbers
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 const safeNumber = (value: any, defaultValue: number = 0): number => {
   if (value === null || value === undefined) return defaultValue;
   const num = Number(value);
   return isNaN(num) ? defaultValue : num;
 };
 
-// Function to create continuous data with smooth battery swap transitions
+const toEpochSec = (ts: string): number => {
+  if (!ts) return 0;
+  const n = Number(ts);
+  if (!isNaN(n) && n > 1_000_000_000) return n;
+  return Math.floor(new Date(ts).getTime() / 1000);
+};
+
+const getFraudColor = (diff: number) => {
+  if (diff >= 30) return { stroke: "#ef4444", fill: "#ef444418" };
+  if (diff >= 15) return { stroke: "#f59e0b", fill: "#f59e0b18" };
+  return { stroke: "#38bdf8", fill: "#38bdf818" };
+};
+
+const getFraudLabel = (diff: number) =>
+  diff >= 30 ? "Critical" : diff >= 15 ? "Warning" : "Suspicious";
+
+// ─── Data processing ─────────────────────────────────────────────────────────
+
 const createContinuousData = (data: TboxData[]): ProcessedDataPoint[] => {
   if (data.length === 0) return [];
 
@@ -74,23 +99,14 @@ const createContinuousData = (data: TboxData[]): ProcessedDataPoint[] => {
     if (isSwapPoint && i > 0) {
       const prevPoint = data[i - 1];
       const currentBatteryPoint = data[i];
-
       currentPoint.continuousTemp =
-        (safeNumber(prevPoint.BATTEMP) +
-          safeNumber(currentBatteryPoint.BATTEMP)) /
-        2;
+        (safeNumber(prevPoint.BATTEMP) + safeNumber(currentBatteryPoint.BATTEMP)) / 2;
       currentPoint.continuousVoltage =
-        (safeNumber(prevPoint.BATVOLT) +
-          safeNumber(currentBatteryPoint.BATVOLT)) /
-        2;
+        (safeNumber(prevPoint.BATVOLT) + safeNumber(currentBatteryPoint.BATVOLT)) / 2;
       currentPoint.continuousCurrent =
-        (safeNumber(prevPoint.BATCURRENT) +
-          safeNumber(currentBatteryPoint.BATCURRENT)) /
-        2;
+        (safeNumber(prevPoint.BATCURRENT) + safeNumber(currentBatteryPoint.BATCURRENT)) / 2;
       currentPoint.continuousCellDiff =
-        (safeNumber(prevPoint.BATCELLDIFFMAX) +
-          safeNumber(currentBatteryPoint.BATCELLDIFFMAX)) /
-        2;
+        (safeNumber(prevPoint.BATCELLDIFFMAX) + safeNumber(currentBatteryPoint.BATCELLDIFFMAX)) / 2;
       currentPoint.swapTransition = true;
     } else {
       currentPoint.continuousTemp = safeNumber(currentPoint.BATTEMP);
@@ -106,7 +122,6 @@ const createContinuousData = (data: TboxData[]): ProcessedDataPoint[] => {
   return processedData;
 };
 
-// Function to create BMS-segmented data for area charts
 const createBMSSegmentedData = (data: ProcessedDataPoint[], metric: string) => {
   if (!data.length) return [];
 
@@ -121,24 +136,16 @@ const createBMSSegmentedData = (data: ProcessedDataPoint[], metric: string) => {
       if (data[i].BMS_ID === bmsId) {
         switch (metric) {
           case "temp":
-            dataPoint[key] = safeNumber(
-              data[i].continuousTemp || data[i].BATTEMP
-            );
+            dataPoint[key] = safeNumber(data[i].continuousTemp || data[i].BATTEMP);
             break;
           case "voltage":
-            dataPoint[key] = safeNumber(
-              data[i].continuousVoltage || data[i].BATVOLT
-            );
+            dataPoint[key] = safeNumber(data[i].continuousVoltage || data[i].BATVOLT);
             break;
           case "current":
-            dataPoint[key] = safeNumber(
-              data[i].continuousCurrent || data[i].BATCURRENT
-            );
+            dataPoint[key] = safeNumber(data[i].continuousCurrent || data[i].BATCURRENT);
             break;
           case "cellDiff":
-            dataPoint[key] = safeNumber(
-              data[i].continuousCellDiff || data[i].BATCELLDIFFMAX
-            );
+            dataPoint[key] = safeNumber(data[i].continuousCellDiff || data[i].BATCELLDIFFMAX);
             break;
           case "soh":
             dataPoint[key] = safeNumber(data[i].BATSOH);
@@ -160,8 +167,9 @@ const createBMSSegmentedData = (data: ProcessedDataPoint[], metric: string) => {
   return segmentedData;
 };
 
-// Enhanced tooltip
-const ScooterTooltip: React.FC<any> = ({ active, payload, label }) => {
+// ─── Tooltip ─────────────────────────────────────────────────────────────────
+
+const ScooterTooltip: React.FC<any> = ({ active, payload }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload as ProcessedDataPoint;
 
@@ -204,8 +212,13 @@ const ScooterTooltip: React.FC<any> = ({ active, payload, label }) => {
   return null;
 };
 
-const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
-  // Use the optimized hook
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+const BatteryHistory: React.FC<BatteryHistoryProps> = ({
+  IMEI,
+  filters,
+  illegalChargeEvents = [],
+}) => {
   const {
     batteryData,
     batterySwaps,
@@ -217,23 +230,13 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
     refetch,
   } = useHomeCharging(IMEI, filters);
 
-  // Process the data for continuous charts
-  const processedData = useMemo(() => {
-    return createContinuousData(batteryData);
-  }, [batteryData]);
+  const processedData = useMemo(() => createContinuousData(batteryData), [batteryData]);
 
-  // Color mapping for different BMS IDs
   const bmsColors = useMemo(() => {
     const uniqueBmsIds = [...new Set(batteryData.map((d) => d.BMS_ID))];
     const colors = [
-      "#8b5cf6",
-      "#06b6d4",
-      "#10b981",
-      "#f59e0b",
-      "#ef4444",
-      "#ec4899",
-      "#84cc16",
-      "#f97316",
+      "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b",
+      "#ef4444", "#ec4899", "#84cc16", "#f97316",
     ];
     return uniqueBmsIds.reduce((acc, bmsId, index) => {
       acc[bmsId] = colors[index % colors.length];
@@ -241,7 +244,6 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
     }, {} as Record<string, string>);
   }, [batteryData]);
 
-  // Create segmented data for each metric
   const temperatureData = useMemo(
     () => createBMSSegmentedData(processedData, "temp"),
     [processedData]
@@ -256,11 +258,11 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
   );
   const cellDiffData = useMemo(() => {
     const data = createBMSSegmentedData(processedData, "cellDiff");
-    const hasData = data.some((d: any) => {
-      return Object.keys(d).some(
+    const hasData = data.some((d: any) =>
+      Object.keys(d).some(
         (key) => key.startsWith("cellDiff_") && d[key] !== null && d[key] !== 0
-      );
-    });
+      )
+    );
     if (!hasData && processedData.length > 0) {
       console.warn("Cell imbalance data appears to be empty or all zeros");
     }
@@ -269,22 +271,54 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
 
   const uniqueBMSIds = [...new Set(batteryData.map((d) => d.BMS_ID))];
 
-  // Loading state
+  // ── FRAUD MARKER FIX ─────────────────────────────────────────────────────
+  // The XAxis is CATEGORICAL (no type="number"), so ReferenceArea x1/x2 and
+  // ReferenceLine x must be exact CTIME values present in the data array.
+  // We find the nearest data-point by index, then use CTIME values ±20 points
+  // around it as window boundaries — guaranteeing exact matches in the array.
+  const fraudEpochs = useMemo(() => {
+    if (!illegalChargeEvents.length || !processedData.length) return [];
+
+    const ctimes = processedData.map((d) => safeNumber(d.CTIME));
+
+    return illegalChargeEvents.map((e) => {
+      const epochSec = toEpochSec(e.timestamp);
+
+      // Find index of the closest data point to the fraud timestamp
+      let nearestIdx = 0;
+      let minDiff = Infinity;
+      ctimes.forEach((ct, idx) => {
+        const diff = Math.abs(ct - epochSec);
+        if (diff < minDiff) { minDiff = diff; nearestIdx = idx; }
+      });
+
+      // Use ±20 data-point index window for the shaded region
+      const WINDOW_PTS = 20;
+      const x1Idx = Math.max(0, nearestIdx - WINDOW_PTS);
+      const x2Idx = Math.min(ctimes.length - 1, nearestIdx + WINDOW_PTS);
+
+      return {
+        ...e,
+        epochSec,
+        snappedCtime: ctimes[nearestIdx], // exact value → ReferenceLine
+        windowX1: ctimes[x1Idx],          // exact value → ReferenceArea left
+        windowX2: ctimes[x2Idx],          // exact value → ReferenceArea right
+      };
+    });
+  }, [illegalChargeEvents, processedData]);
+
+  // ─── Loading ──────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-[400px] flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-16 h-16 mx-auto mb-4 animate-spin text-purple-400" />
-          <p className="text-slate-300 text-lg mb-2">
-            Loading battery diagnostics...
-          </p>
+          <p className="text-slate-300 text-lg mb-2">Loading battery diagnostics...</p>
           <p className="text-slate-500 text-sm">Analyzing data for {IMEI}</p>
           {debugInfo && (
             <div className="mt-4 text-xs text-slate-500 space-y-1">
               <p>Telemetry Records: {safeNumber(debugInfo.telemetryCount)}</p>
-              <p>
-                Battery Swaps: {safeNumber(debugInfo.consolidatedSwapCount)}
-              </p>
+              <p>Battery Swaps: {safeNumber(debugInfo.consolidatedSwapCount)}</p>
               <p>Battery Sessions: {safeNumber(debugInfo.sessionCount)}</p>
               <p>Unique Batteries: {safeNumber(debugInfo.uniqueBatteries)}</p>
             </div>
@@ -294,15 +328,13 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
     );
   }
 
-  // Error state
+  // ─── Error ────────────────────────────────────────────────────────────────
   if (error) {
     return (
       <div className="min-h-[400px] flex items-center justify-center">
         <div className="text-center max-w-lg">
           <XCircle className="w-16 h-16 mx-auto mb-4 text-red-400" />
-          <h2 className="text-xl font-semibold text-red-300 mb-4">
-            Data Loading Error
-          </h2>
+          <h2 className="text-xl font-semibold text-red-300 mb-4">Data Loading Error</h2>
           <div className="bg-red-900/20 border border-red-800 rounded-lg p-4 mb-6">
             <p className="text-slate-300 text-sm">{error}</p>
           </div>
@@ -318,15 +350,13 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
     );
   }
 
-  // No data available
+  // ─── No data ──────────────────────────────────────────────────────────────
   if (batteryData.length === 0) {
     return (
       <div className="min-h-[400px] flex items-center justify-center">
         <div className="text-center max-w-lg">
           <AlertTriangle className="w-16 h-16 mx-auto mb-4 text-yellow-400" />
-          <h2 className="text-xl font-semibold text-slate-200 mb-4">
-            No Battery Data Found
-          </h2>
+          <h2 className="text-xl font-semibold text-slate-200 mb-4">No Battery Data Found</h2>
           <div className="bg-yellow-900/20 border border-yellow-800 rounded-lg p-4 mb-6">
             <p className="text-slate-300 mb-2">
               No battery telemetry data found for:{" "}
@@ -349,10 +379,11 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
     );
   }
 
-  // Main dashboard view with data
+  // ─── Main dashboard ───────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* Header with Debug Info */}
+
+      {/* Header */}
       <div className="flex justify-between items-start">
         <div>
           <h2 className="text-2xl font-bold text-slate-100 flex items-center gap-3">
@@ -363,9 +394,7 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
             <div className="mt-2 text-xs text-slate-500 flex items-center gap-4">
               <span>{safeNumber(debugInfo.telemetryCount)} data points</span>
               <span>•</span>
-              <span>
-                {safeNumber(debugInfo.uniqueBatteries)} unique batteries
-              </span>
+              <span>{safeNumber(debugInfo.uniqueBatteries)} unique batteries</span>
               <span>•</span>
               <span>{batterySwaps.length} swaps detected</span>
             </div>
@@ -438,39 +467,95 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
         </div>
       )}
 
+      {/* Illegal charge warning banner */}
+      {fraudEpochs.length > 0 && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4">
+          <div className="flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-300 mb-2">
+                {fraudEpochs.length} Illegal Charge Event{fraudEpochs.length > 1 ? "s" : ""} Detected for This Vehicle
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {fraudEpochs.map((e, i) => {
+                  const { stroke } = getFraudColor(e.diff);
+                  return (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 text-xs text-slate-300 bg-slate-800/60 px-3 py-1.5 rounded-lg border border-slate-700"
+                    >
+                      <TrendingUp className="w-3 h-3" style={{ color: stroke }} />
+                      <span style={{ color: stroke }} className="font-bold">+{e.diff}%</span>
+                      <span className="text-slate-400">{e.beforePct}% → {e.afterPct}%</span>
+                      <span className="text-slate-500">·</span>
+                      <span className="text-slate-400">
+                        {new Date(e.epochSec * 1000).toLocaleDateString("en-GB", {
+                          day: "2-digit",
+                          month: "short",
+                        })}
+                      </span>
+                      <span
+                        className="px-1.5 py-0.5 rounded text-xs font-medium"
+                        style={{ background: stroke + "22", color: stroke, border: `1px solid ${stroke}55` }}
+                      >
+                        {getFraudLabel(e.diff)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Battery Usage Timeline */}
       <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
-          <Activity className="w-5 h-5 text-purple-400" />
-          Battery Usage Timeline
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
+            <Activity className="w-5 h-5 text-purple-400" />
+            Battery Usage Timeline
+          </h3>
+          {fraudEpochs.length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-lg">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              {fraudEpochs.length} illegal charge{fraudEpochs.length > 1 ? "s" : ""} marked
+            </div>
+          )}
+        </div>
 
         {/* BMS Legend */}
         <div className="flex flex-wrap gap-3 mb-4 p-3 bg-slate-800/50 rounded-lg">
           {Object.entries(bmsColors).map(([bmsId, color]) => (
             <div key={bmsId} className="flex items-center gap-2">
-              <div
-                className="w-4 h-4 rounded-full"
-                style={{ backgroundColor: color }}
-              ></div>
+              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: color }} />
               <span className="text-sm text-slate-300 font-mono">{bmsId}</span>
             </div>
           ))}
+          {fraudEpochs.length > 0 && (
+            <>
+              <div className="w-px h-5 bg-slate-600 mx-1" />
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-3 rounded-sm bg-red-500/25 border border-red-500/60" />
+                <span className="text-sm text-red-400">Illegal Charge</span>
+              </div>
+            </>
+          )}
         </div>
 
         <ResponsiveContainer width="100%" height={400}>
           <ComposedChart data={processedData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
+            {/* Categorical XAxis — original, no type/scale/domain props */}
             <XAxis
               dataKey="CTIME"
               tick={{ fontSize: 12, fill: "#94a3b8" }}
-              tickFormatter={(value) => {
-                const date = new Date(safeNumber(value) * 1000);
-                return date.toLocaleDateString(undefined, {
+              tickFormatter={(value) =>
+                new Date(safeNumber(value) * 1000).toLocaleDateString(undefined, {
                   month: "short",
                   day: "numeric",
-                });
-              }}
+                })
+              }
             />
             <YAxis
               yAxisId="percent"
@@ -497,12 +582,25 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
             />
             <Tooltip content={<ScooterTooltip />} />
 
+            {/* Shaded window — x1/x2 are exact CTIME values from the array */}
+            {fraudEpochs.map((e, i) => {
+              const { fill } = getFraudColor(e.diff);
+              return (
+                <ReferenceArea
+                  key={`fraud-area-${i}`}
+                  yAxisId="percent"
+                  x1={e.windowX1}
+                  x2={e.windowX2}
+                  fill={fill}
+                  strokeOpacity={0}
+                />
+              );
+            })}
+
             <Area
               yAxisId="percent"
               type="monotone"
-              dataKey={(data: ProcessedDataPoint) =>
-                safeNumber(data.BATPERCENT)
-              }
+              dataKey={(d: ProcessedDataPoint) => safeNumber(d.BATPERCENT)}
               fill="#10b981"
               fillOpacity={0.3}
               stroke="#10b981"
@@ -513,22 +611,20 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
             <Line
               yAxisId="soh"
               type="monotone"
-              dataKey={(data: ProcessedDataPoint) => safeNumber(data.BATSOH)}
+              dataKey={(d: ProcessedDataPoint) => safeNumber(d.BATSOH)}
               stroke="#8b5cf6"
               strokeWidth={3}
               dot={false}
               name="Battery Health (%)"
             />
 
-            {/* Battery indicator line at the bottom */}
+            {/* Battery identity strip at bottom */}
             {uniqueBMSIds.map((bmsId) => (
               <Line
                 key={`indicator_${bmsId}`}
                 yAxisId="percent"
                 type="stepAfter"
-                dataKey={(data: ProcessedDataPoint) =>
-                  data.BMS_ID === bmsId ? -5 : null
-                }
+                dataKey={(d: ProcessedDataPoint) => (d.BMS_ID === bmsId ? -5 : null)}
                 stroke={bmsColors[bmsId]}
                 strokeWidth={6}
                 dot={false}
@@ -537,28 +633,48 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
               />
             ))}
 
+            {/* Battery swap lines */}
             {batterySwaps.map((swap, idx) => (
               <ReferenceLine
-                key={idx}
+                key={`swap-${idx}`}
                 x={safeNumber(swap.TIMESTAMP)}
+                yAxisId="percent"
                 stroke="#a855f7"
                 strokeDasharray="2 2"
                 strokeWidth={2}
-                label={{
-                  value: "SWAP",
-                  position: "top",
-                  fontSize: 10,
-                  fill: "#a855f7",
-                }}
+                label={{ value: "SWAP", position: "top", fontSize: 10, fill: "#a855f7" }}
               />
             ))}
+
+            {/* Vertical dashed line — snappedCtime is an exact array value */}
+            {fraudEpochs.map((e, i) => {
+              const { stroke } = getFraudColor(e.diff);
+              return (
+                <ReferenceLine
+                  key={`fraud-line-${i}`}
+                  x={e.snappedCtime}
+                  yAxisId="percent"
+                  stroke={stroke}
+                  strokeWidth={2}
+                  strokeDasharray="4 3"
+                  label={{
+                    value: `⚠ +${e.diff}%`,
+                    position: "insideTopRight",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    fill: stroke,
+                  }}
+                />
+              );
+            })}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
 
       {/* Main Analytics Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Temperature Analysis */}
+
+        {/* Temperature */}
         <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
             <Thermometer className="w-5 h-5 text-orange-400" />
@@ -570,22 +686,16 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
               <XAxis
                 dataKey="CTIME"
                 tick={{ fontSize: 12, fill: "#94a3b8" }}
-                tickFormatter={(value) => {
-                  const date = new Date(safeNumber(value) * 1000);
-                  return date.toLocaleDateString(undefined, {
+                tickFormatter={(v) =>
+                  new Date(safeNumber(v) * 1000).toLocaleDateString(undefined, {
                     month: "short",
                     day: "numeric",
-                  });
-                }}
+                  })
+                }
               />
               <YAxis
                 tick={{ fontSize: 12, fill: "#94a3b8" }}
-                label={{
-                  value: "°C",
-                  angle: -90,
-                  position: "insideLeft",
-                  style: { fill: "#94a3b8" },
-                }}
+                label={{ value: "°C", angle: -90, position: "insideLeft", style: { fill: "#94a3b8" } }}
               />
               <Tooltip content={<ScooterTooltip />} />
 
@@ -603,32 +713,14 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
                 />
               ))}
 
-              <ReferenceLine
-                y={45}
-                stroke="#f59e0b"
-                strokeDasharray="5 5"
-                label={{
-                  value: "Warning (45°C)",
-                  position: "topRight",
-                  fontSize: 10,
-                  fill: "#f59e0b",
-                }}
-              />
-              <ReferenceLine
-                y={65}
-                stroke="#ef4444"
-                strokeDasharray="5 5"
-                label={{
-                  value: "Critical (65°C)",
-                  position: "topRight",
-                  fontSize: 10,
-                  fill: "#ef4444",
-                }}
-              />
+              <ReferenceLine y={45} stroke="#f59e0b" strokeDasharray="5 5"
+                label={{ value: "Warning (45°C)", position: "topRight", fontSize: 10, fill: "#f59e0b" }} />
+              <ReferenceLine y={65} stroke="#ef4444" strokeDasharray="5 5"
+                label={{ value: "Critical (65°C)", position: "topRight", fontSize: 10, fill: "#ef4444" }} />
 
               {batterySwaps.map((swap, idx) => (
                 <ReferenceLine
-                  key={idx}
+                  key={`swap-temp-${idx}`}
                   x={safeNumber(swap.timestamp)}
                   stroke="#a855f7"
                   strokeDasharray="1 1"
@@ -636,11 +728,27 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
                   opacity={0.5}
                 />
               ))}
+
+              {/* Fraud markers — snappedCtime is an exact array value */}
+              {fraudEpochs.map((e, i) => {
+                const { stroke } = getFraudColor(e.diff);
+                return (
+                  <ReferenceLine
+                    key={`fraud-temp-${i}`}
+                    x={e.snappedCtime}
+                    stroke={stroke}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                    opacity={0.8}
+                    label={{ value: "⚠", position: "top", fontSize: 10, fill: stroke }}
+                  />
+                );
+              })}
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
-        {/* Voltage Analysis */}
+        {/* Voltage */}
         <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
           <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
             <Zap className="w-5 h-5 text-blue-400" />
@@ -652,23 +760,17 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
               <XAxis
                 dataKey="CTIME"
                 tick={{ fontSize: 12, fill: "#94a3b8" }}
-                tickFormatter={(value) => {
-                  const date = new Date(safeNumber(value) * 1000);
-                  return date.toLocaleDateString(undefined, {
+                tickFormatter={(v) =>
+                  new Date(safeNumber(v) * 1000).toLocaleDateString(undefined, {
                     month: "short",
                     day: "numeric",
-                  });
-                }}
+                  })
+                }
               />
               <YAxis
                 tick={{ fontSize: 12, fill: "#94a3b8" }}
                 domain={[42, 56]}
-                label={{
-                  value: "V",
-                  angle: -90,
-                  position: "insideLeft",
-                  style: { fill: "#94a3b8" },
-                }}
+                label={{ value: "V", angle: -90, position: "insideLeft", style: { fill: "#94a3b8" } }}
               />
               <Tooltip content={<ScooterTooltip />} />
 
@@ -686,32 +788,14 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
                 />
               ))}
 
-              <ReferenceLine
-                y={44}
-                stroke="#ef4444"
-                strokeDasharray="5 5"
-                label={{
-                  value: "Min Safe (44V)",
-                  position: "topRight",
-                  fontSize: 10,
-                  fill: "#ef4444",
-                }}
-              />
-              <ReferenceLine
-                y={52}
-                stroke="#10b981"
-                strokeDasharray="5 5"
-                label={{
-                  value: "Nominal (52V)",
-                  position: "topRight",
-                  fontSize: 10,
-                  fill: "#10b981",
-                }}
-              />
+              <ReferenceLine y={44} stroke="#ef4444" strokeDasharray="5 5"
+                label={{ value: "Min Safe (44V)", position: "topRight", fontSize: 10, fill: "#ef4444" }} />
+              <ReferenceLine y={52} stroke="#10b981" strokeDasharray="5 5"
+                label={{ value: "Nominal (52V)", position: "topRight", fontSize: 10, fill: "#10b981" }} />
 
               {batterySwaps.map((swap, idx) => (
                 <ReferenceLine
-                  key={idx}
+                  key={`swap-volt-${idx}`}
                   x={safeNumber(swap.timestamp)}
                   stroke="#a855f7"
                   strokeDasharray="1 1"
@@ -719,12 +803,28 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
                   opacity={0.5}
                 />
               ))}
+
+              {/* Fraud markers — snappedCtime is an exact array value */}
+              {fraudEpochs.map((e, i) => {
+                const { stroke } = getFraudColor(e.diff);
+                return (
+                  <ReferenceLine
+                    key={`fraud-volt-${i}`}
+                    x={e.snappedCtime}
+                    stroke={stroke}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                    opacity={0.8}
+                    label={{ value: "⚠", position: "top", fontSize: 10, fill: stroke }}
+                  />
+                );
+              })}
             </AreaChart>
           </ResponsiveContainer>
         </div>
-       </div>
+      </div>
 
-      {/* Footer Status */}
+      {/* Footer */}
       <div className="text-center text-slate-500 text-sm py-4 border-t border-slate-800">
         <div className="flex justify-center items-center gap-6 text-xs flex-wrap">
           <span>IMEI: {IMEI}</span>
@@ -733,9 +833,7 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
           <span>•</span>
           <span>Time Range: {filters.timeRange}h</span>
           <span>•</span>
-          <span>
-            Batteries Tracked: {safeNumber(diagnostics?.totalBatteries)}
-          </span>
+          <span>Batteries Tracked: {safeNumber(diagnostics?.totalBatteries)}</span>
           {diagnostics && (
             <>
               <span>•</span>
@@ -751,6 +849,15 @@ const BatteryHistory: React.FC<BatteryHistoryProps> = ({ IMEI, filters }) => {
                 }`}
               >
                 {diagnostics.overallHealth.toUpperCase()}
+              </span>
+            </>
+          )}
+          {fraudEpochs.length > 0 && (
+            <>
+              <span>•</span>
+              <span className="px-2 py-1 rounded bg-red-900/50 text-red-400 flex items-center gap-1">
+                <ShieldAlert className="w-3 h-3" />
+                {fraudEpochs.length} Illegal Charge{fraudEpochs.length > 1 ? "s" : ""}
               </span>
             </>
           )}

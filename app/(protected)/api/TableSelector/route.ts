@@ -1,3 +1,4 @@
+// app/(protected)/api/TableSelector/route.ts
 import { NextResponse } from "next/server";
 import { TableSelectorService } from "@/services/TableSelectorService";
 import TableSelectorUtils from "@/utils/TableSelectorUtils";
@@ -6,19 +7,11 @@ export async function POST(req: Request) {
   try {
     const { query } = await req.json();
 
-    // ✅ fetch dynamic table descriptions
-    const tableDescriptions = await TableSelectorUtils.fetchTableDescriptions();
-
-    // console.log("Fetched table descriptions:", tableDescriptions);
+    // ✅ Pass the request object to maintain authentication context
+    const tableDescriptions = await TableSelectorUtils.fetchTableDescriptionsWithRequest(req);
 
     const { selectedTables, reasoning } =
       await TableSelectorService.selectRelevantTables(query, tableDescriptions);
-
-    // TableSelectorUtils.logSelectionResults(
-    //   query,
-    //   selectedTables,
-    //   tableDescriptions
-    // );
 
     return NextResponse.json({
       query,
@@ -28,6 +21,15 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error("Table selection failed:", error);
+    
+    // Handle specific error types
+    if (error.message?.includes('Unauthorized')) {
+      return NextResponse.json(
+        { error: "Authentication failed. Please sign in again." },
+        { status: 401 }
+      );
+    }
+
     return NextResponse.json(
       { error: error?.message || "Unknown error" },
       { status: 500 }

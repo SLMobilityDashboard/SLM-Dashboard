@@ -150,6 +150,7 @@ export function MainSidebar() {
         { path: "/revenue",                       label: "Overview",              icon: <Activity className="h-4 w-4" />     },
         { path: "/revenue/analytics",             label: "Analytics",             icon: <TrendingUp className="h-4 w-4" />   },
         { path: "/revenue/transaction-analytics", label: "Transaction Analytics", icon: <ShoppingCart className="h-4 w-4" /> },
+        { path: "/revenue/customer",              label: "Customer Analytics",    icon: <Users className="h-4 w-4" />        },
       ],
     },
   ];
