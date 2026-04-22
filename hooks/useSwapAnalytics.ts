@@ -2,25 +2,20 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { SwapFilters } from "@/components/swap/swap-filters";
+import {
+  computeScore,
+  classify,
+  classifyDayPattern,
+  computeRolling3,
+} from "@/lib/swap-scoring";
+import type { Segment, DayPattern } from "@/lib/swap-scoring";
+
+// Re-export types so consumers only need one import
+export type { Segment, DayPattern } from "@/lib/swap-scoring";
 
 // ============================================================================
 // TYPES
 // ============================================================================
-
-export type Segment =
-  | "Champion"
-  | "Rising"
-  | "Re-engaged"
-  | "Steady"
-  | "Cooling"
-  | "At risk"
-  | "New";
-
-export type DayPattern =
-  | "Fleet operator"
-  | "Weekend warrior"
-  | "Balanced"
-  | "Sporadic";
 
 export interface CustomerSwapData {
   customerId: string;
@@ -45,9 +40,8 @@ export interface CustomerSwapData {
   primaryLocation: string;
   firstActiveIdx: number;
   activeMonths: number;
-  // ── NEW: day-of-week fields ──────────────────────────────────────────────
-  dowProfile: number[];   // [mon, tue, wed, thu, fri, sat, sun]
-  wdRatio: number;        // weekday swaps / total  (0–1)
+  dowProfile: number[];  // [mon, tue, wed, thu, fri, sat, sun]
+  wdRatio: number;       // weekday swaps / total  (0–1)
   dayPattern: DayPattern;
 }
 
@@ -59,10 +53,19 @@ export interface SwapAnalyticsKpi {
   totalSwaps: number;
   fleetMonthly: { month: string; swaps: number; rolling3: number | null }[];
   segmentCounts: Record<Segment, number>;
-  // ── NEW ──────────────────────────────────────────────────────────────────
-  dowFleet: number[];                         // [mon…sun] fleet-level totals
+  dowFleet: number[];                          // [mon…sun] fleet-level totals
   dayPatternCounts: Record<DayPattern, number>;
 }
+
+interface UseSwapAnalyticsReturn {
+  customers: CustomerSwapData[];
+  kpi: SwapAnalyticsKpi | null;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+}
+
+// ── Raw DB row shapes ─────────────────────────────────────────────────────────
 
 interface RawMonthlyRow {
   CUSTOMER_ID: string;
@@ -83,19 +86,22 @@ interface RawEnrichmentRow {
   PRIMARY_LOCATION: string;
 }
 
-// ── NEW ──────────────────────────────────────────────────────────────────────
 interface RawDowRow {
   CUSTOMER_ID: string;
-  DOW: number | string;   // 0 = Sun … 6 = Sat (Snowflake DAYOFWEEK)
+  DOW: number | string;  // Snowflake DAYOFWEEK: 0 = Sun … 6 = Sat
   SWAP_COUNT: number | string;
 }
 
-interface UseSwapAnalyticsReturn {
-  customers: CustomerSwapData[];
-  kpi: SwapAnalyticsKpi | null;
-  loading: boolean;
-  error: string | null;
-  refetch: () => void;
+// ── Internal month aggregation shape ─────────────────────────────────────────
+
+interface MonthEntry {
+  label: string;
+  index: number;
+  swaps: number;
+  avgOldBat: number;
+  avgNewBat: number;
+  successSwaps: number;
+  revenue: number;
 }
 
 // ============================================================================
@@ -279,7 +285,6 @@ WHERE RN = 1
   `.trim();
 }
 
-// ── NEW: DOW query ────────────────────────────────────────────────────────────
 // Snowflake DAYOFWEEK: 0 = Sunday, 1 = Monday … 6 = Saturday
 function buildDowQuery(filters: SwapFilters): string {
   return `
@@ -292,211 +297,6 @@ WHERE ${buildWhere(filters)}
 GROUP BY CUSTOMER_ID, DOW
 ORDER BY CUSTOMER_ID, DOW
   `.trim();
-}
-
-// ============================================================================
-// SCORING LOGIC
-// ============================================================================
-
-function totalMonthsInRange(filters: SwapFilters): number {
-  if (!filters.dateRange?.from || !filters.dateRange?.to) return 12;
-  const diff =
-    (filters.dateRange.to.getFullYear() - filters.dateRange.from.getFullYear()) * 12 +
-    (filters.dateRange.to.getMonth() - filters.dateRange.from.getMonth()) +
-    1;
-  return Math.min(12, Math.max(1, diff));
-}
-
-function weightedLinearTrend(
-  history: number[],
-  firstActiveIdx: number
-): { slope: number; confidence: "high" | "low" } {
-  const active = history.slice(firstActiveIdx);
-  const n = active.length;
-
-  if (n < 2) return { slope: 0, confidence: "low" };
-
-  const nonZeroSorted = [...active].filter((v) => v > 0).sort((a, b) => a - b);
-  const median =
-    nonZeroSorted.length > 0
-      ? nonZeroSorted[Math.floor(nonZeroSorted.length / 2)]
-      : 0;
-
-  const softened = active.map((v) =>
-    median > 0 && v > median * 3 ? median * 2 : v
-  );
-
-  const weights = softened.map((_, i) => (i >= n - 3 ? 2 : 1));
-
-  const sumW   = weights.reduce((a, b) => a + b, 0);
-  const sumWX  = weights.reduce((a, w, i) => a + w * i, 0);
-  const sumWY  = weights.reduce((a, w, i) => a + w * softened[i], 0);
-  const sumWXY = weights.reduce((a, w, i) => a + w * i * softened[i], 0);
-  const sumWX2 = weights.reduce((a, w, i) => a + w * i * i, 0);
-
-  const denom = sumW * sumWX2 - sumWX * sumWX;
-  if (denom === 0) return { slope: 0, confidence: "low" };
-
-  const slope  = (sumW * sumWXY - sumWX * sumWY) / denom;
-  const avgY   = sumWY / sumW;
-
-  const normalisedSlope = avgY > 0 ? (slope / avgY) * 100 : 0;
-  const activeCount = active.filter((v) => v > 0).length;
-
-  return {
-    slope: Math.round(normalisedSlope * 10) / 10,
-    confidence: activeCount >= 4 ? "high" : "low",
-  };
-}
-
-function computeScore(
-  history: number[],
-  numMonths: number
-): {
-  score: number;
-  avg: number;
-  avg3: number;
-  peak: number;
-  trend: number;
-  trendConfidence: "high" | "low";
-  consistency: number;
-  cv: number;
-  firstActiveIdx: number;
-  activeMonths: number;
-} {
-  const firstActiveIdx = history.findIndex((v) => v > 0);
-  const lastActiveIdx = [...history]
-    .map((v, i) => (v > 0 ? i : -1))
-    .filter((i) => i >= 0)
-    .pop() ?? -1;
-
-  if (firstActiveIdx === -1) {
-    return {
-      score: 0, avg: 0, avg3: 0, peak: 0, trend: 0,
-      trendConfidence: "low", consistency: 0, cv: 1,
-      firstActiveIdx: -1, activeMonths: 0,
-    };
-  }
-
-  const activeMonths = history.filter((v) => v > 0).length;
-  const avg  = history.reduce((a, b) => a + b, 0) / numMonths;
-  const peak = Math.max(...history, 0);
-
-  const recent3 = history.slice(-3).filter((v) => v > 0);
-  const avg3 = recent3.length
-    ? Math.round((recent3.reduce((a, b) => a + b, 0) / recent3.length) * 10) / 10
-    : 0;
-
-  const { slope: trend, confidence: trendConfidence } = weightedLinearTrend(
-    history,
-    firstActiveIdx
-  );
-
-  const activeSpan = lastActiveIdx - firstActiveIdx + 1;
-  const baseConsistency =
-    activeSpan > 0 ? (activeMonths / activeSpan) * 100 : 0;
-
-  let trailingSilence = 0;
-  for (let i = history.length - 1; i >= firstActiveIdx; i--) {
-    if (history[i] === 0) trailingSilence++;
-    else break;
-  }
-  const decayFactor = Math.max(0, 1 - (trailingSilence / activeSpan) * 0.4);
-  const consistency = Math.round(baseConsistency * decayFactor);
-
-  const nonZeroVals = history.filter((v) => v > 0);
-  const nonZeroAvg  =
-    nonZeroVals.length > 0
-      ? nonZeroVals.reduce((a, b) => a + b, 0) / nonZeroVals.length
-      : 0;
-  const variance =
-    nonZeroVals.length > 0
-      ? nonZeroVals.reduce((a, b) => a + Math.pow(b - nonZeroAvg, 2), 0) /
-        nonZeroVals.length
-      : 0;
-  const cv = nonZeroAvg > 0 ? Math.sqrt(variance) / nonZeroAvg : 1;
-
-  const volumePts      = Math.min(30, Math.round((avg / 25) * 30));
-  const consistencyPts = Math.min(25, Math.round((consistency / 100) * 25));
-  const stabilityPts   = Math.min(20, Math.round(Math.max(0, 1 - cv) * 20));
-  const rawTrendPts    = Math.min(25, Math.max(0, Math.round(((trend + 50) / 100) * 25)));
-  const trendPts       = trendConfidence === "low" ? Math.min(15, rawTrendPts) : rawTrendPts;
-
-  const score = Math.min(100, Math.max(0, volumePts + trendPts + consistencyPts + stabilityPts));
-
-  return {
-    score,
-    avg:   Math.round(avg * 10) / 10,
-    avg3,
-    peak,
-    trend,
-    trendConfidence,
-    consistency,
-    cv,
-    firstActiveIdx,
-    activeMonths,
-  };
-}
-
-function longestConsecutiveZeros(arr: number[]): number {
-  let max = 0, cur = 0;
-  for (const v of arr) {
-    if (v === 0) { cur++; max = Math.max(max, cur); }
-    else cur = 0;
-  }
-  return max;
-}
-
-function classify(
-  score: number,
-  trend: number,
-  trendConfidence: "high" | "low",
-  consistency: number,
-  history: number[],
-  firstActiveIdx: number
-): Segment {
-  const n = history.length;
-  if (firstActiveIdx === -1) return "At risk";
-
-  const hasRecent = history.slice(-2).some((v) => v > 0);
-  const midpoint  = Math.floor(n / 2);
-  const hadEarly  = firstActiveIdx < midpoint;
-
-  if (firstActiveIdx >= midpoint && hasRecent) return "New";
-
-  if (hadEarly && hasRecent) {
-    const midHistory = history.slice(firstActiveIdx + 1, -2);
-    const longestGap = longestConsecutiveZeros(midHistory);
-    const wasQuietMidRange = !history.slice(midpoint, -2).some((v) => v > 0);
-    if (longestGap >= 3 && wasQuietMidRange) return "Re-engaged";
-  }
-
-  if (score >= 75 && trend >= -5) return "Champion";
-
-  const risingThreshold = trendConfidence === "high" ? 15 : 25;
-  if (trend >= risingThreshold && consistency >= 50) return "Rising";
-
-  if (!hasRecent && consistency < 40) return "At risk";
-  if (trend <= -30 && trendConfidence === "high") return "At risk";
-  if (trend <= -10 && score < 60) return "Cooling";
-
-  return "Steady";
-}
-
-// ── NEW: day-pattern classifier ───────────────────────────────────────────────
-/**
- * Classify a customer's swap behaviour by day-of-week preference.
- *
- * @param dowProfile  [mon, tue, wed, thu, fri, sat, sun]  (index 0 = Mon)
- * @param total       total swaps across all days
- */
-function classifyDayPattern(dowProfile: number[], total: number): DayPattern {
-  if (total < 5) return "Sporadic";
-  const weekday = dowProfile.slice(0, 5).reduce((a, b) => a + b, 0);
-  const wdRatio = weekday / total;
-  if (wdRatio >= 0.70) return "Fleet operator";
-  if (wdRatio <= 0.40) return "Weekend warrior";
-  return "Balanced";
 }
 
 // ============================================================================
@@ -540,11 +340,21 @@ function filtersKey(f: SwapFilters): string {
   });
 }
 
-// ── DOW index mapping ─────────────────────────────────────────────────────────
-// Snowflake: 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
-// Internal:  index 0=Mon … 4=Fri, 5=Sat, 6=Sun
+function totalMonthsInRange(filters: SwapFilters): number {
+  if (!filters.dateRange?.from || !filters.dateRange?.to) return 12;
+  const diff =
+    (filters.dateRange.to.getFullYear() - filters.dateRange.from.getFullYear()) * 12 +
+    (filters.dateRange.to.getMonth() - filters.dateRange.from.getMonth()) +
+    1;
+  return Math.min(12, Math.max(1, diff));
+}
+
+/**
+ * Snowflake DAYOFWEEK → internal Mon-first index
+ * Snowflake: 0=Sun, 1=Mon … 6=Sat
+ * Internal:  0=Mon … 4=Fri, 5=Sat, 6=Sun
+ */
 function snowflakeDowToIndex(dow: number): number {
-  // Sun(0)→6, Mon(1)→0, Tue(2)→1, Wed(3)→2, Thu(4)→3, Fri(5)→4, Sat(6)→5
   return dow === 0 ? 6 : dow - 1;
 }
 
@@ -572,14 +382,14 @@ export function useSwapAnalytics(filters: SwapFilters): UseSwapAnalyticsReturn {
     try {
       const numMonths = totalMonthsInRange(f);
 
-      // Run all three queries in parallel
+      // ── Fetch all data in parallel ─────────────────────────────────────────
       const [monthlyRows, enrichmentRows, dowRows] = await Promise.all([
         runQuery<RawMonthlyRow>(buildMonthlyQuery(f), ctrl.signal),
         runQuery<RawEnrichmentRow>(buildEnrichmentQuery(f), ctrl.signal),
         runQuery<RawDowRow>(buildDowQuery(f), ctrl.signal),
       ]);
 
-      // ── Enrichment map ─────────────────────────────────────────────────────
+      // ── Enrichment map: customerId → { station, location, name } ──────────
       const enrichMap = new Map<string, { station: string; location: string; name: string }>();
       for (const r of enrichmentRows) {
         enrichMap.set(r.CUSTOMER_ID, {
@@ -589,7 +399,7 @@ export function useSwapAnalytics(filters: SwapFilters): UseSwapAnalyticsReturn {
         });
       }
 
-      // ── DOW map: customerId → [mon,tue,wed,thu,fri,sat,sun] ───────────────
+      // ── DOW map: customerId → [mon, tue, wed, thu, fri, sat, sun] ─────────
       const dowMap = new Map<string, number[]>();
       for (const r of dowRows) {
         const id  = r.CUSTOMER_ID;
@@ -598,14 +408,8 @@ export function useSwapAnalytics(filters: SwapFilters): UseSwapAnalyticsReturn {
         dowMap.get(id)![idx] += toNum(r.SWAP_COUNT);
       }
 
-      // ── Monthly aggregation ────────────────────────────────────────────────
-      type MonthEntry = {
-        label: string; index: number; swaps: number;
-        avgOldBat: number; avgNewBat: number;
-        successSwaps: number; revenue: number;
-      };
+      // ── Monthly aggregation: customerId → { name, months[] } ─────────────
       const customerMap = new Map<string, { name: string; months: MonthEntry[] }>();
-
       for (const row of monthlyRows) {
         const id = row.CUSTOMER_ID;
         if (!customerMap.has(id)) customerMap.set(id, { name: row.CUSTOMER_NAME, months: [] });
@@ -620,6 +424,7 @@ export function useSwapAnalytics(filters: SwapFilters): UseSwapAnalyticsReturn {
         });
       }
 
+      // Build ordered month label array from all data
       const labelMap = new Map<number, string>();
       for (const { months } of customerMap.values()) {
         for (const m of months) labelMap.set(m.index, m.label);
@@ -628,6 +433,7 @@ export function useSwapAnalytics(filters: SwapFilters): UseSwapAnalyticsReturn {
         labelMap.get(i + 1) ?? ""
       );
 
+      // ── Score and classify each customer ──────────────────────────────────
       const fleetByMonth: number[] = Array(numMonths).fill(0);
       const dowFleet: number[]     = Array(7).fill(0);
       const scored: CustomerSwapData[] = [];
@@ -657,21 +463,28 @@ export function useSwapAnalytics(filters: SwapFilters): UseSwapAnalyticsReturn {
           }
         }
 
-        const { score, avg, avg3, peak, trend, trendConfidence, consistency, cv, firstActiveIdx, activeMonths } =
-          computeScore(history, numMonths);
+        // ── Scoring (from swap-scoring.ts) ───────────────────────────────────
+        // Guard: ensure history is a valid array before scoring
+        if (!Array.isArray(history) || history.length === 0) continue;
+
+        const scoreResult = computeScore(history, numMonths);
+        const {
+          score, avg, avg3, peak, trend, trendConfidence,
+          consistency, cv, firstActiveIdx, activeMonths,
+        } = scoreResult;
 
         if (firstActiveIdx === -1) continue;
 
-        const segment = classify(score, trend, trendConfidence, consistency, history, firstActiveIdx);
+        // classify() now takes (scoreResult, history) — updated signature
+        const segment = classify(scoreResult, history);
 
-        // ── DOW / day-pattern ────────────────────────────────────────────────
+        // ── Day-of-week pattern (from swap-scoring.ts) ───────────────────────
         const dowProfile = dowMap.get(id) ?? Array(7).fill(0);
         const dowTotal   = dowProfile.reduce((a, b) => a + b, 0);
         const weekday    = dowProfile.slice(0, 5).reduce((a, b) => a + b, 0);
         const wdRatio    = dowTotal > 0 ? weekday / dowTotal : 0;
         const dayPattern = classifyDayPattern(dowProfile, dowTotal);
 
-        // Accumulate fleet DOW totals
         dowProfile.forEach((v, i) => { dowFleet[i] += v; });
 
         const enrich       = enrichMap.get(id);
@@ -703,20 +516,20 @@ export function useSwapAnalytics(filters: SwapFilters): UseSwapAnalyticsReturn {
           primaryLocation: enrich?.location ?? "",
           firstActiveIdx,
           activeMonths,
-          // ── new ──
           dowProfile,
           wdRatio,
           dayPattern,
         });
       }
 
+      // ── KPI aggregation ───────────────────────────────────────────────────
+      // FIX #5: Use computeRolling3() for a consistent window.
+      // Months 0 and 1 return null instead of misleading partial averages.
+      const rolling3Values = computeRolling3(fleetByMonth);
       const fleetMonthly = fleetByMonth.map((swaps, i) => ({
-        month: monthLabels[i] ?? `M${i + 1}`,
+        month:    monthLabels[i] ?? `M${i + 1}`,
         swaps,
-        rolling3:
-          i === 0 ? fleetByMonth[0]
-          : i === 1 ? Math.round((fleetByMonth[0] + fleetByMonth[1]) / 2)
-          : Math.round((fleetByMonth[i] + fleetByMonth[i - 1] + fleetByMonth[i - 2]) / 3),
+        rolling3: rolling3Values[i],
       }));
 
       const segmentCounts = Object.fromEntries(
@@ -753,6 +566,7 @@ export function useSwapAnalytics(filters: SwapFilters): UseSwapAnalyticsReturn {
     }
   }, []);
 
+  // Re-run whenever filters meaningfully change
   useEffect(() => {
     const key = filtersKey(filters);
     if (key === lastFilterKey.current) return;
@@ -767,6 +581,7 @@ export function useSwapAnalytics(filters: SwapFilters): UseSwapAnalyticsReturn {
     process(filters);
   }, [filtersKey(filters), filters, process]);
 
+  // Cleanup on unmount
   useEffect(() => () => { abortRef.current?.abort(); }, []);
 
   const refetch = useCallback(() => {
