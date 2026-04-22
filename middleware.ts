@@ -8,20 +8,20 @@ const PUBLIC_EXACT: string[] = ['/'];
 const PUBLIC_PREFIXES = [
   '/auth',
   '/api/auth',
+  '/api/permissions',   // ✅ handles its own session/auth checks internally
   '/debug',
   '/api/debug',
   '/api/prewarm-job',
   '/api/redis-clear',
-  // ✅ /api/permissions removed — access mirrors /settings/rbac
 ];
 
 const FORBIDDEN_REDIRECT = '/unauthorized';
 
 // ── Maps API routes to their equivalent page route for RBAC lookup ────────────
+// NOTE: /api/permissions is intentionally NOT here — it is self-auth'd and must
+// be reachable by all authenticated users to fetch their own permission set.
 const API_ROUTE_PAGE_MAP: Record<string, string> = {
-  '/api/permissions': '/settings/rbac',
-  // add more here if needed in future e.g:
-  // '/api/users': '/settings/users',
+  // '/api/users': '/settings/users',  ← add future mappings here
 };
 
 export default async function middleware(req: NextRequest) {
