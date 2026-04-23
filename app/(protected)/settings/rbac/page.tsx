@@ -60,7 +60,7 @@ type Override = {
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const ALL_ROLES = ["Admin", "Manager", "Analyst", "Viewer", "FactoryManager", "QA"];
+const ALL_ROLES = ["Admin", "Manager", "Analyst", "Viewer", "FactoryManager", "QA", "Marketer"];
 
 const ROLE_COLORS: Record<string, string> = {
   Admin:          "bg-red-500/20 text-red-300 border-red-500/30",
