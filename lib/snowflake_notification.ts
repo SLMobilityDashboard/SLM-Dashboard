@@ -62,13 +62,108 @@ class SnowflakeNotificationManager {
   }
 
   // ✅ Resolve display username — from token if OAuth, else env default
-  private static resolveUsername(requestedUsername?: string, oauthToken?: string): string {
+  private static resolveUsername(
+    requestedUsername?: string,
+    oauthToken?: string
+  ): string {
+    // OAuth users come from Cognito token
     if (oauthToken) {
       return this.getUsernameFromToken(oauthToken);
     }
-    if (requestedUsername) return requestedUsername;
+
+    const usernameMap: Record<string, string> = {
+      'safnas': 'SAFNAS',
+      'safnas@slmobility.com': 'SAFNAS',
+
+      'hansika': 'HANSIKAAIT',
+      'hansikaait': 'HANSIKAAIT',
+      'hansika@slmobility.com': 'HANSIKAAIT',
+
+      'oshani': 'OSHANIQA',
+      'oshaniqa': 'OSHANIQA',
+      'oshani@slmobility.com': 'OSHANIQA',
+
+      'usmaan': 'USMAANRIFKHAN',
+      'usmaanrifkhan': 'USMAANRIFKHAN',
+      'usmaanit': 'USMAANRIFKHAN',
+      'usmaanit@slmobility.com': 'USMAANRIFKHAN',
+
+      'ashan': 'ASHANSLM',
+      'ashanslm': 'ASHANSLM',
+      'ashan@slmobility.com': 'ASHANSLM',
+
+      'madhushi': 'MADHUSHI',
+      'madhushimarketing': 'MADHUSHI',
+      'madhushi@lencar.lk': 'MADHUSHI',
+
+      'suneth': 'SUNETH',
+      'sunethmarketing': 'SUNETH',
+      'suneth@slmobility.com': 'SUNETH',
+
+      'mithun': 'MITHUN',
+      'mithunlencar': 'MITHUN',
+      'mithun@lencar.lk': 'MITHUN',
+
+      'rasika': 'RASIKA',
+      'rasikafac': 'RASIKA',
+      'rasika@slmobility.com': 'RASIKA',
+
+      'zainab': 'ZAINAB',
+      'zainabqanew': 'ZAINAB',
+      'zainab@slmobility.com': 'ZAINAB',
+
+      'nayanaka': 'NAYANAKA',
+      'nayanaka buddhi': 'NAYANAKA',
+      'nayanakabuddhi@gmail.com': 'NAYANAKA',
+
+      'dinusha': 'DINUSHA',
+      'dinusha jayakody': 'DINUSHA',
+      'dinusha@slmobility.com': 'DINUSHA',
+
+      'mafaz': 'MAFAZ',
+      'mafazfec': 'MAFAZ',
+      'mafaz@slmobility.com': 'MAFAZ',
+
+      'zaid': 'ZAID',
+      'zaidfaiz': 'ZAID',
+      'zaid@slmobility.com': 'ZAID',
+
+      'janaka': 'JANAKA',
+      'janakaudara': 'JANAKA',
+      'udara@slmobility.com': 'JANAKA',
+
+      'aitadmin': 'JANAKAAIT',
+      'janakaait': 'JANAKAAIT',
+      'janaka@ascensionit.com.au': 'JANAKAAIT',
+
+      'rifkhan': 'RIFKHAN',
+      'rifkhansiddeek': 'RIFKHAN',
+      'rifkhan@slmobility.com': 'RIFKHAN'
+    };
+
+    if (requestedUsername) {
+      const normalized = requestedUsername.trim().toLowerCase();
+
+      const mappedUsername =
+        usernameMap[normalized] ||
+        usernameMap[requestedUsername] ||
+        requestedUsername.toUpperCase();
+
+      console.log(
+        `[Snowflake-Notification] 🔄 User Mapping: "${requestedUsername}" -> "${mappedUsername}"`
+      );
+
+      return mappedUsername;
+    }
+
     const envUsername = process.env.SNOWFLAKE_USERNAME;
-    if (!envUsername) throw new Error('No username provided and SNOWFLAKE_USERNAME is not set');
+
+    if (!envUsername) {
+      throw new Error(
+        'No username provided and SNOWFLAKE_USERNAME is not set'
+      );
+    }
+
     return envUsername;
   }
 
