@@ -8,9 +8,9 @@ import { Activity, ListChecks, Database, DollarSign, RefreshCw } from "lucide-re
 import { useWarehouseQuery } from "@/hooks/use-warehouse-query";
 import { TASKS_SQL, PIPES_SQL, COSTS_SQL, TaskExecutionRow, PipeLogRow, WarehouseCostRow } from "@/lib/monitoring-queries";
 
-import OverviewPanel from "@/components/monitoring/Overview-panel";
+import OverviewPanel from "@/components/monitoring/overview-panel";
 import TaskExecutionPanel from "@/components/monitoring/task-execution-panel";
-import PipelineStatusPanel from "@/components/monitoring/Pipeline-status-panel";
+import PipelineStatusPanel from "@/components/monitoring/pipeline-status-panel";
 import WarehouseCostPanel from "@/components/monitoring/warehouse-cost-panel";
 const REFRESH_MS = 60_000; // client re-polls /api/query every minute; the
 // endpoint itself decides whether that's a cache hit or a fresh Snowflake run.
