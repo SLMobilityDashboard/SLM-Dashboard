@@ -232,9 +232,9 @@ function useBatteryData(
     }
 
     // Exclude idle data if requested
-    if (!filters.includeIdleData) {
-      conditions.push(`NOT (MOTORRPM <= 20 AND THROTTLEPERCENT <= 50 AND ABS(BATCURRENT) <= 20)`);
-    }
+    // if (!filters.includeIdleData) {
+    //   conditions.push(`NOT (MOTORRPM <= 20 AND THROTTLEPERCENT <= 50 AND ABS(BATCURRENT) <= 20)`);
+    // }
 
     return conditions;
   }, [filters]);

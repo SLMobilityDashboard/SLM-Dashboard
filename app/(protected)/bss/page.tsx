@@ -59,7 +59,7 @@ export interface BatterySwappingStation {
   APPROVED_BY?: string;
   BSS_PLANTED_DATE_ELEC_UNIT_COUNT?: number;
   BSS_PLANTED_DATE?: Date;
-  BSS_PLANTED_PLACE_MOBILE_NUMBER?: string;
+  CONTACT_NUMBER?: string;
   CITY_ID?: string;
   LOCATION_CODE?: string;
   LOCATION_NAME?: string;
@@ -243,7 +243,7 @@ const buildComprehensiveBSSQuery = () => {
       ss.APPROVED_BY,
       ss.BSS_PLANTED_DATE_ELEC_UNIT_COUNT,
       ss.BSS_PLANTED_DATE,
-      ss.BSS_PLANTED_PLACE_MOBILE_NUMBER,
+      ss.CONTACT_NUMBER,
       -- Location details
       ss.CITY_ID,
       ss.LOCATION_CODE,
@@ -874,7 +874,7 @@ const BSSOverviewPage: React.FC = () => {
           APPROVED_BY: item.APPROVED_BY,
           BSS_PLANTED_DATE_ELEC_UNIT_COUNT: item.BSS_PLANTED_DATE_ELEC_UNIT_COUNT,
           BSS_PLANTED_DATE: item.BSS_PLANTED_DATE ? new Date(item.BSS_PLANTED_DATE) : undefined,
-          BSS_PLANTED_PLACE_MOBILE_NUMBER: item.BSS_PLANTED_PLACE_MOBILE_NUMBER,
+          CONTACT_NUMBER: item.CONTACT_NUMBER,
           CITY_ID: item.CITY_ID,
           LOCATION_CODE: item.LOCATION_CODE,
           LOCATION_NAME: item.LOCATION_NAME,

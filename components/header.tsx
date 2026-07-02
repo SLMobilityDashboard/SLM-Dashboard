@@ -88,14 +88,14 @@ export function Header() {
   }, []);
 
   // Fetch notifications
-  useEffect(() => {
-    if (isClient) {
-      fetchNotifications();
-      // Poll for new notifications every hour
-      const interval = setInterval(fetchNotifications, 3600000);
-      return () => clearInterval(interval);
-    }
-  }, [isClient]);
+  // useEffect(() => {
+  //   if (isClient) {
+  //     fetchNotifications();
+  //     // Poll for new notifications every hour
+  //     const interval = setInterval(fetchNotifications, 3600000);
+  //     return () => clearInterval(interval);
+  //   }
+  // }, [isClient]);
 
   const fetchNotifications = async (forceRefresh = false) => {
     setNotificationsLoading(true);

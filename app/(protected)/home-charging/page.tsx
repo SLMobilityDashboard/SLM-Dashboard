@@ -29,6 +29,8 @@ import {
   Eye,
   ChevronsUpDown,
   Calendar,
+  Battery,
+  ArrowLeftRight,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -51,13 +53,18 @@ interface SuspiciousRecord {
   CHASSIS_NUMBER: string;
   YESTERDAY_FIRST_CTIME: string;
   YESTERDAY_FIRST_BATPERCENT: number;
+  YESTERDAY_FIRST_BMS_ID: string;
   BEFORE_YESTERDAY_MAX_CTIME: string;
   BEFORE_YESTERDAY_MAX_BATPERCENT: number;
+  BEFORE_YESTERDAY_MAX_BMS_ID: string;
   BATPERCENT_DIFFERENCE: number;
+  EVENT_TYPE: 'ILLEGAL_CHARGE' | 'BATTERY_SWAP';
+  IS_SWAP: boolean;
 }
 
 type SortField = keyof SuspiciousRecord;
 type SortDir = "asc" | "desc";
+type EventTypeFilter = "all" | "ILLEGAL_CHARGE" | "BATTERY_SWAP";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -145,6 +152,7 @@ function DetailModal({
 }) {
   const severity = getSeverity(record.BATPERCENT_DIFFERENCE);
   const cfg = severityConfig[severity];
+  const isSwap = record.IS_SWAP;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -158,11 +166,15 @@ function DetailModal({
         <div className={`p-5 border-b ${cfg.border} flex items-start justify-between`}>
           <div className="flex items-center gap-3">
             <div className={`p-2 rounded-xl ${cfg.bg}`}>
-              <ShieldAlert className={`w-5 h-5 ${cfg.color}`} />
+              {isSwap ? (
+                <ArrowLeftRight className={`w-5 h-5 text-blue-400`} />
+              ) : (
+                <ShieldAlert className={`w-5 h-5 ${cfg.color}`} />
+              )}
             </div>
             <div>
               <h2 className="font-bold text-slate-100 text-lg">
-                Illegal Charge Detected
+                {isSwap ? "Battery Swap Detected" : "Illegal Charge Detected"}
               </h2>
               <p className="text-sm text-slate-400">{record.TBOXID}</p>
             </div>
@@ -201,6 +213,34 @@ function DetailModal({
             </div>
           </div>
 
+          {/* BMS ID Comparison */}
+          <div>
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+              BMS ID Comparison
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/50">
+                <p className="text-xs text-slate-400 mb-1">Before (Day Before Yesterday)</p>
+                <p className="text-sm font-mono text-slate-200">{record.BEFORE_YESTERDAY_MAX_BMS_ID || "—"}</p>
+              </div>
+              <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/50">
+                <p className="text-xs text-slate-400 mb-1">After (Yesterday First)</p>
+                <p className="text-sm font-mono text-slate-200">{record.YESTERDAY_FIRST_BMS_ID || "—"}</p>
+              </div>
+            </div>
+            {isSwap ? (
+              <div className="mt-2 p-2 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center gap-2">
+                <ArrowLeftRight className="w-4 h-4 text-blue-400" />
+                <span className="text-sm text-blue-300">Different BMS IDs detected - Battery Swap</span>
+              </div>
+            ) : (
+              <div className="mt-2 p-2 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-red-400" />
+                <span className="text-sm text-red-300">Same BMS ID - Illegal Charging Detected</span>
+              </div>
+            )}
+          </div>
+
           <div>
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
               Battery Timeline
@@ -212,6 +252,7 @@ function DetailModal({
                   <span>{formatDateTime(record.BEFORE_YESTERDAY_MAX_CTIME)}</span>
                 </div>
                 <BatteryBar pct={record.BEFORE_YESTERDAY_MAX_BATPERCENT} color="bg-slate-500" />
+                <div className="text-xs text-slate-500 mt-1">BMS: {record.BEFORE_YESTERDAY_MAX_BMS_ID || "—"}</div>
               </div>
               <div className="flex items-center justify-center gap-2">
                 <div className="h-px flex-1 bg-slate-700" />
@@ -227,14 +268,15 @@ function DetailModal({
                   <span>{formatDateTime(record.YESTERDAY_FIRST_CTIME)}</span>
                 </div>
                 <BatteryBar pct={record.YESTERDAY_FIRST_BATPERCENT} color={cfg.bar} />
+                <div className="text-xs text-slate-500 mt-1">BMS: {record.YESTERDAY_FIRST_BMS_ID || "—"}</div>
               </div>
             </div>
           </div>
 
           <div className="flex items-center justify-between">
-            <span className="text-sm text-slate-400">Severity</span>
-            <span className={`text-sm font-semibold px-3 py-1 rounded-full border ${cfg.badge}`}>
-              {cfg.label} (+{record.BATPERCENT_DIFFERENCE}%)
+            <span className="text-sm text-slate-400">Event Type</span>
+            <span className={`text-sm font-semibold px-3 py-1 rounded-full border ${isSwap ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' : cfg.badge}`}>
+              {isSwap ? "🔄 Battery Swap" : `${cfg.label} (+${record.BATPERCENT_DIFFERENCE}%)`}
             </span>
           </div>
         </div>
@@ -293,6 +335,7 @@ export default function BatteryAnalysisPage() {
 
   const [fraudSearch, setFraudSearch] = useState("");
   const [fraudSeverityFilter, setFraudSeverityFilter] = useState<"all" | "critical" | "warning" | "low">("all");
+  const [fraudEventTypeFilter, setFraudEventTypeFilter] = useState<EventTypeFilter>("all");
   const [fraudMinThreshold, setFraudMinThreshold] = useState(5);
   const [fraudSortField, setFraudSortField] = useState<SortField>("BATPERCENT_DIFFERENCE");
   const [fraudSortDir, setFraudSortDir] = useState<SortDir>("desc");
@@ -352,10 +395,32 @@ export default function BatteryAnalysisPage() {
     setFraudError(null);
     const sql = `
       SELECT
-        REPORT_DATE, TBOXID, CUSTOMER_ID, CUSTOMER_NAME, CHASSIS_NUMBER,
-        YESTERDAY_FIRST_CTIME, YESTERDAY_FIRST_BATPERCENT,
-        BEFORE_YESTERDAY_MAX_CTIME, BEFORE_YESTERDAY_MAX_BATPERCENT,
-        BATPERCENT_DIFFERENCE
+        REPORT_DATE, 
+        TBOXID, 
+        CUSTOMER_ID, 
+        CUSTOMER_NAME, 
+        CHASSIS_NUMBER,
+        YESTERDAY_FIRST_CTIME, 
+        YESTERDAY_FIRST_BATPERCENT,
+        YESTERDAY_FIRST_BMS_ID,
+        BEFORE_YESTERDAY_MAX_CTIME, 
+        BEFORE_YESTERDAY_MAX_BATPERCENT,
+        BEFORE_YESTERDAY_MAX_BMS_ID,
+        BATPERCENT_DIFFERENCE,
+        CASE 
+          WHEN YESTERDAY_FIRST_BMS_ID != BEFORE_YESTERDAY_MAX_BMS_ID 
+            OR YESTERDAY_FIRST_BMS_ID IS NULL 
+            OR BEFORE_YESTERDAY_MAX_BMS_ID IS NULL
+          THEN 'BATTERY_SWAP' 
+          ELSE 'ILLEGAL_CHARGE' 
+        END as EVENT_TYPE,
+        CASE 
+          WHEN YESTERDAY_FIRST_BMS_ID != BEFORE_YESTERDAY_MAX_BMS_ID 
+            OR YESTERDAY_FIRST_BMS_ID IS NULL 
+            OR BEFORE_YESTERDAY_MAX_BMS_ID IS NULL
+          THEN 1 
+          ELSE 0 
+        END as IS_SWAP
       FROM REPORT_DB.GPS_DASHBOARD.TBOX_BATPERCENT_SUMMARY
       WHERE BATPERCENT_DIFFERENCE >= ${fraudMinThreshold}
         AND REPORT_DATE >= DATEADD(day, -7, CURRENT_DATE())
@@ -480,6 +545,7 @@ export default function BatteryAnalysisPage() {
     .filter((r) => {
       const sev = getSeverity(r.BATPERCENT_DIFFERENCE);
       if (fraudSeverityFilter !== "all" && sev !== fraudSeverityFilter) return false;
+      if (fraudEventTypeFilter !== "all" && r.EVENT_TYPE !== fraudEventTypeFilter) return false;
       if (fraudSearch) {
         const q = fraudSearch.toLowerCase();
         return (
@@ -503,7 +569,8 @@ export default function BatteryAnalysisPage() {
     critical: fraudRecords.filter((r) => getSeverity(r.BATPERCENT_DIFFERENCE) === "critical").length,
     warning: fraudRecords.filter((r) => getSeverity(r.BATPERCENT_DIFFERENCE) === "warning").length,
     low: fraudRecords.filter((r) => getSeverity(r.BATPERCENT_DIFFERENCE) === "low").length,
-    // unique vehicles across all 7 days (same TBOXID can appear on multiple days)
+    swaps: fraudRecords.filter((r) => r.IS_SWAP).length,
+    illegalCharges: fraudRecords.filter((r) => !r.IS_SWAP).length,
     uniqueVehicles: new Set(fraudRecords.map((r) => r.TBOXID)).size,
     maxJump: fraudRecords.length > 0 ? Math.max(...fraudRecords.map((r) => r.BATPERCENT_DIFFERENCE)) : 0,
     avgJump: fraudRecords.length > 0
@@ -525,14 +592,14 @@ export default function BatteryAnalysisPage() {
 
   const exportFraudCSV = () => {
     if (!filteredFraud.length) return;
-    const header = Object.keys(filteredFraud[0]).join(",");
+    const headers = Object.keys(filteredFraud[0]).join(",");
     const rows = filteredFraud.map((r) => Object.values(r).join(","));
-    const csv = [header, ...rows].join("\n");
+    const csv = [headers, ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `illegal_charges_${new Date().toISOString().split("T")[0]}.csv`;
+    a.download = `battery_events_${new Date().toISOString().split("T")[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -562,6 +629,9 @@ export default function BatteryAnalysisPage() {
             beforePct: r.BEFORE_YESTERDAY_MAX_BATPERCENT,
             afterPct: r.YESTERDAY_FIRST_BATPERCENT,
             diff: r.BATPERCENT_DIFFERENCE,
+            isSwap: r.IS_SWAP,
+            beforeBmsId: r.BEFORE_YESTERDAY_MAX_BMS_ID,
+            afterBmsId: r.YESTERDAY_FIRST_BMS_ID,
           }));
       })()
     : [];
@@ -586,16 +656,18 @@ export default function BatteryAnalysisPage() {
             Battery History & Diagnostics
           </h1>
           <p className="text-xl text-slate-400 max-w-2xl mx-auto">
-            Comprehensive battery performance, health insights, and fraud detection
+            Comprehensive battery performance, health insights, and fraud detection with BMS tracking
           </p>
         </div>
 
         {/* Fraud Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
           {[
             { label: "Critical", value: fraudStats.critical, icon: <AlertTriangle className="w-4 h-4" />, color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", filter: "critical" as const },
             { label: "Warning", value: fraudStats.warning, icon: <Zap className="w-4 h-4" />, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20", filter: "warning" as const },
             { label: "Suspicious", value: fraudStats.low, icon: <Shield className="w-4 h-4" />, color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/20", filter: "low" as const },
+            { label: "Illegal Charges", value: fraudStats.illegalCharges, icon: <ShieldAlert className="w-4 h-4" />, color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/20", filter: null },
+            { label: "Battery Swaps", value: fraudStats.swaps, icon: <ArrowLeftRight className="w-4 h-4" />, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20", filter: null },
             { label: "Vehicles", value: fraudStats.uniqueVehicles, icon: <Car className="w-4 h-4" />, color: "text-purple-400", bg: "bg-purple-500/10", border: "border-purple-500/20", filter: null },
             { label: "Max Jump", value: `+${fraudStats.maxJump}%`, icon: <TrendingUp className="w-4 h-4" />, color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/20", filter: null },
             { label: "Avg Jump", value: `+${fraudStats.avgJump}%`, icon: <Activity className="w-4 h-4" />, color: "text-teal-400", bg: "bg-teal-500/10", border: "border-teal-500/20", filter: null },
@@ -626,10 +698,15 @@ export default function BatteryAnalysisPage() {
             >
               <div className="flex items-center gap-2">
                 <ShieldAlert className="h-4 w-4 text-red-400" />
-                <span className="font-medium">Illegal Charging Alerts</span>
+                <span className="font-medium">Battery Events & Alerts</span>
                 {fraudStats.critical > 0 && (
                   <Badge className="bg-red-500/20 text-red-300 border border-red-500/30">
                     {fraudStats.critical} critical
+                  </Badge>
+                )}
+                {fraudStats.swaps > 0 && (
+                  <Badge className="bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    {fraudStats.swaps} swaps
                   </Badge>
                 )}
                 {fraudLastRefreshed && !isFraudSectionExpanded && (
@@ -712,6 +789,27 @@ export default function BatteryAnalysisPage() {
                       </div>
                     </div>
 
+                    <div className="space-y-1">
+                      <Label className="text-xs">Event Type</Label>
+                      <div className="flex items-center gap-2">
+                        {(["all", "ILLEGAL_CHARGE", "BATTERY_SWAP"] as const).map((type) => (
+                          <button
+                            key={type}
+                            onClick={() => setFraudEventTypeFilter(type)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                              fraudEventTypeFilter === type
+                                ? type === "BATTERY_SWAP" 
+                                  ? "bg-blue-600 text-white border-blue-500"
+                                  : "bg-purple-600 text-white border-purple-500"
+                                : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700"
+                            }`}
+                          >
+                            {type === "all" ? "All" : type === "ILLEGAL_CHARGE" ? "⚡ Illegal" : "🔄 Swap"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="flex gap-2 ml-auto">
                       <Button variant="outline" size="sm" onClick={exportFraudCSV} disabled={!filteredFraud.length} className="border-slate-600">
                         <Download className="w-4 h-4 mr-1.5" />
@@ -732,13 +830,13 @@ export default function BatteryAnalysisPage() {
                 ) : fraudLoading && fraudRecords.length === 0 ? (
                   <div className="p-10 text-center">
                     <Loader2 className="w-8 h-8 text-purple-400 animate-spin mx-auto mb-3" />
-                    <p className="text-slate-400">Loading suspicious records…</p>
+                    <p className="text-slate-400">Loading battery events…</p>
                   </div>
                 ) : filteredFraud.length === 0 ? (
                   <div className="p-10 text-center">
                     <Shield className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-                    <p className="text-slate-400 font-medium">No suspicious records found</p>
-                    <p className="text-slate-500 text-sm mt-1">Try lowering the minimum battery jump threshold</p>
+                    <p className="text-slate-400 font-medium">No events found</p>
+                    <p className="text-slate-500 text-sm mt-1">Try adjusting the filters or minimum battery jump threshold</p>
                   </div>
                 ) : (
                   <>
@@ -758,21 +856,25 @@ export default function BatteryAnalysisPage() {
                               { key: "TBOXID", label: "TBOX ID" },
                               { key: "CHASSIS_NUMBER", label: "Chassis" },
                               { key: "CUSTOMER_NAME", label: "Customer" },
-                              { key: "BEFORE_YESTERDAY_MAX_BATPERCENT", label: "Before Yesterday" },
-                              { key: "YESTERDAY_FIRST_BATPERCENT", label: "Yesterday" },
+                              { key: "BEFORE_YESTERDAY_MAX_BATPERCENT", label: "Before" },
+                              { key: "YESTERDAY_FIRST_BATPERCENT", label: "After" },
                               { key: "BATPERCENT_DIFFERENCE", label: "Jump" },
+                              { key: "BMS_IDS", label: "BMS ID" },
                             ].map((col) => (
                               <th
                                 key={col.key}
-                                onClick={() => handleFraudSort(col.key as SortField)}
-                                className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider cursor-pointer hover:text-slate-200 transition-colors select-none"
+                                onClick={() => col.key !== "BMS_IDS" && handleFraudSort(col.key as SortField)}
+                                className={`px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider ${
+                                  col.key !== "BMS_IDS" ? "cursor-pointer hover:text-slate-200 transition-colors" : ""
+                                } select-none`}
                               >
                                 <div className="flex items-center gap-1">
                                   {col.label}
-                                  <FraudSortIcon field={col.key as SortField} />
+                                  {col.key !== "BMS_IDS" && <FraudSortIcon field={col.key as SortField} />}
                                 </div>
                               </th>
                             ))}
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Type</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider">Severity</th>
                             <th className="px-4 py-3" />
                           </tr>
@@ -781,6 +883,7 @@ export default function BatteryAnalysisPage() {
                           {filteredFraud.map((record, idx) => {
                             const severity = getSeverity(record.BATPERCENT_DIFFERENCE);
                             const cfg = severityConfig[severity];
+                            const isSwap = record.IS_SWAP;
                             return (
                               <tr key={`${record.TBOXID}-${record.REPORT_DATE}-${idx}`} className="hover:bg-slate-800/30 transition-colors group">
                                 {/* Report Date */}
@@ -819,21 +922,43 @@ export default function BatteryAnalysisPage() {
                                 </td>
                                 <td className="px-4 py-3">
                                   <div className="w-28">
-                                    <BatteryBar pct={record.YESTERDAY_FIRST_BATPERCENT} color={cfg.bar} />
+                                    <BatteryBar pct={record.YESTERDAY_FIRST_BATPERCENT} color={isSwap ? "bg-blue-500" : cfg.bar} />
                                     <div className="text-xs text-slate-500 mt-0.5">
                                       {formatDateTime(record.YESTERDAY_FIRST_CTIME)}
                                     </div>
                                   </div>
                                 </td>
                                 <td className="px-4 py-3">
-                                  <div className={`inline-flex items-center gap-1 font-bold text-sm ${cfg.color}`}>
+                                  <div className={`inline-flex items-center gap-1 font-bold text-sm ${isSwap ? "text-blue-400" : cfg.color}`}>
                                     <TrendingUp className="w-3.5 h-3.5" />
                                     +{record.BATPERCENT_DIFFERENCE}%
                                   </div>
                                 </td>
                                 <td className="px-4 py-3">
-                                  <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${cfg.badge}`}>
-                                    {cfg.label}
+                                  <div className="text-xs">
+                                    <div className="text-slate-400">Before: <span className="font-mono text-slate-300">{record.BEFORE_YESTERDAY_MAX_BMS_ID || "—"}</span></div>
+                                    <div className="text-slate-400">After: <span className="font-mono text-slate-300">{record.YESTERDAY_FIRST_BMS_ID || "—"}</span></div>
+                                    {isSwap && (
+                                      <Badge className="mt-1 bg-blue-500/20 text-blue-300 border-blue-500/30 text-[10px]">
+                                        🔄 Different
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  {isSwap ? (
+                                    <span className="text-xs px-2.5 py-1 rounded-full border font-medium bg-blue-500/20 text-blue-300 border-blue-500/30 flex items-center gap-1">
+                                      <ArrowLeftRight className="w-3 h-3" /> Swap
+                                    </span>
+                                  ) : (
+                                    <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${cfg.badge}`}>
+                                      ⚡ Illegal
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${isSwap ? "bg-blue-500/20 text-blue-300 border-blue-500/30" : cfg.badge}`}>
+                                    {isSwap ? "N/A" : cfg.label}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3">
@@ -861,6 +986,8 @@ export default function BatteryAnalysisPage() {
                     <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" /><b className="text-slate-400">Critical</b> ≥ {THRESHOLD_CRITICAL}% jump</span>
                     <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-500 inline-block" /><b className="text-slate-400">Warning</b> {THRESHOLD_WARNING}–{THRESHOLD_CRITICAL - 1}%</span>
                     <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-500 inline-block" /><b className="text-slate-400">Suspicious</b> below {THRESHOLD_WARNING}%</span>
+                    <span className="flex items-center gap-1.5"><ArrowLeftRight className="w-3 h-3 text-blue-400" /><b className="text-slate-400">Swap</b> Different BMS IDs</span>
+                    <span className="flex items-center gap-1.5"><ShieldAlert className="w-3 h-3 text-red-400" /><b className="text-slate-400">Illegal</b> Same BMS ID</span>
                     <span className="ml-auto">Last 7 days · Compares day-before-yesterday max vs yesterday first reading</span>
                   </div>
                 </div>
@@ -1047,7 +1174,6 @@ export default function BatteryAnalysisPage() {
 
         {/* ── Battery History Component ──────────────────────────────────── */}
         {batteryFilters.selectedVehicleImei ? (
-          // ✅ THE FIX: illegalChargeEvents now passed so BatteryHistory can highlight fraud regions
           <BatteryHistory
             IMEI={batteryFilters.selectedVehicleImei}
             filters={batteryFilters}

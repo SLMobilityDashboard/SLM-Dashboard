@@ -54,7 +54,7 @@ interface BSSChargeData {
   CHARGE_LEVEL: number;
   TEMP: number;
   VOLTAGE: number;
-    CURRENT_VALUE: number;  // Changed from CURRENT
+  CURRENT_VALUE: number;
   CHARGER_STATUS: string;
 }
 
@@ -208,7 +208,7 @@ function consolidateRapidSwaps(swaps: VehicleSwapEvent[], timeWindowMinutes: num
 
 function useBatteryDataByBMS(
   bmsId: string,
-  filters: BatteryFilters = { timeRange: 50 }
+  filters: BatteryFilters = { timeRange: 168 }
 ) {
   const [batteryData, setBatteryData] = useState<TboxData[]>([]);
   const [vehicleSwaps, setVehicleSwaps] = useState<VehicleSwapEvent[]>([]);
@@ -222,7 +222,6 @@ function useBatteryDataByBMS(
 
   const fetchSnowflakeData = useCallback(async (query: string, queryName?: string) => {
     try {
-      
       const response = await fetch("/api/query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -237,11 +236,7 @@ function useBatteryDataByBMS(
         throw new Error(`Snowflake API Error (${response.status}): ${JSON.stringify(result)}`);
       }
 
-    
       const data = result.data || result.rows || result || [];
-      
-     
-      
       return data;
     } catch (error) {
       console.error(`${queryName || 'Query'} failed:`, error);
@@ -298,7 +293,6 @@ function useBatteryDataByBMS(
       conditions.push(`CTIME >= ${filters.startTimestamp}`);
       conditions.push(`CTIME <= ${filters.endTimestamp}`);
     } else if (filters.timeRange) {
-      // Calculate timestamp in JavaScript to avoid Snowflake EXTRACT(EPOCH) syntax issues
       const hoursAgo = Math.floor(Date.now() / 1000) - (filters.timeRange * 3600);
       conditions.push(`CTIME >= ${hoursAgo}`);
     }
@@ -329,7 +323,6 @@ function useBatteryDataByBMS(
       conditions.push(`CT >= ${filters.startTimestamp}`);
       conditions.push(`CT <= ${filters.endTimestamp}`);
     } else if (filters.timeRange) {
-      // Calculate timestamp in JavaScript to avoid Snowflake EXTRACT(EPOCH) syntax issues
       const hoursAgo = Math.floor(Date.now() / 1000) - (filters.timeRange * 3600);
       conditions.push(`CT >= ${hoursAgo}`);
     }
@@ -337,41 +330,59 @@ function useBatteryDataByBMS(
     return conditions;
   }, [filters]);
 
-  const queries = useMemo(() => {
-    const filterConditions = buildFilterConditions();
-    const bssFilterConditions = buildBSSFilterConditions();
-    
-    const cleanedBmsId = bmsId
-      .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
-      .trim()
-      .toUpperCase();
-    
-    const whereClause = `WHERE UPPER(TRIM(REGEXP_REPLACE(
-      COALESCE(BMSID, ''), 
-      '[\\x00-\\x1F\\x7F-\\x9F]', '', 1, 0, 'c'
-    ))) = '${cleanedBmsId}' AND ${filterConditions.join(' AND ')}`;
+  const loadData = useCallback(async () => {
+    if (!bmsId) {
+      setLoading(false);
+      return;
+    }
 
-    const bssWhereClause = `WHERE UPPER(TRIM(REGEXP_REPLACE(
-      COALESCE(BID, ''), 
-      '[\\x00-\\x1F\\x7F-\\x9F]', '', 1, 0, 'c'
-    ))) = '${cleanedBmsId}' AND ${bssFilterConditions.join(' AND ')}`;
-
-    return {
-      debugBmsIds: `
-        SELECT DISTINCT 
-          BMSID,
-          TBOXID,
-          COUNT(*) as RECORD_COUNT,
-          MIN(CTIME) as FIRST_SEEN,
-          MAX(CTIME) as LAST_SEEN
-        FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-        WHERE ${filterConditions.join(' AND ')}
-        GROUP BY BMSID, TBOXID
-        ORDER BY RECORD_COUNT DESC
-        LIMIT 50
-      `,
+    setLoading(true);
+    setError(null);
+    setDebugInfo(null);
+    
+    try {
+      const cleanId = bmsId.trim();
       
-      batteryTelemetry: `
+      // Step 1: Check if the TBOXID exists at all
+      const existenceCheck = `
+        SELECT 
+          COUNT(*) as TOTAL_RECORDS,
+          MIN(CTIME) as EARLIEST_TIME,
+          MAX(CTIME) as LATEST_TIME,
+          COUNT(DISTINCT DATE_TRUNC('day', TO_TIMESTAMP(CTIME))) as ACTIVE_DAYS
+        FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+        WHERE TBOXID = '${cleanId}'
+      `;
+      
+      const existenceResult = await fetchSnowflakeData(existenceCheck, "existenceCheck");
+      
+      if (!existenceResult || existenceResult.length === 0 || existenceResult[0].TOTAL_RECORDS === 0) {
+        // TBOXID doesn't exist - show what does exist
+        const sampleTboxQuery = `
+          SELECT DISTINCT 
+            TBOXID,
+            COUNT(*) as RECORD_COUNT,
+            MIN(CTIME) as FIRST_SEEN,
+            MAX(CTIME) as LAST_SEEN
+          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+          GROUP BY TBOXID
+          ORDER BY RECORD_COUNT DESC
+          LIMIT 10
+        `;
+        
+        const sampleTbox = await fetchSnowflakeData(sampleTboxQuery, "sampleTbox");
+        
+        setError(`TBOXID "${cleanId}" not found in database. Available TBOXIDs: ${sampleTbox.map((r: any) => r.TBOXID).join(', ')}`);
+        setLoading(false);
+        return;
+      }
+      
+      // Step 2: Check data with time filter
+      const filterConditions = buildFilterConditions();
+      const whereClause = `WHERE TBOXID = '${cleanId}' AND ${filterConditions.join(' AND ')}`;
+      
+      // Step 3: Fetch telemetry data
+      const telemetryQuery = `
         SELECT
           BATTEMP,
           BATVOLT,
@@ -397,140 +408,205 @@ function useBatteryDataByBMS(
         FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
         ${whereClause}
         ORDER BY CTIME ASC
-      `,
+      `;
 
-      bssChargeData: `
-        SELECT 
-          DEVICE_ID,
-          _CABINET_NO as CABINET_NO,
-          NO as SLOT_NO,
-          CT as CTIME,
-          COALESCE(KWH, BATTERY) as CHARGE_LEVEL,
-          CELL_TEMP as TEMP,
-          V as VOLTAGE,
-          I as CURRENT_VALUE,  -- Changed from CURRENT to CURRENT_VALUE
-          S as CHARGER_STATUS
-        FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
-        ${bssWhereClause}
-          AND IS_BATTERY = '1'
-          AND (KWH IS NOT NULL OR BATTERY IS NOT NULL)
-        ORDER BY CT ASC
-      `,
-
-      bssChargingSessions: `
-        WITH charging_sessions AS (
-          SELECT 
-            DEVICE_ID,
-            BID,
-            _CABINET_NO as CABINET_NO,
-            NO as SLOT_NO,
-            CT,
-            COALESCE(KWH, BATTERY) as CHARGE_LEVEL,
-            CELL_TEMP as TEMP,
-            V as VOLTAGE,
-            I as CURRENT_VALUE,  -- Changed from CURRENT to CURRENT_VALUE
-            S as CHARGER_STATUS,
-            LAG(CT) OVER (PARTITION BY DEVICE_ID, _CABINET_NO, NO ORDER BY CT) as PREV_CT,
-            LAG(COALESCE(KWH, BATTERY)) OVER (PARTITION BY DEVICE_ID, _CABINET_NO, NO ORDER BY CT) as PREV_CHARGE,
-            LAG(S) OVER (PARTITION BY DEVICE_ID, _CABINET_NO, NO ORDER BY CT) as PREV_STATUS
-          FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
-          ${bssWhereClause}
-            AND IS_BATTERY = '1'
-            AND (KWH IS NOT NULL OR BATTERY IS NOT NULL)
-        ),
-        session_boundaries AS (
-          SELECT
-            *,
-            CASE 
-              WHEN PREV_CT IS NULL OR (CT - PREV_CT) > 3600 THEN 1
-              WHEN (CHARGER_STATUS IN ('charging', 'charged')) AND 
-                  (PREV_STATUS NOT IN ('charging', 'charged') OR PREV_STATUS IS NULL) THEN 1
-              WHEN CHARGE_LEVEL > PREV_CHARGE + 5 THEN 1
-              ELSE 0
-            END as IS_SESSION_START
-          FROM charging_sessions
-        ),
-        sessions_with_id AS (
-          SELECT
-            *,
-            SUM(IS_SESSION_START) OVER (PARTITION BY DEVICE_ID, CABINET_NO, SLOT_NO ORDER BY CT) as SESSION_ID
-          FROM session_boundaries
-        )
-        SELECT
-          DEVICE_ID,
-          CABINET_NO,
-          SLOT_NO,
-          MIN(CT) as STARTTIME,
-          MAX(CT) as ENDTIME,
-          ROUND((MAX(CT) - MIN(CT)) / 3600.0, 2) as DURATION,
-          MIN(CHARGE_LEVEL) as STARTCHARGE,
-          MAX(CHARGE_LEVEL) as ENDCHARGE,
-          (MAX(CHARGE_LEVEL) - MIN(CHARGE_LEVEL)) as CHARGE_GAINED,
-          ROUND(AVG(NULLIF(TEMP, 0)), 1) as AVGTEMP,
-          ROUND(AVG(NULLIF(VOLTAGE, 0)), 1) as AVGVOLTAGE,
-          ROUND(AVG(ABS(NULLIF(CURRENT_VALUE, 0))), 1) as AVGCURRENT,  -- Updated here too
-          ROUND(MAX(NULLIF(TEMP, 0)), 1) as MAXTEMP,
-          MAX(CHARGER_STATUS) as CHARGER_STATUS,
-          MAX(BID) as BID
-        FROM sessions_with_id
-        GROUP BY DEVICE_ID, CABINET_NO, SLOT_NO, SESSION_ID
-        HAVING (MAX(CT) - MIN(CT)) >= 300
-          AND (MAX(CHARGE_LEVEL) - MIN(CHARGE_LEVEL)) > 1
-        ORDER BY STARTTIME DESC
-        LIMIT 100
-      `,
-            
-      bssDebugQuery: `
-        SELECT 
-          COUNT(*) as TOTAL_BSS_RECORDS,
-          COUNT(DISTINCT BID) as UNIQUE_BIDS,
-          COUNT(DISTINCT DEVICE_ID) as UNIQUE_DEVICES,
-          COUNT(CASE WHEN IS_BATTERY = 'Y' THEN 1 END) as BATTERY_PRESENT_RECORDS,
-          COUNT(CASE WHEN KWH IS NOT NULL THEN 1 END) as KWH_NOT_NULL,
-          COUNT(CASE WHEN BATTERY IS NOT NULL THEN 1 END) as BATTERY_NOT_NULL,
-          MIN(CT) as EARLIEST_TIME,
-          MAX(CT) as LATEST_TIME
-        FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
-        WHERE ${bssFilterConditions.join(' AND ')}
-      `,
+      let telemetryResult = await fetchSnowflakeData(telemetryQuery, "batteryTelemetry");
       
-      bssSampleBIDs: `
-        SELECT DISTINCT 
-          BID,
-          DEVICE_ID,
-          COUNT(*) as RECORD_COUNT,
-          MIN(CT) as FIRST_SEEN,
-          MAX(CT) as LAST_SEEN
-        FROM SOURCE_DATA.BSS_DATA.BSS_CABINET_STATUS
-        WHERE ${bssFilterConditions.join(' AND ')}
-          AND BID IS NOT NULL
-          AND IS_BATTERY = 'Y'
-        GROUP BY BID, DEVICE_ID
-        ORDER BY RECORD_COUNT DESC
-        LIMIT 20
-      `,
-
-      vehicleSwapDetection: `
+      // If no data with idle filter, try without it
+      if (!telemetryResult || telemetryResult.length === 0) {
+        const noIdleConditions = filterConditions.filter(c => !c.includes('NOT (MOTORRPM'));
+        const noIdleWhere = `WHERE TBOXID = '${cleanId}' AND ${noIdleConditions.join(' AND ')}`;
+        
+        const noIdleQuery = `
+          SELECT
+            BATTEMP,
+            BATVOLT,
+            COALESCE(NULLIF(BATCELLDIFFMAX, 0), CASE WHEN BATVOLT IS NOT NULL AND BATVOLT > 0 THEN ABS(BATVOLT - 520) * 10.0 ELSE 0 END) as BATCELLDIFFMAX,
+            BATCYCLECOUNT,
+            BATSOH,
+            BATPERCENT,
+            BATCURRENT,
+            COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR,
+            CTIME,
+            MOTORRPM,
+            TBOXID,
+            COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
+            COALESCE(STATE, 'UNKNOWN') as STATE,
+            THROTTLEPERCENT
+          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+          ${noIdleWhere}
+          ORDER BY CTIME ASC
+        `;
+        
+        telemetryResult = await fetchSnowflakeData(noIdleQuery, "batteryTelemetryNoIdle");
+        
+        if (telemetryResult && telemetryResult.length > 0) {
+          setDebugInfo(prev => ({
+            ...prev,
+            idleFilterRemoved: true,
+            idleFilterRemovedMessage: "All data was being filtered out by idle condition. Removed idle filter."
+          }));
+        }
+      }
+      
+      // If still no data, try a broader time range
+      if (!telemetryResult || telemetryResult.length === 0) {
+        const broadConditions = filterConditions.filter(c => !c.includes('CTIME >='));
+        const broadWhere = `WHERE TBOXID = '${cleanId}' AND ${broadConditions.join(' AND ')}`;
+        
+        const broadQuery = `
+          SELECT
+            BATTEMP,
+            BATVOLT,
+            COALESCE(NULLIF(BATCELLDIFFMAX, 0), CASE WHEN BATVOLT IS NOT NULL AND BATVOLT > 0 THEN ABS(BATVOLT - 520) * 10.0 ELSE 0 END) as BATCELLDIFFMAX,
+            BATCYCLECOUNT,
+            BATSOH,
+            BATPERCENT,
+            BATCURRENT,
+            COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR,
+            CTIME,
+            MOTORRPM,
+            TBOXID,
+            COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
+            COALESCE(STATE, 'UNKNOWN') as STATE,
+            THROTTLEPERCENT
+          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+          ${broadWhere}
+          ORDER BY CTIME DESC
+          LIMIT 1000
+        `;
+        
+        telemetryResult = await fetchSnowflakeData(broadQuery, "batteryTelemetryBroad");
+        
+        if (telemetryResult && telemetryResult.length > 0) {
+          setDebugInfo(prev => ({
+            ...prev,
+            timeRangeExpanded: true,
+            timeRangeExpandedMessage: "No data in current time range. Expanded to all available data."
+          }));
+        }
+      }
+      
+      if (!telemetryResult || telemetryResult.length === 0) {
+        setError(`No data found for TBOXID "${cleanId}" with current filters.`);
+        setLoading(false);
+        return;
+      }
+      
+      const normalizedTelemetry = normalizeUnits(telemetryResult);
+      setBatteryData(normalizedTelemetry);
+      
+      // Step 4: Fetch swap detection data
+      const swapConditions = buildFilterConditions();
+      const swapWhere = `WHERE TBOXID = '${cleanId}' AND ${swapConditions.join(' AND ')}`;
+      
+      const swapQuery = `
+        WITH cleaned_data AS (
+          SELECT
+            CTIME,
+            TBOXID,
+            BATSOH,
+            BATPERCENT,
+            LAG(TBOXID) OVER (ORDER BY CTIME) as prev_tbox,
+            LAG(BATSOH) OVER (ORDER BY CTIME) as prev_soh,
+            LAG(BATPERCENT) OVER (ORDER BY CTIME) as prev_charge,
+            LAG(CTIME) OVER (ORDER BY CTIME) as prev_time,
+            ROW_NUMBER() OVER (ORDER BY CTIME) as row_num
+          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+          ${swapWhere}
+        ),
+        swaps AS (
+          SELECT
+            CTIME as TIMESTAMP,
+            prev_tbox as OLDTBOXID,
+            TBOXID as NEWTBOXID,
+            COALESCE(prev_soh, 0) as OLDSOH,
+            COALESCE(BATSOH, 0) as NEWSOH,
+            COALESCE((BATPERCENT - prev_charge), 0) as CHARGECHANGE,
+            (CTIME - prev_time) as time_gap
+          FROM cleaned_data
+          WHERE TBOXID != prev_tbox
+            AND prev_tbox IS NOT NULL
+            AND TBOXID IS NOT NULL
+            AND prev_tbox != ''
+            AND TBOXID != ''
+            AND (CTIME - prev_time) >= 30
+            AND LENGTH(TBOXID) > 3
+            AND LENGTH(prev_tbox) > 3
+        )
         SELECT 
-          CTIME as TIMESTAMP,
-          LAG(TBOXID) OVER (ORDER BY CTIME) as OLDTBOXID,
-          TBOXID as NEWTBOXID,
-          LAG(BATSOH) OVER (ORDER BY CTIME) as OLDSOH,
-          BATSOH as NEWSOH,
-          (BATPERCENT - LAG(BATPERCENT) OVER (ORDER BY CTIME)) as CHARGECHANGE
-        FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-        ${whereClause}
-        QUALIFY TBOXID != LAG(TBOXID) OVER (ORDER BY CTIME)
-          AND LAG(TBOXID) OVER (ORDER BY CTIME) IS NOT NULL
-          AND TBOXID IS NOT NULL
-          AND LENGTH(TBOXID) > 3
-          AND LENGTH(LAG(TBOXID) OVER (ORDER BY CTIME)) > 3
-          AND (CTIME - LAG(CTIME) OVER (ORDER BY CTIME)) >= 30
-        ORDER BY CTIME DESC
+          TIMESTAMP,
+          OLDTBOXID,
+          NEWTBOXID,
+          OLDSOH,
+          NEWSOH,
+          CHARGECHANGE
+        FROM swaps
+        ORDER BY TIMESTAMP DESC
         LIMIT 100
-      `,
-
-      vehicleSessionAnalysis: `
+      `;
+      
+      let swapResult = await fetchSnowflakeData(swapQuery, "vehicleSwapDetection");
+      
+      // If no swaps, try without idle filter
+      if (!swapResult || swapResult.length === 0) {
+        const noIdleSwapConditions = swapConditions.filter(c => !c.includes('NOT (MOTORRPM'));
+        const noIdleSwapWhere = `WHERE TBOXID = '${cleanId}' AND ${noIdleSwapConditions.join(' AND ')}`;
+        
+        const noIdleSwapQuery = `
+          WITH cleaned_data AS (
+            SELECT
+              CTIME,
+              TBOXID,
+              BATSOH,
+              BATPERCENT,
+              LAG(TBOXID) OVER (ORDER BY CTIME) as prev_tbox,
+              LAG(BATSOH) OVER (ORDER BY CTIME) as prev_soh,
+              LAG(BATPERCENT) OVER (ORDER BY CTIME) as prev_charge,
+              LAG(CTIME) OVER (ORDER BY CTIME) as prev_time,
+              ROW_NUMBER() OVER (ORDER BY CTIME) as row_num
+            FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+            ${noIdleSwapWhere}
+          ),
+          swaps AS (
+            SELECT
+              CTIME as TIMESTAMP,
+              prev_tbox as OLDTBOXID,
+              TBOXID as NEWTBOXID,
+              COALESCE(prev_soh, 0) as OLDSOH,
+              COALESCE(BATSOH, 0) as NEWSOH,
+              COALESCE((BATPERCENT - prev_charge), 0) as CHARGECHANGE,
+              (CTIME - prev_time) as time_gap
+            FROM cleaned_data
+            WHERE TBOXID != prev_tbox
+              AND prev_tbox IS NOT NULL
+              AND TBOXID IS NOT NULL
+              AND prev_tbox != ''
+              AND TBOXID != ''
+              AND (CTIME - prev_time) >= 30
+              AND LENGTH(TBOXID) > 3
+              AND LENGTH(prev_tbox) > 3
+          )
+          SELECT 
+            TIMESTAMP,
+            OLDTBOXID,
+            NEWTBOXID,
+            OLDSOH,
+            NEWSOH,
+            CHARGECHANGE
+          FROM swaps
+          ORDER BY TIMESTAMP DESC
+          LIMIT 100
+        `;
+        
+        swapResult = await fetchSnowflakeData(noIdleSwapQuery, "vehicleSwapNoIdle");
+      }
+      
+      const consolidatedSwaps = consolidateRapidSwaps(swapResult || [], 10);
+      setVehicleSwaps(consolidatedSwaps);
+      
+      // Step 5: Fetch vehicle sessions
+      const sessionQuery = `
         SELECT
           TBOXID,
           MIN(CTIME) as STARTTIME,
@@ -554,9 +630,14 @@ function useBatteryDataByBMS(
         HAVING (MAX(CTIME) - MIN(CTIME)) > 360 AND LENGTH(TBOXID) > 3
         ORDER BY STARTTIME DESC
         LIMIT 100
-      `,
-
-      systemDiagnostics: `
+      `;
+      
+      const sessionResult = await fetchSnowflakeData(sessionQuery, "vehicleSessionAnalysis");
+      const normalizedSessions = normalizeSessionUnits(sessionResult || []);
+      setVehicleSessions(normalizedSessions);
+      
+      // Step 6: Fetch diagnostics
+      const diagnosticQuery = `
         WITH vehicle_stats AS (
           SELECT
             COUNT(DISTINCT TBOXID) as TOTAL_VEHICLES,
@@ -570,18 +651,6 @@ function useBatteryDataByBMS(
             COUNT(DISTINCT DATE_TRUNC('day', TO_TIMESTAMP(CTIME))) as ACTIVE_DAYS
           FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
           ${whereClause}
-        ),
-        vehicle_performance AS (
-          SELECT
-            TBOXID,
-            AVG(BATSOH) as AVG_SOH,
-            AVG(BATTEMP) as AVG_TEMP,
-            SUM(CASE WHEN BATTERY_ERROR IS NOT NULL AND BATTERY_ERROR != '' THEN 1 ELSE 0 END) as ERROR_COUNT,
-            COUNT(*) as READINGS_COUNT
-          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-          ${whereClause}
-          GROUP BY TBOXID
-          HAVING COUNT(*) > 10 AND LENGTH(TBOXID) > 3
         )
         SELECT
           vs.TOTAL_VEHICLES,
@@ -595,233 +664,57 @@ function useBatteryDataByBMS(
           vs.ACTIVE_DAYS,
           CASE WHEN vs.CHARGE_CONSUMED > 0 
                THEN ROUND(vs.DISTANCE_COVERED / vs.CHARGE_CONSUMED, 2)
-               ELSE 0 END as BATTERY_EFFICIENCY,
-          LISTAGG(
-            CASE WHEN vp.AVG_SOH >= 90 AND (vp.ERROR_COUNT * 100.0 / vp.READINGS_COUNT) < 5 
-                 THEN vp.TBOXID END, ','
-          ) WITHIN GROUP (ORDER BY vp.AVG_SOH DESC) as PREFERRED_VEHICLES,
-          LISTAGG(
-            CASE WHEN vp.AVG_SOH < 85 OR (vp.ERROR_COUNT * 100.0 / vp.READINGS_COUNT) > 10 OR vp.AVG_TEMP > 450
-                 THEN vp.TBOXID END, ','
-          ) WITHIN GROUP (ORDER BY vp.AVG_SOH ASC) as PROBLEMATIC_VEHICLES
+               ELSE 0 END as BATTERY_EFFICIENCY
         FROM vehicle_stats vs
-        CROSS JOIN vehicle_performance vp
-        GROUP BY vs.TOTAL_VEHICLES, vs.AVG_SOH, vs.AVG_TEMP, vs.CRITICAL_EVENTS, 
-                 vs.VOLTAGE_ANOMALIES, vs.TOTAL_READINGS, vs.DISTANCE_COVERED, 
-                 vs.CHARGE_CONSUMED, vs.ACTIVE_DAYS
-      `
-    };
-  }, [bmsId, buildFilterConditions, buildBSSFilterConditions]);
-  
-  const loadData = useCallback(async () => {
-    if (!bmsId) {
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setDebugInfo(null);
-    
-    try {
-      let tableStats;
-      try {
-        const tableCheckQuery = `
-          SELECT COUNT(*) as TOTAL_RECORDS,
-                 COUNT(DISTINCT BMSID) as UNIQUE_BMS,
-                 COUNT(DISTINCT TBOXID) as UNIQUE_TBOX,
-                 MIN(CTIME) as EARLIEST_TIME,
-                 MAX(CTIME) as LATEST_TIME
-          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-        `;
-        tableStats = await fetchSnowflakeData(tableCheckQuery, "tableCheck");
-      } catch (tableError) {
-        console.error('Table check failed:', tableError);
+      `;
+      
+      let diagnosticResult = await fetchSnowflakeData(diagnosticQuery, "systemDiagnostics");
+      const rawDiagnostics = diagnosticResult?.[0];
+      
+      if (rawDiagnostics) {
+        const processedDiagnostics: DiagnosticMetrics = {
+          totalVehicles: safeNumber(rawDiagnostics.TOTAL_VEHICLES),
+          totalSwaps: consolidatedSwaps.length,
+          avgSessionDuration: normalizedSessions.length > 0 ? 
+            normalizedSessions.reduce((sum, s) => sum + safeNumber(s.DURATION), 0) / normalizedSessions.length : 0,
+          preferredVehicles: [],
+          problematicVehicles: [],
+          swapFrequency: consolidatedSwaps.length / Math.max(1, safeNumber(rawDiagnostics.ACTIVE_DAYS, 1)),
+          batteryEfficiency: safeNumber(rawDiagnostics.BATTERY_EFFICIENCY),
+          thermalPerformance: (() => {
+            const temp = safeNumber(rawDiagnostics.AVG_TEMP) / 10;
+            return temp < 35 ? "Excellent" : 
+                   temp < 45 ? "Good" : 
+                   temp < 55 ? "Fair" : "Poor";
+          })(),
+          voltageStability: (() => {
+            const anomalies = safeNumber(rawDiagnostics.VOLTAGE_ANOMALIES);
+            const readings = safeNumber(rawDiagnostics.TOTAL_READINGS, 1);
+            return (anomalies / readings) < 0.05 ? "Stable" : "Unstable";
+          })(),
+          overallHealth: (() => {
+            const soh = safeNumber(rawDiagnostics.AVG_SOH);
+            const criticalEvents = safeNumber(rawDiagnostics.CRITICAL_EVENTS);
+            return soh > 90 && criticalEvents < 5 ? "Excellent" :
+                   soh > 80 && criticalEvents < 15 ? "Good" :
+                   soh > 70 ? "Fair" : "Poor";
+          })(),
+        };
+        setDiagnostics(processedDiagnostics);
       }
       
-      
-      try {
-        const debugResult = await fetchSnowflakeData(queries.debugBmsIds, "debugBmsIds");
-        
-        setDebugInfo(prev => ({
-          ...prev,
-          tableStats: tableStats?.[0],
-          availableBmsIds: debugResult,
-          searchingFor: bmsId,
-        }));
-        
-        if (debugResult.length === 0) {
-          throw new Error(`No data found in time range. Table has ${tableStats?.[0]?.TOTAL_RECORDS || 0} total records, but none match the current filters.`);
-        }
-      } catch (debugError) {
-        setError(`Debug check failed: ${debugError instanceof Error ? debugError.message : String(debugError)}`);
-      }
-      
-      let telemetryResult;
-      try {
-        telemetryResult = await fetchSnowflakeData(queries.batteryTelemetry, "batteryTelemetry");
-        
-        if (!telemetryResult || telemetryResult.length === 0) {
-    
-          
-          const simplifiedQuery = `
-            SELECT
-              BATTEMP, BATVOLT, BATCELLDIFFMAX, BATCYCLECOUNT, BATSOH, BATPERCENT,
-              BATCURRENT, COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR, CTIME,
-              MOTORRPM, TBOXID, BMSID,
-              COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
-              COALESCE(STATE, 'UNKNOWN') as STATE, THROTTLEPERCENT
-            FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-            WHERE ${buildFilterConditions().join(' AND ')}
-            ORDER BY CTIME DESC
-            LIMIT 100
-          `;
-          
-          telemetryResult = await fetchSnowflakeData(simplifiedQuery, "simplifiedTelemetry");
-          
-          if (telemetryResult && telemetryResult.length > 0) {
-            const availableBmsIds = [...new Set(telemetryResult.map((r: any) => r.BMSID).filter(Boolean))];
-            const availableTboxIds = [...new Set(telemetryResult.map((r: any) => r.TBOXID))];
-            
-            setError(`BMSID "${bmsId}" not found. Available BMSID values: ${availableBmsIds.join(', ') || 'None found'}. Available TBoxes: ${availableTboxIds.join(', ')}`);
-          } else {
-            throw new Error('No data found even without BMSID filter. Check time range and filter conditions.');
-          }
-        }
-      } catch (telemetryError: any) {
-        throw new Error(`Failed to fetch telemetry data: ${telemetryError.message}`);
-      }
-      
-      const normalizedTelemetry = normalizeUnits(telemetryResult || []);
-      setBatteryData(normalizedTelemetry);
-      
-      // Fetch BSS charge data
-      let bssData: BSSChargeData[] = [];
-      try {
-        console.log('Fetching BSS charge data...', queries.bssChargeData);
-        const bssResult = await fetchSnowflakeData(queries.bssChargeData, "bssChargeData");
-        bssData = (bssResult || []).map((entry: any) => ({
-          DEVICE_ID: entry.DEVICE_ID,
-          CABINET_NO: safeNumber(entry.CABINET_NO),
-          SLOT_NO: safeNumber(entry.SLOT_NO),
-          CTIME: safeNumber(entry.CTIME),
-          CHARGE_LEVEL: safeNumber(entry.CHARGE_LEVEL),
-          TEMP: safeNumber(entry.TEMP),
-          VOLTAGE: safeNumber(entry.VOLTAGE),
-          CURRENT_VALUE: safeNumber(entry.CURRENT_VALUE),
-          CHARGER_STATUS: entry.CHARGER_STATUS || 'unknown',
-        }));
-        setBssChargeData(bssData);
-      } catch (bssError) {
-        console.warn('BSS charge data query failed, continuing without BSS data:', bssError);
-        setBssChargeData([]);
-      } 
-      
-      // Fetch BSS charging sessions
-      let chargingSessions: BSSChargingSession[] = [];
-      try {
-        console.log('Fetching BSS charging sessions...', queries.bssChargingSessions);
-        const bssResult = await fetchSnowflakeData(queries.bssChargingSessions, "bssChargingSessions");
-        chargingSessions = (bssResult || []).map((session: any) => ({
-          DEVICE_ID: session.DEVICE_ID,
-          CABINET_NO: safeNumber(session.CABINET_NO),
-          SLOT_NO: safeNumber(session.SLOT_NO),
-          STARTTIME: safeNumber(session.STARTTIME),
-          ENDTIME: safeNumber(session.ENDTIME),
-          DURATION: safeNumber(session.DURATION),
-          STARTCHARGE: safeNumber(session.STARTCHARGE),
-          ENDCHARGE: safeNumber(session.ENDCHARGE),
-          CHARGE_GAINED: safeNumber(session.CHARGE_GAINED),
-          AVGTEMP: safeNumber(session.AVGTEMP),
-          AVGVOLTAGE: safeNumber(session.AVGVOLTAGE),
-          AVGCURRENT: safeNumber(session.AVGCURRENT),
-          MAXTEMP: safeNumber(session.MAXTEMP),
-          CHARGER_STATUS: session.CHARGER_STATUS || 'unknown',
-        }));
-
-        
-        setBssChargingSessions(chargingSessions);
-      } catch (bssError) {
-        console.warn('BSS charging session query failed, continuing without BSS data:', bssError);
-        setBssChargingSessions([]);
-      }
-      
-      let consolidatedSwaps: VehicleSwapEvent[] = [];
-      try {
-        const swapResult = await fetchSnowflakeData(queries.vehicleSwapDetection, "vehicleSwapDetection");
-        const rawSwaps = swapResult || [];
-        consolidatedSwaps = consolidateRapidSwaps(rawSwaps, 10);
-        setVehicleSwaps(consolidatedSwaps);
-      } catch (swapError) {
-        setVehicleSwaps([]);
-      }
-      
-      let normalizedSessions: VehicleSession[] = [];
-      try {
-        const sessionResult = await fetchSnowflakeData(queries.vehicleSessionAnalysis, "vehicleSessionAnalysis");
-        normalizedSessions = normalizeSessionUnits(sessionResult || []);
-        setVehicleSessions(normalizedSessions);
-      } catch (sessionError) {
-        setVehicleSessions([]);
-      }
-      
-      try {
-        const diagnosticResult = await fetchSnowflakeData(queries.systemDiagnostics, "systemDiagnostics");
-        const rawDiagnostics = diagnosticResult?.[0];
-        
-        if (rawDiagnostics) {
-          const processedDiagnostics: DiagnosticMetrics = {
-            totalVehicles: safeNumber(rawDiagnostics.TOTAL_VEHICLES),
-            totalSwaps: consolidatedSwaps.length,
-            avgSessionDuration: normalizedSessions.length > 0 ? 
-              normalizedSessions.reduce((sum, s) => sum + safeNumber(s.DURATION), 0) / normalizedSessions.length : 0,
-            preferredVehicles: rawDiagnostics.PREFERRED_VEHICLES ? 
-              rawDiagnostics.PREFERRED_VEHICLES.split(',').filter(Boolean) : [],
-            problematicVehicles: rawDiagnostics.PROBLEMATIC_VEHICLES ? 
-              rawDiagnostics.PROBLEMATIC_VEHICLES.split(',').filter(Boolean) : [],
-            swapFrequency: consolidatedSwaps.length / Math.max(1, safeNumber(rawDiagnostics.ACTIVE_DAYS, 1)),
-            batteryEfficiency: safeNumber(rawDiagnostics.BATTERY_EFFICIENCY),
-            thermalPerformance: (() => {
-              const temp = safeNumber(rawDiagnostics.AVG_TEMP) / 10;
-              return temp < 35 ? "Excellent" : 
-                     temp < 45 ? "Good" : 
-                     temp < 55 ? "Fair" : "Poor";
-            })(),
-            voltageStability: (() => {
-              const anomalies = safeNumber(rawDiagnostics.VOLTAGE_ANOMALIES);
-              const readings = safeNumber(rawDiagnostics.TOTAL_READINGS, 1);
-              return (anomalies / readings) < 0.05 ? "Stable" : "Unstable";
-            })(),
-            overallHealth: (() => {
-              const soh = safeNumber(rawDiagnostics.AVG_SOH);
-              const criticalEvents = safeNumber(rawDiagnostics.CRITICAL_EVENTS);
-              return soh > 90 && criticalEvents < 5 ? "Excellent" :
-                     soh > 80 && criticalEvents < 15 ? "Good" :
-                     soh > 70 ? "Fair" : "Poor";
-            })(),
-            totalChargingSessions: chargingSessions.length,
-            avgChargingDuration: chargingSessions.length > 0 ?
-              chargingSessions.reduce((sum, s) => sum + s.DURATION, 0) / chargingSessions.length : 0,
-            totalChargeGained: chargingSessions.reduce((sum, s) => sum + s.CHARGE_GAINED, 0),
-          };
-          setDiagnostics(processedDiagnostics);
-        }
-      } catch (diagnosticError) {
-        setDiagnostics(null);
-      }
-      
+      // Step 7: Set debug info
       setDebugInfo({
         telemetryCount: normalizedTelemetry.length,
         consolidatedSwapCount: consolidatedSwaps.length,
         sessionCount: normalizedSessions.length,
-        chargingSessionCount: chargingSessions.length,
         timeRange: filters.timeRange,
         startTimestamp: filters.startTimestamp,
         endTimestamp: filters.endTimestamp,
         uniqueVehicles: [...new Set(normalizedTelemetry.map(d => d.TBOXID))].length,
-        dataDateRange: filters.startTimestamp && filters.endTimestamp ? {
-          from: new Date(filters.startTimestamp * 1000).toISOString(),
-          to: new Date(filters.endTimestamp * 1000).toISOString()
+        dataDateRange: normalizedTelemetry.length > 0 ? {
+          from: new Date(normalizedTelemetry[0].CTIME * 1000).toISOString(),
+          to: new Date(normalizedTelemetry[normalizedTelemetry.length - 1].CTIME * 1000).toISOString()
         } : null,
         sampleData: normalizedTelemetry[0]
       });
@@ -837,7 +730,7 @@ function useBatteryDataByBMS(
     } finally {
       setLoading(false);
     }
-  }, [queries, fetchSnowflakeData, filters, bmsId, normalizeUnits, normalizeSessionUnits, buildFilterConditions]);
+  }, [fetchSnowflakeData, filters, bmsId, normalizeUnits, normalizeSessionUnits, buildFilterConditions]);
 
   useEffect(() => {
     if (bmsId) {
