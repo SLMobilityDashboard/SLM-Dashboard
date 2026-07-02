@@ -64093,3 +64093,18 @@
 {"level":"INFO","message":"[1:01:49.936 PM]: No client config detected."}
 {"level":"INFO","message":"[1:01:49.937 PM]: No config file path found. Client config will not be used."}
 {"level":"INFO","message":"[1:01:49.938 PM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[4:02:33.747 PM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[4:02:33.880 PM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[4:02:33.882 PM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[4:02:33.883 PM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[4:02:33.884 PM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[4:02:33.885 PM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[4:02:33.887 PM]: No client config detected."}
+{"level":"INFO","message":"[4:02:33.887 PM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[4:02:33.888 PM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[4:02:33.900 PM]: No client config detected."}
+{"level":"INFO","message":"[4:02:33.900 PM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[4:02:33.901 PM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[4:02:33.903 PM]: No client config detected."}
+{"level":"INFO","message":"[4:02:33.904 PM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[4:02:33.905 PM]: Easy Logging is disabled as no config has been found"}
