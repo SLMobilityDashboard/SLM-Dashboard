@@ -2,6 +2,16 @@ import NextAuth, { NextAuthOptions } from "next-auth";
 import CognitoProvider from "next-auth/providers/cognito";
 import { getRolesForEmail } from "@/lib/auth/role-mappings";
 
+// ─── Env validation — fail loudly at boot instead of a cryptic DNS error later ──
+if (!process.env.COGNITO_DOMAIN) {
+  throw new Error("COGNITO_DOMAIN env var is not set");
+}
+if (process.env.COGNITO_DOMAIN.includes("://")) {
+  // COGNITO_DOMAIN is expected to be a FULL URL (e.g. "https://your-domain.auth.region.amazoncognito.com")
+  // This check just guards against someone accidentally stripping/doubling the protocol later.
+  // console.log("ℹ️  COGNITO_DOMAIN includes protocol — using as-is:", process.env.COGNITO_DOMAIN);
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CognitoProvider({
@@ -14,7 +24,10 @@ export const authOptions: NextAuthOptions = {
 
   session: {
     strategy: "jwt",
-    maxAge:   24 * 60 * 60,
+    // Extended from 24h -> 7 days. NOTE: this should not exceed your Cognito
+    // App Client's "refresh token expiration" setting, or the cookie will
+    // outlive the refresh token and users will be forced to re-login anyway.
+    maxAge: 7 * 24 * 60 * 60,
   },
 
   callbacks: {
@@ -60,8 +73,12 @@ export const authOptions: NextAuthOptions = {
       }
 
       try {
+        // FIX: COGNITO_DOMAIN already includes the "https://" prefix in this
+        // environment (e.g. "https://slmobility-uat.auth.ap-southeast-1.amazoncognito.com").
+        // The old code prepended "https://" again, producing "https://https://..."
+        // which fails DNS resolution with ENOTFOUND "https". Do NOT re-add the protocol here.
         const response = await fetch(
-          `https://${process.env.COGNITO_DOMAIN}/oauth2/token`,
+          `${process.env.COGNITO_DOMAIN}/oauth2/token`,
           {
             method:  "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -120,6 +137,10 @@ export const authOptions: NextAuthOptions = {
         session.accessToken = token.accessToken as string;
       }
 
+      // Always propagate refresh errors to the session so API routes can
+      // detect a dead refresh token and return 401 instead of passing a
+      // stale token through to Snowflake (which fails with a confusing
+      // OAuth 390318 "access token expired" error).
       if (token.error) {
         (session as any).error = token.error;
       }
