@@ -99,7 +99,7 @@ export const useSwaps = (filters?: ProfitFilters) => {
         : "NULL";
 
       const sql = `
-        CALL GET_SWAP_METRICS_PROCEDURE(
+        CALL DB_DUMP.PUBLIC.GET_SWAP_METRICS_PROCEDURE(
           '${fromDate}'::DATE,
           '${toDate}'::DATE,
           ${areasParam},
