@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Zap, CheckCircle2, XCircle, FileStack } from "lucide-react";
+import { Zap, CheckCircle2, XCircle, FileStack, AlertTriangle } from "lucide-react";
 import {
   TaskExecutionRow,
   PipeLogRow,
@@ -10,6 +10,7 @@ import {
   normalizeTaskStatus,
   isPipeHealthy,
   formatCredits,
+  formatDateTime,
 } from "@/lib/monitoring-queries";
 
 interface Props {
@@ -63,6 +64,30 @@ export default function OverviewPanel({ tasks, pipes, costs }: Props) {
     return { creditsToday, creditsWeek, failed24h, successRate, totalTasks, unhealthyPipes, pendingFiles };
   }, [taskRows, pipeRows, costRows]);
 
+  // Recent failures + a quick "is this the same task looping" signal.
+  // A single task failing 10x in 48h is a very different problem than
+  // 10 different tasks each failing once — surface both.
+  const failureInsights = useMemo(() => {
+    const failed = taskRows
+      .filter((r) => normalizeTaskStatus(r.STATUS) === "failed")
+      .sort((a, b) => new Date(b.SCHEDULED_TIME ?? 0).getTime() - new Date(a.SCHEDULED_TIME ?? 0).getTime());
+
+    const countByTask = new Map<string, number>();
+    failed.forEach((r) => {
+      countByTask.set(r.TASK_NAME, (countByTask.get(r.TASK_NAME) ?? 0) + 1);
+    });
+
+    const repeatOffenders = [...countByTask.entries()]
+      .filter(([, count]) => count >= 3)
+      .sort((a, b) => b[1] - a[1]);
+
+    return {
+      recent: failed.slice(0, 5),
+      distinctFailingTasks: countByTask.size,
+      repeatOffenders,
+    };
+  }, [taskRows]);
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -95,7 +120,10 @@ export default function OverviewPanel({ tasks, pipes, costs }: Props) {
     {
       title: "Failed Tasks",
       value: stats.failed24h,
-      sub: "in last 48h",
+      sub:
+        failureInsights.distinctFailingTasks > 0
+          ? `across ${failureInsights.distinctFailingTasks} distinct task${failureInsights.distinctFailingTasks === 1 ? "" : "s"}`
+          : "in last 48h",
       icon: XCircle,
       color: stats.failed24h > 0 ? "text-red-400" : "text-slate-300",
       bg: "bg-red-500/10",
@@ -113,23 +141,70 @@ export default function OverviewPanel({ tasks, pipes, costs }: Props) {
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-      {cards.map((card) => (
-        <Card key={card.title} className={`bg-slate-900/50 border-slate-800 ${card.border} backdrop-blur-sm`}>
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {cards.map((card) => (
+          <Card key={card.title} className={`bg-slate-900/50 border-slate-800 ${card.border} backdrop-blur-sm`}>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-400 mb-1">{card.title}</p>
+                  <p className="text-2xl font-bold text-slate-100">{card.value}</p>
+                  <p className="text-xs text-slate-500 mt-1">{card.sub}</p>
+                </div>
+                <div className={`p-3 rounded-lg ${card.bg}`}>
+                  <card.icon className={`w-6 h-6 ${card.color}`} />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {failureInsights.recent.length > 0 && (
+        <Card className="bg-slate-900/50 border-red-500/20 backdrop-blur-sm">
           <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-400 mb-1">{card.title}</p>
-                <p className="text-2xl font-bold text-slate-100">{card.value}</p>
-                <p className="text-xs text-slate-500 mt-1">{card.sub}</p>
+            <div className="flex items-center gap-2 mb-4">
+              <AlertTriangle className="w-4 h-4 text-red-400" />
+              <h3 className="text-sm font-semibold text-slate-200">Recent Failures</h3>
+            </div>
+
+            {failureInsights.repeatOffenders.length > 0 && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {failureInsights.repeatOffenders.map(([taskName, count]) => (
+                  <span
+                    key={taskName}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md bg-red-500/10 border border-red-500/30 text-red-400"
+                  >
+                    {taskName} failed {count}x
+                  </span>
+                ))}
               </div>
-              <div className={`p-3 rounded-lg ${card.bg}`}>
-                <card.icon className={`w-6 h-6 ${card.color}`} />
-              </div>
+            )}
+
+            <div className="space-y-2">
+              {failureInsights.recent.map((row) => (
+                <div
+                  key={row.LOG_ID}
+                  className="flex items-center justify-between text-sm border-b border-slate-800 last:border-0 pb-2 last:pb-0"
+                >
+                  <div className="min-w-0">
+                    <p className="text-slate-200 font-medium truncate">{row.TASK_NAME}</p>
+                    {row.ERROR_MESSAGE && (
+                      <p className="text-xs text-slate-500 truncate max-w-md" title={row.ERROR_MESSAGE}>
+                        {row.ERROR_MESSAGE.split("\n")[0]}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-500 whitespace-nowrap ml-4">
+                    {formatDateTime(row.SCHEDULED_TIME)}
+                  </span>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
-      ))}
+      )}
     </div>
   );
 }

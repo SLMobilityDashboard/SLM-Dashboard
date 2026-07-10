@@ -1,4 +1,3 @@
-// hooks/use-task-marks.ts
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
@@ -14,6 +13,8 @@ export interface TaskMark {
 interface UseTaskMarksResult {
   marked: Map<number, TaskMark>;
   loading: boolean;
+  refreshing: boolean;
+  refresh: () => Promise<void>;
   toggle: (logId: number) => void;
 }
 
@@ -21,22 +22,27 @@ export function useTaskMarks(): UseTaskMarksResult {
   const { data: sessionData } = useSession();
   const [marked, setMarked] = useState<Map<number, TaskMark>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isManualRefresh = false) => {
+    if (isManualRefresh) setRefreshing(true);
     try {
-      const res = await fetch("/api/task-marks");
+      const res = await fetch("/api/task-marks", { cache: "no-store" });
       if (!res.ok) return;
       const body = await res.json();
       const entries: TaskMark[] = body.marked ?? [];
       setMarked(new Map(entries.map((m) => [m.logId, m])));
     } finally {
       setLoading(false);
+      if (isManualRefresh) setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const refresh = useCallback(() => load(true), [load]);
 
   const toggle = useCallback(
     (logId: number) => {
@@ -94,5 +100,5 @@ export function useTaskMarks(): UseTaskMarksResult {
     [marked, sessionData]
   );
 
-  return { marked, loading, toggle };
+  return { marked, loading, refreshing, refresh, toggle };
 }

@@ -1,7 +1,6 @@
-// app/(protected)/Observatory/monitoring/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Activity, ListChecks, Database, DollarSign, RefreshCw } from "lucide-react";
@@ -10,18 +9,23 @@ import { useWarehouseQuery } from "@/hooks/use-warehouse-query";
 import { TASKS_SQL, PIPES_SQL, COSTS_SQL, TaskExecutionRow, PipeLogRow, WarehouseCostRow } from "@/lib/monitoring-queries";
 
 import OverviewPanel from "@/components/monitoring/overview-panel";
-import TaskExecutionPanel from "@/components/monitoring/task-execution-panel";
+import TaskExecutionPanel, { TaskExecutionPanelHandle } from "@/components/monitoring/task-execution-panel";
 import PipelineStatusPanel from "@/components/monitoring/pipeline-status-panel";
 import WarehouseCostPanel from "@/components/monitoring/warehouse-cost-panel";
+
 const REFRESH_MS = 60_000; // client re-polls /api/query every minute; the
 // endpoint itself decides whether that's a cache hit or a fresh Snowflake run.
 
 export default function WarehouseMonitoringPage() {
-  const tasks = useWarehouseQuery<TaskExecutionRow>(TASKS_SQL, { refreshIntervalMs: REFRESH_MS });
+  const tasks = useWarehouseQuery<TaskExecutionRow>(TASKS_SQL, {
+    refreshIntervalMs: REFRESH_MS,
+    forceDynamic: true, // task log is near-real-time; don't let /api/query bucket it hourly/daily
+  });
   const pipes = useWarehouseQuery<PipeLogRow>(PIPES_SQL, { refreshIntervalMs: REFRESH_MS });
   const costs = useWarehouseQuery<WarehouseCostRow>(COSTS_SQL, { refreshIntervalMs: REFRESH_MS });
 
   const [tab, setTab] = useState("overview");
+  const taskPanelRef = useRef<TaskExecutionPanelHandle>(null);
 
   const anyLoading = tasks.loading || pipes.loading || costs.loading;
 
@@ -29,6 +33,7 @@ export default function WarehouseMonitoringPage() {
     tasks.refetch();
     pipes.refetch();
     costs.refetch();
+    taskPanelRef.current?.refreshMarks();
   };
 
   return (
@@ -82,7 +87,13 @@ export default function WarehouseMonitoringPage() {
         </TabsContent>
 
         <TabsContent value="tasks">
-          <TaskExecutionPanel data={tasks.data} loading={tasks.loading} error={tasks.error} />
+          <TaskExecutionPanel
+            ref={taskPanelRef}
+            data={tasks.data}
+            loading={tasks.loading}
+            error={tasks.error}
+            onRefetch={tasks.refetch}
+          />
         </TabsContent>
 
         <TabsContent value="pipes">

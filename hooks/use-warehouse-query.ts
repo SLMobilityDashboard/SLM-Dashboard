@@ -11,7 +11,7 @@ export type CacheStatus =
   | null;
 
 interface UseWarehouseQueryOptions {
-  /** Force the /api/query endpoint to bucket this query by day even without a date fn in the SQL. */
+  /** Force the /api/log-query endpoint to bucket this query by day even without a date fn in the SQL. */
   forceDynamic?: boolean;
   /** Poll the endpoint on this interval (ms). 0 / undefined = fetch once. */
   refreshIntervalMs?: number;
@@ -30,7 +30,7 @@ interface UseWarehouseQueryResult<T> {
 }
 
 /**
- * Sends a SQL string to the existing /api/query endpoint (auth, caching,
+ * Sends a SQL string to the existing /api/log-query endpoint (auth, caching,
  * and dedup are all handled server-side already) and exposes the result
  * as normal React state. No new API routes needed — this just standardizes
  * how dashboard components talk to that one endpoint.
@@ -60,7 +60,7 @@ export function useWarehouseQuery<T = Record<string, any>>(
     setError(null);
 
     try {
-      const res = await fetch("/api/query", {
+      const res = await fetch("/api/log-query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sql: sqlRef.current, forceDynamic }),
