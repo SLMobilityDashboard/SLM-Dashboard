@@ -75,7 +75,7 @@ export default function PipelineStatusPanel({ data, loading, error }: Props) {
                       </Badge>
                     </div>
 
-                    {(isStale || hasBacklog) && (
+                    {/* {(isStale || hasBacklog) && (
                       <div className="flex items-center gap-1.5 text-xs text-amber-400 mb-3">
                         <AlertTriangle className="w-3.5 h-3.5" />
                         {isStale && hasBacklog
@@ -84,7 +84,7 @@ export default function PipelineStatusPanel({ data, loading, error }: Props) {
                           ? "No files ingested in over an hour"
                           : `${backlog} files pending`}
                       </div>
-                    )}
+                    )} */}
 
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="bg-slate-900/50 rounded-md p-2">

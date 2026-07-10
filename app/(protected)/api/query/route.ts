@@ -446,6 +446,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    if ((session as any).error === "RefreshTokenError") {
+      return NextResponse.json(
+        { error: "Session expired — please sign in again" },
+        { status: 401 }
+      );
+    }
+
+    // FIX: was reading `.name` (a display name from Cognito's `name` attribute),
+    // NOT the actual `cognito:username` claim. This caused Snowflake OAuth
+    // connections to fail with 390100 "Incorrect username or password" for
+    // any user whose display name differs from their Cognito username —
+    // it only appeared to "work" for admin01 because both happened to match.
     const cognitoUsername = (session.user as any).username;
     const email           = session.user.email ?? "";
 
@@ -576,7 +588,6 @@ export async function POST(req: NextRequest) {
 
       if (dedupResult !== null) {
         console.log(
-          // `✅ [DEDUP] [${shortHash}] [${cognitoUsername}] Got result from in-flight query — ` +
           `${dedupResult.length} rows — ${duration}ms`
         );
 

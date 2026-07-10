@@ -1,3 +1,4 @@
+// app/(protected)/Observatory/monitoring/page.tsx
 "use client";
 
 import { useState } from "react";

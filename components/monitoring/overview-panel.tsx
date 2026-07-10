@@ -18,7 +18,29 @@ interface Props {
   costs: WarehouseCostRow[] | null;
 }
 
+function CardSkeleton() {
+  return (
+    <Card className="bg-slate-900/50 border-slate-800 backdrop-blur-sm">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 space-y-2">
+            <div className="h-3 w-24 rounded bg-slate-800 animate-pulse" />
+            <div className="h-7 w-16 rounded bg-slate-800 animate-pulse" />
+            <div className="h-3 w-32 rounded bg-slate-800 animate-pulse" />
+          </div>
+          <div className="p-3 rounded-lg bg-slate-800/60">
+            <div className="w-6 h-6 rounded bg-slate-700 animate-pulse" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function OverviewPanel({ tasks, pipes, costs }: Props) {
+  // Treat null as "not yet loaded"; an empty array means loaded but no data.
+  const isLoading = tasks === null && pipes === null && costs === null;
+
   const taskRows = tasks ?? [];
   const pipeRows = pipes ?? [];
   const costRows = costs ?? [];
@@ -40,6 +62,16 @@ export default function OverviewPanel({ tasks, pipes, costs }: Props) {
 
     return { creditsToday, creditsWeek, failed24h, successRate, totalTasks, unhealthyPipes, pendingFiles };
   }, [taskRows, pipeRows, costRows]);
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <CardSkeleton key={i} />
+        ))}
+      </div>
+    );
+  }
 
   const cards = [
     {
