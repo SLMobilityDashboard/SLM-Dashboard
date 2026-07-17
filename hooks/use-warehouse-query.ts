@@ -1,4 +1,3 @@
-// hooks/use-warehouse-query.ts
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -24,8 +23,9 @@ interface UseWarehouseQueryResult<T> {
   error: string | null;
   loading: boolean;
   cacheStatus: CacheStatus;
-  /** Value of X-Cache-Type header (static | daily | hourly) if present. */
+  /** Value of X-Cache-Type header (static | daily | hourly | realtime) if present. */
   cacheType: string | null;
+  /** Manual refresh — always bypasses cache and re-runs against Snowflake. */
   refetch: () => void;
 }
 
@@ -53,7 +53,7 @@ export function useWarehouseQuery<T = Record<string, any>>(
   const sqlRef = useRef(sql);
   sqlRef.current = sql;
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (opts: { force?: boolean } = {}) => {
     if (!enabled) return;
 
     setLoading(true);
@@ -63,7 +63,14 @@ export function useWarehouseQuery<T = Record<string, any>>(
       const res = await fetch("/api/log-query", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: sqlRef.current, forceDynamic }),
+        body: JSON.stringify({
+          sql: sqlRef.current,
+          forceDynamic,
+          // Manual refresh bypasses cache read on the server entirely, so a
+          // click always re-runs Snowflake regardless of the cache strategy's
+          // TTL (which can be as long as 24h for "static" queries).
+          forceRefresh: opts.force ?? false,
+        }),
       });
 
       setCacheStatus(res.headers.get("X-Cache-Status") as CacheStatus);
@@ -84,6 +91,7 @@ export function useWarehouseQuery<T = Record<string, any>>(
   }, [forceDynamic, enabled]);
 
   useEffect(() => {
+    // Initial mount load — respects cache, does NOT force a fresh Snowflake run.
     fetchData();
 
     if (!refreshIntervalMs || refreshIntervalMs <= 0) return;
@@ -93,5 +101,12 @@ export function useWarehouseQuery<T = Record<string, any>>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchData, refreshIntervalMs, sql]);
 
-  return { data, error, loading, cacheStatus, cacheType, refetch: fetchData };
+  return {
+    data,
+    error,
+    loading,
+    cacheStatus,
+    cacheType,
+    refetch: () => fetchData({ force: true }),
+  };
 }

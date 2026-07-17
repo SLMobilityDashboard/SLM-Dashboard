@@ -64551,3 +64551,31 @@
 {"level":"INFO","message":"[3:31:23.199 PM]: Connecting to GLOBAL Snowflake domain"}
 {"level":"INFO","message":"[3:32:26.258 PM]: Connecting to GLOBAL Snowflake domain"}
 {"level":"INFO","message":"[3:33:26.865 PM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[3:34:26.407 PM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[3:35:26.359 PM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[3:36:26.390 PM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[9:07:17.253 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[9:07:17.502 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[9:07:17.505 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[9:07:17.507 AM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[9:07:17.508 AM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[9:07:17.509 AM]: Trying to initialize Easy Logging"}
+{"level":"INFO","message":"[9:07:17.517 AM]: No client config detected."}
+{"level":"INFO","message":"[9:07:17.518 AM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[9:07:17.519 AM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[9:07:17.539 AM]: No client config detected."}
+{"level":"INFO","message":"[9:07:17.539 AM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[9:07:17.540 AM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[9:07:17.544 AM]: No client config detected."}
+{"level":"INFO","message":"[9:07:17.544 AM]: No config file path found. Client config will not be used."}
+{"level":"INFO","message":"[9:07:17.545 AM]: Easy Logging is disabled as no config has been found"}
+{"level":"INFO","message":"[9:32:57.719 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[10:35:29.574 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[10:35:31.717 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[10:35:36.209 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[10:35:54.761 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[10:35:56.946 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[10:39:02.973 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[10:39:27.010 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[10:48:53.162 AM]: Connecting to GLOBAL Snowflake domain"}
+{"level":"INFO","message":"[10:49:51.381 AM]: Connecting to GLOBAL Snowflake domain"}

@@ -28,35 +28,34 @@ class SnowflakeConnectionManager {
    * IMPORTANT: `username` must be the `cognito:username` claim value from
    * the JWT — NOT the email address, and NOT uppercased.
    */
-  private static buildConnectionOptions(
-    cognitoUsername: string,
-    Token: string,
-    role?: string,
-  ): Record<string, unknown> {
-    if (!process.env.SNOWFLAKE_ACCOUNT) {
-      throw new Error('SNOWFLAKE_ACCOUNT env var is not set');
-    }
-
-    const opts: Record<string, unknown> = {
-      account:        process.env.SNOWFLAKE_ACCOUNT,  // e.g. "BQSPVDD-GP91871"
-      username:       cognitoUsername,                 // cognito:username claim — used as-is
-      authenticator:  'OAUTH',
-      token:          Token,
-      warehouse:      process.env.SNOWFLAKE_WAREHOUSE, // optional: specify a default warehouse
-      loginTimeout:   this.LOGIN_TIMEOUT_MS,
-      requestTimeout: this.REQUEST_TIMEOUT_MS,
-    };
-
-    // Only force a role if one was explicitly passed. Otherwise leave it
-    // unset so Snowflake's EXTERNAL_OAUTH_ANY_ROLE_MODE resolves the user's
-    // actual granted/default role automatically — avoids hardcoding a role
-    // (e.g. SYSADMIN) the user may not actually have.
-    if (role) {
-      opts.role = role;
-    }
-
-    return opts;
+private static buildConnectionOptions(
+  cognitoUsername: string,
+  Token: string,
+  role?: string,
+): Record<string, unknown> {
+  if (!process.env.SNOWFLAKE_ACCOUNT) {
+    throw new Error('SNOWFLAKE_ACCOUNT env var is not set');
   }
+
+  const opts: Record<string, unknown> = {
+    account:        process.env.SNOWFLAKE_ACCOUNT,
+    username:       cognitoUsername,
+    authenticator:  'OAUTH',
+    token:          Token,
+    warehouse:      process.env.SNOWFLAKE_WAREHOUSE,
+    loginTimeout:   this.LOGIN_TIMEOUT_MS,
+    requestTimeout: this.REQUEST_TIMEOUT_MS,
+  };
+
+  // Only add `role` when one was explicitly passed — omitting the key
+  // entirely (not just leaving it `undefined`) lets Snowflake's
+  // EXTERNAL_OAUTH_ANY_ROLE_MODE auto-resolve the user's granted role.
+  if (role) {
+    opts.role = role;
+  }
+
+  return opts;
+}
 
   private static connect(connection: Connection): Promise<void> {
     return new Promise((resolve, reject) => {

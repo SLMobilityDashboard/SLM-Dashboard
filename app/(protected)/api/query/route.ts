@@ -73,8 +73,18 @@ function normalizeSQL(sql: string): string {
   return n.trim();
 }
 
-function generateQueryHash(sql: string): string {
-  return crypto.createHash("sha256").update(normalizeSQL(sql)).digest("hex");
+// SECURITY FIX: fold cognitoUsername into the hash. Roles are now resolved
+// per-user (EXTERNAL_OAUTH_ANY_ROLE_MODE), so identical SQL text can
+// legitimately return different rows for different users (row-level
+// security, masking policies, different grants). Hashing SQL alone meant
+// whichever user ran a query first would populate a cache entry that got
+// served to every other user regardless of their own permissions — a
+// cross-user data leak. Scoping the hash per-user fixes that.
+function generateQueryHash(sql: string, cognitoUsername: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(`${cognitoUsername}:${normalizeSQL(sql)}`)
+    .digest("hex");
 }
 
 function generateCacheKey(queryHash: string, sql: string, forceDynamic?: boolean): string {
@@ -453,11 +463,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // FIX: was reading `.name` (a display name from Cognito's `name` attribute),
-    // NOT the actual `cognito:username` claim. This caused Snowflake OAuth
-    // connections to fail with 390100 "Incorrect username or password" for
-    // any user whose display name differs from their Cognito username —
-    // it only appeared to "work" for admin01 because both happened to match.
     const cognitoUsername = (session.user as any).username;
     const email           = session.user.email ?? "";
 
@@ -474,12 +479,13 @@ export async function POST(req: NextRequest) {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    const queryHash    = generateQueryHash(sql);
+    // SECURITY FIX: hash now includes cognitoUsername (see generateQueryHash
+    // comment above) so users with different roles/grants never share a
+    // cache entry for the same SQL text.
+    const queryHash    = generateQueryHash(sql, cognitoUsername);
     const cacheKey     = generateCacheKey(queryHash, sql, forceDynamic);
     const shortHash    = queryHash.substring(0, 8);
     const strategy     = getCacheStrategy(sql, forceDynamic);
-
-    // console.log(`[${shortHash}] [${cognitoUsername}] Processing query`);
 
     const redis        = await getRedis();
     const statsData    = await redis.get(`query:stats:${queryHash}`);
@@ -574,21 +580,16 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── Cache MISS — acquire dedup lock ──────────────────────────────────────
-    // Prevents concurrent requests for the same uncached SQL from each
-    // spawning a separate Snowflake query. Only the request that wins the
-    // lock executes; all others wait and read from cache once it's written.
     const missLockAcquired = await acquireMissLock(cacheKey);
 
     if (!missLockAcquired) {
       // Another request is already running this exact query — wait for it
-      // console.log(`⏳ [DEDUP] [${shortHash}] [${cognitoUsername}] Waiting for in-flight query...`);
-
       const dedupResult = await waitForCache(cacheKey);
       const duration    = Date.now() - startTime;
 
       if (dedupResult !== null) {
         console.log(
-          `${dedupResult.length} rows — ${duration}ms`
+          `🟣 [DEDUP] [${shortHash}] [${cognitoUsername}] — ${dedupResult.length} rows — ${duration}ms`
         );
 
         await logQueryAnalytics({

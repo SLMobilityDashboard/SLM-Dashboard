@@ -437,7 +437,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { sql, forceDynamic } = JSON.parse(text);
+    const { sql, forceDynamic, forceRefresh } = JSON.parse(text);
 
     if (!sql || typeof sql !== "string") {
       return NextResponse.json({ error: "Missing or invalid SQL" }, { status: 400 });
@@ -485,7 +485,12 @@ export async function POST(req: NextRequest) {
     const isPersistent = stats?.isPersistent || false;
 
     // ─── Cache HIT ────────────────────────────────────────────────────────────
-    const cachedData = await readFromCache(cacheKey);
+    // A forceRefresh request (manual "Refresh" click from the client) always
+    // bypasses this lookup entirely and falls through to the Snowflake
+    // execution path below, regardless of the cache strategy's TTL — this is
+    // what guarantees a click actually re-runs the query instead of silently
+    // returning up-to-24h-old cached data for "static" strategy queries.
+    const cachedData = forceRefresh ? null : await readFromCache(cacheKey);
 
     if (cachedData) {
       const shouldRevalidate = await needsRevalidation(cacheKey, isPersistent);

@@ -49,12 +49,13 @@ export default function PipelineStatusPanel({ data, loading, error }: Props) {
                 const isStale = staleMin !== null && staleMin > STALE_THRESHOLD_MIN;
                 const backlog = pipe.PENDING_FILE_COUNT ?? 0;
                 const hasBacklog = backlog > BACKLOG_WARNING;
+                const hasWarning = !healthy || isStale || hasBacklog;
 
                 return (
                   <div
                     key={pipe.PIPE_ID}
                     className={`p-4 rounded-lg border ${
-                      healthy && !isStale && !hasBacklog
+                      !hasWarning
                         ? "border-slate-700/50 bg-slate-800/30"
                         : "border-amber-500/30 bg-amber-500/5"
                     }`}
@@ -75,16 +76,18 @@ export default function PipelineStatusPanel({ data, loading, error }: Props) {
                       </Badge>
                     </div>
 
-                    {/* {(isStale || hasBacklog) && (
+                    {hasWarning && (
                       <div className="flex items-center gap-1.5 text-xs text-amber-400 mb-3">
                         <AlertTriangle className="w-3.5 h-3.5" />
-                        {isStale && hasBacklog
+                        {!healthy
+                          ? `Unhealthy state: ${pipe.EXECUTION_STATE ?? "UNKNOWN"}`
+                          : isStale && hasBacklog
                           ? `Stale ingest + ${backlog} files pending`
                           : isStale
                           ? "No files ingested in over an hour"
                           : `${backlog} files pending`}
                       </div>
-                    )} */}
+                    )}
 
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="bg-slate-900/50 rounded-md p-2">

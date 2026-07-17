@@ -13,16 +13,14 @@ import TaskExecutionPanel, { TaskExecutionPanelHandle } from "@/components/monit
 import PipelineStatusPanel from "@/components/monitoring/pipeline-status-panel";
 import WarehouseCostPanel from "@/components/monitoring/warehouse-cost-panel";
 
-const REFRESH_MS = 60_000; // client re-polls /api/query every minute; the
-// endpoint itself decides whether that's a cache hit or a fresh Snowflake run.
-
 export default function WarehouseMonitoringPage() {
+  // No refreshIntervalMs passed in => each query fetches once on mount and
+  // otherwise only re-runs when the user clicks Refresh (refetchAll below).
   const tasks = useWarehouseQuery<TaskExecutionRow>(TASKS_SQL, {
-    refreshIntervalMs: REFRESH_MS,
-    forceDynamic: true, // task log is near-real-time; don't let /api/query bucket it hourly/daily
+    forceDynamic: true,
   });
-  const pipes = useWarehouseQuery<PipeLogRow>(PIPES_SQL, { refreshIntervalMs: REFRESH_MS });
-  const costs = useWarehouseQuery<WarehouseCostRow>(COSTS_SQL, { refreshIntervalMs: REFRESH_MS });
+  const pipes = useWarehouseQuery<PipeLogRow>(PIPES_SQL, {});
+  const costs = useWarehouseQuery<WarehouseCostRow>(COSTS_SQL, {});
 
   const [tab, setTab] = useState("overview");
   const taskPanelRef = useRef<TaskExecutionPanelHandle>(null);
