@@ -1,0 +1,122 @@
+_type: export
+__export_format: 4
+__export_date: 2026-08-14T09:23:22.678Z
+__export_source: insomnia.desktop.app:v2023.5.8
+resources:
+  - _id: req_a6b491cd93c24fb38f8a4d8be92d7f45
+    parentId: fld_f70187ca476248889847de61d15a9449
+    modified: 1786699357838
+    created: 1786690327226
+    url: "{{baseUrl}}/api/scooters/total-distance/refresh"
+    name: Refresh Total Distance (protected)
+    description: ""
+    method: POST
+    body: {}
+    parameters: []
+    headers:
+      - name: x-refresh-secret
+        value: "{{ _.refreshSecret }}"
+        id: pair_ebc9792f9f2a47e4995f6cc0cc59afd4
+    authentication: {}
+    metaSortKey: -1786690327226
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: fld_f70187ca476248889847de61d15a9449
+    parentId: wrk_9fab1e751ce742e3a90a84bcc34d1573
+    modified: 1786690327223
+    created: 1786690327223
+    name: Scooter Total Distance API
+    description: Public endpoint returning total distance traveled across all
+      scooters. Currently in MOCK mode until the Snowflake schema is wired up.
+    environment:
+      baseUrl: https://slm-dashboard.vercel.app/
+      refreshSecret: This-is-some-secret-string-for-refreshing-the-distance-data
+    environmentPropertyOrder: null
+    metaSortKey: -1786690327223
+    _type: request_group
+  - _id: wrk_9fab1e751ce742e3a90a84bcc34d1573
+    parentId: null
+    modified: 1786690327221
+    created: 1786690327221
+    name: Imported Workspace
+    description: ""
+    scope: collection
+    _type: workspace
+  - _id: req_65b1f6aa10a24fc186b528a2c0a47b85
+    parentId: fld_f70187ca476248889847de61d15a9449
+    modified: 1786699264177
+    created: 1786690327224
+    url: "{{baseUrl}}/api/scooters/total-distance"
+    name: Get Total Distance
+    description: ""
+    method: GET
+    body: {}
+    parameters: []
+    headers: []
+    authentication: {}
+    metaSortKey: -1786690327224
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: env_7ab0b990b2a1d20795f585e2323b82ceb25de352
+    parentId: wrk_9fab1e751ce742e3a90a84bcc34d1573
+    modified: 1786699306010
+    created: 1786690329537
+    name: Base Environment
+    data: {}
+    dataPropertyOrder: {}
+    color: null
+    isPrivate: false
+    metaSortKey: 1786690329537
+    _type: environment
+  - _id: jar_7ab0b990b2a1d20795f585e2323b82ceb25de352
+    parentId: wrk_9fab1e751ce742e3a90a84bcc34d1573
+    modified: 1786690329538
+    created: 1786690329538
+    name: Default Jar
+    cookies: []
+    _type: cookie_jar
+  - _id: env_a0b33b2eaf6143429364a6496c0cfe57
+    parentId: env_7ab0b990b2a1d20795f585e2323b82ceb25de352
+    modified: 1786699312164
+    created: 1786699270352
+    name: New Environment
+    data: {}
+    dataPropertyOrder: {}
+    color: null
+    isPrivate: false
+    metaSortKey: 1786699270352
+    _type: environment
+  - _id: env_d344ac5e1b3f46c2b17376f96f7affe1
+    parentId: env_7ab0b990b2a1d20795f585e2323b82ceb25de352
+    modified: 1786699276844
+    created: 1786699276844
+    name: New Environment
+    data: {}
+    dataPropertyOrder: null
+    color: null
+    isPrivate: true
+    metaSortKey: 1786699276844
+    _type: environment
+  - _id: env_debd8c41b0d841748f0fa98f539fce1b
+    parentId: env_7ab0b990b2a1d20795f585e2323b82ceb25de352
+    modified: 1786699278001
+    created: 1786699278001
+    name: New Environment
+    data: {}
+    dataPropertyOrder: null
+    color: null
+    isPrivate: false
+    metaSortKey: 1786699278001
+    _type: environment

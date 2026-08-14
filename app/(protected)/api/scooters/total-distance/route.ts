@@ -6,7 +6,7 @@ import { toLocalDisplay } from "@/lib/timezone";
 // It only ever reads from Redis, it never touches Snowflake,
 // so it's cheap and safe to leave open.
 
-const CACHE_KEY = "cache:scooter-total-distance";
+const CACHE_KEY = "cache:scooter-total-distance-snowflake";
 const META_KEY = `${CACHE_KEY}:meta`;
 
 export async function GET() {

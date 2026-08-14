@@ -7,7 +7,7 @@ import { toLocalDisplay } from "@/lib/timezone";
 // Snowflake and rewrites the cache. Call it manually (Postman/curl) or
 // wire it up to a scheduled job if you eventually want it automatic.
 
-const CACHE_KEY = "cache:scooter-total-distance";
+const CACHE_KEY = "cache:scooter-total-distance-snowflake";
 const META_KEY = `${CACHE_KEY}:meta`;
 
 // Since your source data only updates once a day as a batch job, there's
