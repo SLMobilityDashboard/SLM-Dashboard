@@ -464,7 +464,6 @@ class SnowflakeNotificationManager {
       connections,
     };
   }
-  // 
 
   public static manualCleanup(): void {
     console.log('[Snowflake-Notification] Manual cleanup triggered');

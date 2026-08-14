@@ -13,6 +13,8 @@ const PUBLIC_PREFIXES = [
   '/api/debug',
   '/api/prewarm-job',
   '/api/redis-clear',
+  '/api/scooters/total-distance', // ✅ public read + self-auth'd refresh (x-refresh-secret header)
+  '/api/scooters/total-distance/refresh', // ✅ public read + self-auth'd refresh (x-refresh-secret header)
 ];
 
 const FORBIDDEN_REDIRECT = '/unauthorized';
