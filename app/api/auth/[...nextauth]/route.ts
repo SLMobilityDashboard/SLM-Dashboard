@@ -1,6 +1,10 @@
 import NextAuth, { NextAuthOptions } from "next-auth";
 import CognitoProvider from "next-auth/providers/cognito";
 import { getRolesForEmail } from "@/lib/auth/role-mappings";
+import { jwtDecode } from "jwt-decode"; // or `jose`'s decodeJwt — either works,
+                                         // we only need to read claims, not verify
+                                         // (NextAuth already validated the token
+                                         // when it was issued by Cognito).
 
 // ─── Env validation — fail loudly at boot instead of a cryptic DNS error later ──
 if (!process.env.COGNITO_DOMAIN) {
@@ -10,6 +14,36 @@ if (process.env.COGNITO_DOMAIN.includes("://")) {
   // COGNITO_DOMAIN is expected to be a FULL URL (e.g. "https://your-domain.auth.region.amazoncognito.com")
   // This check just guards against someone accidentally stripping/doubling the protocol later.
   // console.log("ℹ️  COGNITO_DOMAIN includes protocol — using as-is:", process.env.COGNITO_DOMAIN);
+}
+
+// ─── Snowflake role extraction ───────────────────────────────────────────────
+// Cognito's Pre Token Generation Lambda (V2_0) injects `scp: "session:role:<ROLE>"`
+// into the ID token based on the user's cognito:groups, per the
+// EXTERNAL_OAUTH_ANY_ROLE_MODE = DISABLE setup on the Snowflake security
+// integration. This decodes that claim so it can ride along on the session.
+//
+// NOTE: this only reads claims — it does not verify the token's signature.
+// That's fine here because NextAuth's CognitoProvider already validated the
+// token against Cognito's JWKS when it was issued; we're just reading a
+// claim off a token we already trust.
+interface CognitoIdTokenClaims {
+  "cognito:username": string;
+  scp?: string; // e.g. "session:role:ANALYST_ROLE"
+  [key: string]: unknown;
+}
+
+function extractSnowflakeRole(idToken: string | undefined): string | null {
+  if (!idToken) return null;
+  try {
+    const claims = jwtDecode<CognitoIdTokenClaims>(idToken);
+    const match  = claims.scp?.match(/session:role:(\S+)/);
+    return match?.[1] ?? null;
+  } catch {
+    // Malformed/missing token — treat as "no role asserted", not a fatal
+    // error. Snowflake falls back to session:role-any (the user's default
+    // role) when no scp claim is present.
+    return null;
+  }
 }
 
 export const authOptions: NextAuthOptions = {
@@ -54,7 +88,17 @@ export const authOptions: NextAuthOptions = {
 
         token.roles = [...new Set([...cognitoGroups, ...customRoles])];
 
-        console.log("✅ Sign in:", token.email, "| cognito:username:", token.cognitoUsername, "| roles:", token.roles);
+        // Snowflake session role — asserted by Cognito's Pre Token
+        // Generation Lambda via the `scp` claim, distinct from `roles`
+        // above (which drives app-level UI/authorization, not Snowflake).
+        token.snowflakeRole = extractSnowflakeRole(account.id_token);
+
+        console.log(
+          "✅ Sign in:", token.email,
+          "| cognito:username:", token.cognitoUsername,
+          "| roles:", token.roles,
+          "| snowflakeRole:", token.snowflakeRole ?? "(none — will use session:role-any)",
+        );
         return token;
       }
 
@@ -101,12 +145,28 @@ export const authOptions: NextAuthOptions = {
 
         console.log("✅ Tokens refreshed successfully");
 
+        // IMPORTANT: re-extract the role from the *refreshed* ID token, not
+        // the old one. If the user's Cognito group membership changed since
+        // their last login (added/removed from an analyst/admin group),
+        // Cognito's Pre Token Generation Lambda will bake a different `scp`
+        // claim into this new token — re-reading it here is what makes role
+        // changes take effect without forcing a full re-login.
+        const refreshedSnowflakeRole = extractSnowflakeRole(refreshed.id_token);
+
+        if (refreshedSnowflakeRole !== (token.snowflakeRole ?? null)) {
+          console.log(
+            "🔁 Snowflake role changed on refresh:",
+            token.snowflakeRole ?? "(none)", "->", refreshedSnowflakeRole ?? "(none)",
+          );
+        }
+
         return {
           ...token,
           idToken:        refreshed.id_token,
           // Cognito refresh doesn't always return a new access_token; keep the old one if absent
           accessToken:    refreshed.access_token ?? token.accessToken,
           idTokenExpires: Date.now() + 55 * 60 * 1000,
+          snowflakeRole:  refreshedSnowflakeRole,
           error:          undefined,
         };
 
@@ -126,6 +186,10 @@ export const authOptions: NextAuthOptions = {
         username:       token.cognitoUsername as string,
         givenName:      token.givenName       as string,
         middleName:     token.middleName      as string,
+        // Snowflake session role, or null to mean "let Snowflake resolve
+        // session:role-any (the user's default role)". route.ts reads this
+        // both to fold it into the per-user cache key and for logging.
+        snowflakeRole:  (token.snowflakeRole as string | null) ?? null,
       };
 
       // Prefer id_token for Snowflake OAuth; fall back to access_token

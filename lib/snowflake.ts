@@ -10,11 +10,18 @@ interface QueryResult {
 interface ExecuteQueryOptions {
   Token?:           string;
   addAuditComment?: boolean;
-  // NEW: allows callers to pass a role derived from the user's own Cognito
-  // groups/permissions instead of always using the global SNOWFLAKE_ROLE env
-  // var. Falls back to SNOWFLAKE_ROLE if not provided, so existing callers
-  // keep working unchanged.
   snowflakeRole?:   string;
+  // `snowflakeRole` comes from the ID token's `scp` claim
+  // (session:role:<ROLE>), injected by the Cognito Pre Token Generation
+  // Lambda. When present, it is passed explicitly as the Snowflake
+  // connection's `role`. Snowflake still validates that this role is
+  // listed in the token's `scp` claim (EXTERNAL_OAUTH_ANY_ROLE_MODE=DISABLE
+  // on the security integration) — this option just makes the *choice* of
+  // role explicit instead of implicitly falling back to DEFAULT_ROLE.
+  //
+  // If `snowflakeRole` is omitted, we fall back to the old behavior:
+  // Snowflake activates the DEFAULT_ROLE configured on the Snowflake user
+  // object, and scp still has to permit it.
 }
 
 class SnowflakeConnectionManager {
@@ -22,40 +29,36 @@ class SnowflakeConnectionManager {
   private static readonly LOGIN_TIMEOUT_MS   = 120_000;
 
   /**
-   * Build minimal connection options using the cognito:username claim
-   * and the raw Cognito token (id_token or access_token).
+   * Build connection options using the cognito:username claim, the raw
+   * Cognito token (id_token), and optionally an explicit role.
    *
    * IMPORTANT: `username` must be the `cognito:username` claim value from
    * the JWT — NOT the email address, and NOT uppercased.
+   *
+   * `role` is only set when `snowflakeRole` is provided. If omitted,
+   * Snowflake falls back to the DEFAULT_ROLE configured on the Snowflake
+   * user object for cognitoUsername.
    */
-private static buildConnectionOptions(
-  cognitoUsername: string,
-  Token: string,
-  role?: string,
-): Record<string, unknown> {
-  if (!process.env.SNOWFLAKE_ACCOUNT) {
-    throw new Error('SNOWFLAKE_ACCOUNT env var is not set');
+  private static buildConnectionOptions(
+    cognitoUsername: string,
+    Token: string,
+    snowflakeRole?: string,
+  ): Record<string, unknown> {
+    if (!process.env.SNOWFLAKE_ACCOUNT) {
+      throw new Error('SNOWFLAKE_ACCOUNT env var is not set');
+    }
+
+    return {
+      account:        process.env.SNOWFLAKE_ACCOUNT,
+      username:       cognitoUsername,
+      authenticator:  'OAUTH',
+      token:          Token,
+      warehouse:      process.env.SNOWFLAKE_WAREHOUSE,
+      ...(snowflakeRole ? { role: snowflakeRole } : {}),
+      loginTimeout:   this.LOGIN_TIMEOUT_MS,
+      requestTimeout: this.REQUEST_TIMEOUT_MS,
+    };
   }
-
-  const opts: Record<string, unknown> = {
-    account:        process.env.SNOWFLAKE_ACCOUNT,
-    username:       cognitoUsername,
-    authenticator:  'OAUTH',
-    token:          Token,
-    warehouse:      process.env.SNOWFLAKE_WAREHOUSE,
-    loginTimeout:   this.LOGIN_TIMEOUT_MS,
-    requestTimeout: this.REQUEST_TIMEOUT_MS,
-  };
-
-  // Only add `role` when one was explicitly passed — omitting the key
-  // entirely (not just leaving it `undefined`) lets Snowflake's
-  // EXTERNAL_OAUTH_ANY_ROLE_MODE auto-resolve the user's granted role.
-  if (role) {
-    opts.role = role;
-  }
-
-  return opts;
-}
 
   private static connect(connection: Connection): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -96,12 +99,20 @@ private static buildConnectionOptions(
   /**
    * Execute a SQL query against Snowflake using OAuth token relay.
    *
+   * Role resolution:
+   * - If `options.snowflakeRole` is provided (from the token's scp claim),
+   *   it is passed explicitly as the connection's `role`.
+   * - Otherwise, Snowflake activates the DEFAULT_ROLE configured on the
+   *   Snowflake user object.
+   * - Either way, Snowflake's EXTERNAL_OAUTH_ANY_ROLE_MODE=DISABLE setting
+   *   requires the resolved role to be listed in the token's scp claim, or
+   *   the connection fails with error 390317.
+   *
    * @param sql             - The SQL to execute.
    * @param cognitoUsername - The `cognito:username` claim from the session
    *                          (session.user.username in NextAuth).
-   * @param options         - Must include a valid `Token` (id_token or access_token).
-   *                          Optionally pass `snowflakeRole` to use a role specific
-   *                          to this user rather than the global SNOWFLAKE_ROLE default.
+   * @param options         - Must include a valid `Token` (Cognito ID token).
+   *                          May include `snowflakeRole`.
    */
   public static async executeQuery(
     sql: string,
@@ -111,50 +122,54 @@ private static buildConnectionOptions(
     const { Token, addAuditComment = true, snowflakeRole } = options;
 
     if (!Token) {
-      throw new Error('Cognito Token (idToken or accessToken) is required for Snowflake query');
+      throw new Error('Cognito Token (ID token) is required for Snowflake query');
     }
 
     if (!cognitoUsername) {
       throw new Error('cognitoUsername is required — pass session.user.username from NextAuth');
     }
 
-    // IMPORTANT: we no longer default to SNOWFLAKE_ROLE automatically.
-    // That env var previously forced every user onto one hardcoded role
-    // (e.g. SYSADMIN) regardless of what they actually have granted,
-    // which caused 390186 errors for users without that specific role.
-    // Now: pass `snowflakeRole` explicitly if you know a user needs a
-    // specific role; otherwise leave it unset and let Snowflake's
-    // EXTERNAL_OAUTH_ANY_ROLE_MODE resolve the user's real default role.
-    const requestedRole = snowflakeRole; // undefined unless explicitly passed
-
     const finalSql = addAuditComment
       ? `-- User: ${cognitoUsername}\n${sql}`
       : sql;
 
     console.log(`📊 Executing query as Snowflake user: ${cognitoUsername}`);
-    console.log(`🔑 Role: ${requestedRole ?? '(auto-resolved by Snowflake)'}`);
+    console.log(
+      snowflakeRole
+        ? `🔑 Role requested (from token scp claim): ${snowflakeRole}`
+        : `🔑 Role: (none in token — falling back to DEFAULT_ROLE)`
+    );
 
-    const connectionOptions = this.buildConnectionOptions(cognitoUsername, Token, requestedRole);
+    const connectionOptions = this.buildConnectionOptions(cognitoUsername, Token, snowflakeRole);
     const connection = snowflake.createConnection(connectionOptions as any);
 
     try {
       await this.connect(connection);
     } catch (err: any) {
-      // Surface a clearer message for the common "role not granted" case
-      // (Snowflake error code 390186) instead of the raw SDK error.
+      // Surface a clearer message for the common "role not granted / not
+      // permitted by OAuth token" cases instead of the raw SDK error.
       if (err?.code === '390186' || /not granted to this user/i.test(err?.message ?? '')) {
         throw new Error(
-          `Snowflake role '${requestedRole}' is not granted to user '${cognitoUsername}'. ` +
-          `Either grant the role in Snowflake (GRANT ROLE ${requestedRole} TO USER ${cognitoUsername};) ` +
-          `or omit snowflakeRole to let Snowflake auto-resolve the user's actual role.`,
+          `Snowflake connection failed for user '${cognitoUsername}' — likely no DEFAULT_ROLE ` +
+          `is set on the Snowflake user, or the configured DEFAULT_ROLE isn't actually granted. ` +
+          `Check: ALTER USER ${cognitoUsername} SET DEFAULT_ROLE = <role>; ` +
+          `and confirm the role is granted: GRANT ROLE <role> TO USER ${cognitoUsername};`,
+        );
+      }
+      if (err?.code === '390317' || /not listed in the Access Token/i.test(err?.message ?? '')) {
+        throw new Error(
+          `Snowflake connection failed for user '${cognitoUsername}' — the role ` +
+          `${snowflakeRole ? `'${snowflakeRole}'` : `(DEFAULT_ROLE)`} is not present in the ` +
+          `OAuth token's 'scp' claim. Check the Cognito Pre Token Generation Lambda is injecting ` +
+          `'session:role:<ROLE>' into the ID token for this user, and that it matches a role ` +
+          `actually granted to them in Snowflake.`,
         );
       }
       throw err;
     }
 
-    // Log which role Snowflake actually activated — useful when role was
-    // auto-resolved, since we don't know it in advance in that case.
-    let activeRole = requestedRole ?? '(unknown)';
+    // Log which role Snowflake actually activated.
+    let activeRole = '(unknown)';
     try {
       const roleResult = await this.runQuery(connection, 'SELECT CURRENT_ROLE() AS ROLE');
       activeRole = roleResult.rows?.[0]?.ROLE ?? activeRole;
@@ -187,7 +202,7 @@ private static buildConnectionOptions(
     try {
       const result = await this.runQuery(connection, finalSql);
       console.log(
-        `✅ Query done [${cognitoUsername}]: ${result.rowCount} rows in ${result.executionTime.toFixed(2)}s`,
+        `✅ Query done [${cognitoUsername}/${activeRole}]: ${result.rowCount} rows in ${result.executionTime.toFixed(2)}s`,
       );
       return result;
     } finally {

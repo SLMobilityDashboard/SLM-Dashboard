@@ -84,6 +84,7 @@
     "input-otp": "latest",
     "install": "^0.13.0",
     "jsonwebtoken": "^9.0.2",
+    "jwt-decode": "^4.0.0",
     "leaflet": "latest",
     "leaflet.markercluster": "^1.5.3",
     "lodash.isequal": "^4.5.0",

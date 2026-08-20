@@ -73,17 +73,21 @@ function normalizeSQL(sql: string): string {
   return n.trim();
 }
 
-// SECURITY FIX: fold cognitoUsername into the hash. Roles are now resolved
-// per-user (EXTERNAL_OAUTH_ANY_ROLE_MODE), so identical SQL text can
-// legitimately return different rows for different users (row-level
-// security, masking policies, different grants). Hashing SQL alone meant
-// whichever user ran a query first would populate a cache entry that got
-// served to every other user regardless of their own permissions — a
-// cross-user data leak. Scoping the hash per-user fixes that.
-function generateQueryHash(sql: string, cognitoUsername: string): string {
+// SECURITY FIX: fold cognitoUsername AND snowflakeRole into the hash.
+// Identical SQL text can legitimately return different rows for different
+// users (row-level security, masking policies, different grants) — and,
+// now that role is asserted per-session from the token's `scp` claim
+// rather than being a fixed 1:1 function of the user, the SAME user can
+// also see different rows depending on which role was active for a given
+// request (e.g. their Cognito group membership changed, or a user is
+// permitted multiple roles). Hashing username alone is no longer enough
+// to guarantee cache isolation — role must be included too, or a query
+// cached under one role could be served to the same user running under a
+// different role, leaking rows they shouldn't see under that role.
+function generateQueryHash(sql: string, cognitoUsername: string, snowflakeRole?: string): string {
   return crypto
     .createHash("sha256")
-    .update(`${cognitoUsername}:${normalizeSQL(sql)}`)
+    .update(`${cognitoUsername}:${snowflakeRole ?? "default"}:${normalizeSQL(sql)}`)
     .digest("hex");
 }
 
@@ -187,6 +191,7 @@ async function performRevalidation(
   sql:             string,
   cognitoUsername: string,
   Token:           string,
+  snowflakeRole?:  string,
 ): Promise<{ dataChanged: boolean; newData?: any[]; error?: string }> {
   console.log(`[REVALIDATE] [${shortHash}] Checking for data changes...`);
 
@@ -194,7 +199,10 @@ async function performRevalidation(
   const metaKey = `${cacheKey}:meta`;
 
   try {
-    const result = await SnowflakeConnectionManager.executeQuery(sql, cognitoUsername, { Token });
+    const result = await SnowflakeConnectionManager.executeQuery(sql, cognitoUsername, {
+      Token,
+      snowflakeRole,
+    });
 
     const freshData     = result.rows;
     const freshDataHash = generateDataHash(freshData);
@@ -464,7 +472,13 @@ export async function POST(req: NextRequest) {
     }
 
     const cognitoUsername = (session.user as any).username;
-    const email           = session.user.email ?? "";
+    const email            = session.user.email ?? "";
+
+    // Role asserted by the Cognito ID token's `scp` claim
+    // (session:role:<ROLE>), read in the NextAuth jwt/session callbacks.
+    // May be undefined if the token carries no scp claim, in which case
+    // SnowflakeConnectionManager falls back to the user's DEFAULT_ROLE.
+    const snowflakeRole = (session.user as any).snowflakeRole ?? undefined;
 
     if (!cognitoUsername) {
       return NextResponse.json(
@@ -479,10 +493,11 @@ export async function POST(req: NextRequest) {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // SECURITY FIX: hash now includes cognitoUsername (see generateQueryHash
-    // comment above) so users with different roles/grants never share a
-    // cache entry for the same SQL text.
-    const queryHash    = generateQueryHash(sql, cognitoUsername);
+    // SECURITY FIX: hash includes cognitoUsername AND snowflakeRole (see
+    // generateQueryHash comment above) so users — or the same user acting
+    // under a different asserted role — never share a cache entry for the
+    // same SQL text when the underlying rows could legitimately differ.
+    const queryHash    = generateQueryHash(sql, cognitoUsername, snowflakeRole);
     const cacheKey     = generateCacheKey(queryHash, sql, forceDynamic);
     const shortHash    = queryHash.substring(0, 8);
     const strategy     = getCacheStrategy(sql, forceDynamic);
@@ -511,7 +526,7 @@ export async function POST(req: NextRequest) {
           (async () => {
             try {
               const result = await performRevalidation(
-                cacheKey, shortHash, sql, cognitoUsername, Token
+                cacheKey, shortHash, sql, cognitoUsername, Token, snowflakeRole
               );
               if (result.dataChanged && result.newData) {
                 await writeToCache(cacheKey, result.newData, shortHash, {
@@ -545,6 +560,7 @@ export async function POST(req: NextRequest) {
               "X-Persistent":   "true",
               "X-Revalidation": "background",
               "X-User":         cognitoUsername,
+              "X-Role":         snowflakeRole ?? "(default)",
             },
           });
         }
@@ -575,6 +591,7 @@ export async function POST(req: NextRequest) {
           "X-Cache-Type":   strategy.type,
           "X-Persistent":   isPersistent ? "true" : "false",
           "X-User":         cognitoUsername,
+          "X-Role":         snowflakeRole ?? "(default)",
         },
       });
     }
@@ -610,6 +627,7 @@ export async function POST(req: NextRequest) {
             "X-Cache-Hash":   queryHash,
             "X-Cache-Type":   strategy.type,
             "X-User":         cognitoUsername,
+            "X-Role":         snowflakeRole ?? "(default)",
           },
         });
       }
@@ -624,7 +642,16 @@ export async function POST(req: NextRequest) {
     );
 
     try {
-      const result = await SnowflakeConnectionManager.executeQuery(sql, cognitoUsername, { Token });
+      // The Snowflake connection's `role` is set explicitly from
+      // snowflakeRole (the token's scp claim) when present. If absent,
+      // SnowflakeConnectionManager falls back to the Snowflake user's
+      // DEFAULT_ROLE. Either way, Snowflake's EXTERNAL_OAUTH_ANY_ROLE_MODE
+      // = DISABLE setting requires the resolved role to be listed in the
+      // token's scp claim, or the connection fails with error 390317.
+      const result = await SnowflakeConnectionManager.executeQuery(sql, cognitoUsername, {
+        Token,
+        snowflakeRole,
+      });
       const rows   = result.rows;
 
       if (!rows || rows.length === 0) {
@@ -651,6 +678,7 @@ export async function POST(req: NextRequest) {
             "X-Cache-Type":   "hourly",
             "X-Row-Count":    "0",
             "X-User":         cognitoUsername,
+            "X-Role":         snowflakeRole ?? "(default)",
           },
         });
       }
@@ -684,6 +712,7 @@ export async function POST(req: NextRequest) {
           "X-Row-Count":      rows.length.toString(),
           "X-Query-Duration": totalDuration.toString(),
           "X-User":           cognitoUsername,
+          "X-Role":           snowflakeRole ?? "(default)",
         },
       });
 
