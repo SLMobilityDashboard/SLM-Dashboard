@@ -57,7 +57,7 @@ export const useRevenueByArea = (filters?: RevenueFilters) => {
           LOCATIONNAME AS AREA,
           STATIONNAME AS STATION,
           SUM(TOTAL_REVENUE) AS TOTAL_REVENUE
-        FROM MY_REVENUESUMMARY
+        FROM DB_DUMP.PUBLIC.MY_REVENUESUMMARY
         WHERE DATE BETWEEN '${fromDate}' AND '${toDate}'
           ${areasList ? `AND AREA IN (${areasList})` : ""}
           ${stationsList ? `AND STATION IN (${stationsList})` : ""}

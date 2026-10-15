@@ -62,15 +62,15 @@ const mapProviders = {
     style: "light",
   },
   cartodb_dark: {
-    name: "Carto Dark Matter",
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution: "© OpenStreetMap contributors © CARTO",
+    name: "OpenStreetMap",
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "© OpenStreetMap contributors",
     style: "dark",
   },
   cartodb_light: {
-    name: "Carto Positron",
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: "© OpenStreetMap contributors © CARTO",
+    name: "OpenStreetMap",
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: "© OpenStreetMap contributors",
     style: "light",
   },
   satellite: {

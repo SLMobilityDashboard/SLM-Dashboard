@@ -470,9 +470,9 @@ export default function SwapStationMap({
 
     // Add tile layer
     L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
       {
-        attribution: "© OpenStreetMap contributors © CARTO",
+        attribution: "© OpenStreetMap contributors",
         maxZoom: 19,
         subdomains: "abcd",
       }
@@ -613,7 +613,7 @@ export default function SwapStationMap({
             {/* Map Badge */}
             <div className="absolute top-3 left-3 z-[999]">
               <div className="bg-slate-800/90 backdrop-blur-sm border border-slate-700 text-slate-300 px-3 py-2 rounded-md text-xs font-medium">
-                Carto Dark Matter | {stationLocations.length} stations
+                OpenStreetMap | {stationLocations.length} stations
               </div>
             </div>
 

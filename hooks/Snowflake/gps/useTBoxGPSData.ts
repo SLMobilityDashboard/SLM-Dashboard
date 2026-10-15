@@ -484,7 +484,9 @@ const buildGPSDataQuery = useCallback((filters: TBoxGPSFilters): string => {
         latitude: parseFloat(row.LATITUDE),
         longitude: parseFloat(row.LONGITUDE),
         timestamp: row.TIMESTAMP,
-        date: row.TIMESTAMP ? row.TIMESTAMP.split('T')[0] : null,  // ← add this
+        date: row.TIMESTAMP
+          ? String(row.TIMESTAMP).split('T')[0].split(' ')[0]
+          : null,
         tboxId: row.TBOX_ID,
         province: row.PROVINCE,
         district: row.DISTRICT,

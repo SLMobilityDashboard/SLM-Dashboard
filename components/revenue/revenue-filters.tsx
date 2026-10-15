@@ -98,7 +98,7 @@ const useGeographicHierarchy = (filters?: RevenueFilters) => {
                     rs.LOCATIONNAME AS AREA,
                     adp.DISTRICT_NAME AS DISTRICT,
                     adp.PROVICE_NAME AS PROVINCE
-                  FROM MY_REVENUESUMMARY rs
+                  FROM DB_DUMP.PUBLIC.MY_REVENUESUMMARY rs
                   JOIN SOURCE_DATA.MASTER_DATA.AREA_DISTRICT_PROVICE_LOOKUP adp 
                     ON rs.LOCATIONNAME = adp.AREA_NAME
                   WHERE rs.TOTAL_REVENUE > 0
@@ -113,7 +113,7 @@ const useGeographicHierarchy = (filters?: RevenueFilters) => {
             sql: `SELECT DISTINCT 
                     rs.LOCATIONNAME AS AREA, 
                     rs.STATIONNAME AS STATION 
-                  FROM MY_REVENUESUMMARY rs
+                  FROM DB_DUMP.PUBLIC.MY_REVENUESUMMARY rs
                   WHERE rs.TOTAL_REVENUE > 0
                   ORDER BY AREA, STATION`,
           }),

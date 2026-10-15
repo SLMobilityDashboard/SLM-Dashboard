@@ -30,10 +30,10 @@ export default function ScooterMapComponent({ lat, lng }: ScooterMapComponentPro
         // Create map with dark style
         mapInstance.current = L.map(mapRef.current).setView([lat, lng], 15)
 
-        // Add dark tile layer (similar to Carto Dark Matter)
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+        // Add OpenStreetMap tile layer (no API key needed)
+        L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
           attribution:
-            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
           subdomains: "abcd",
           maxZoom: 19,
         }).addTo(mapInstance.current)

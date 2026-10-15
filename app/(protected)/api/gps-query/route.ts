@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getToken } from "next-auth/jwt";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import SnowflakeConnectionManager from "@/lib/snowflake";
 import crypto from "crypto";
 import { getRedis } from "@/lib/redis";
@@ -46,52 +47,6 @@ interface CacheMetadata {
   dataChangeCount: number;
 }
 
-// -------------------- User Extraction --------------------
-async function extractUserFromRequest(req: NextRequest): Promise<{ 
-  userId?: string; 
-  username?: string;
-  email?: string;
-  roles?: string[];
-}> {
-  try {
-    // Get token from NextAuth - this works with Cognito
-    const token = await getToken({ 
-      req, 
-      secret: process.env.NEXTAUTH_SECRET 
-    });
-    
-    if (token) {
-      console.log('🔐 [GPS] Token found:', {
-        sub: token.sub,
-        name: token.name,
-        email: token.email,
-        username: token.username,
-        roles: token.roles
-      });
-      
-      return {
-        userId: token.sub || token.id,
-        username: token.name as string || token.userName || token.email,
-        email: token.email as string,
-        roles: token.roles as string[] || []
-      };
-    }
-
-    // Check for session cookie as fallback
-    const cookieHeader = req.headers.get('cookie');
-    if (cookieHeader?.includes('next-auth.session-token')) {
-      console.log('🔐 [GPS] Session cookie found but token not decoded');
-      return { userId: 'authenticated', username: 'user' };
-    }
-    
-    console.log('🔐 [GPS] No user session found');
-    return {}; // No user info available
-  } catch (error) {
-    console.error('[GPS] Error extracting user from request:', error);
-    return {};
-  }
-}
-
 // -------------------- Query Normalization --------------------
 const DYNAMIC_DATE_FUNCTIONS = [
   'current_date', 'current_timestamp', 'current_time',
@@ -127,9 +82,14 @@ function normalizeSQL(sql: string): string {
   return normalized.trim();
 }
 
-function generateQueryHash(sql: string): string {
-  const normalizedSql = normalizeSQL(sql);
-  return crypto.createHash("sha256").update(normalizedSql).digest("hex");
+// Identical SQL can return different rows for different users/roles
+// (row-level security, masking, grants), so the hash includes both —
+// same approach as /api/query.
+function generateQueryHash(sql: string, cognitoUsername: string, snowflakeRole?: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(`${cognitoUsername}:${snowflakeRole ?? "default"}:${normalizeSQL(sql)}`)
+    .digest("hex");
 }
 
 function generateCacheKey(queryHash: string, sql: string, forceDynamic?: boolean): string {
@@ -207,7 +167,9 @@ async function performRevalidation(
   cacheKey: string,
   shortHash: string,
   sql: string,
-  username?: string
+  cognitoUsername: string,
+  Token: string,
+  snowflakeRole?: string,
 ): Promise<{ dataChanged: boolean; newData?: any[]; error?: string }> {
   console.log(`[REVALIDATE GPS] [${shortHash}] Checking for data changes...`);
   
@@ -215,7 +177,10 @@ async function performRevalidation(
   const metaKey = `${cacheKey}:meta`;
   
   try {
-    const result = await SnowflakeConnectionManager.executeQuery(sql, username, false);
+    const result = await SnowflakeConnectionManager.executeQuery(sql, cognitoUsername, {
+      Token,
+      snowflakeRole,
+    });
     const freshData = result.rows;
     
     const freshDataHash = generateDataHash(freshData);
@@ -504,21 +469,46 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
-    // Extract systemUser parameter from request body
-    const { sql, forceDynamic, systemUser } = await req.json();
+    const { sql, forceDynamic } = await req.json();
     if (!sql || typeof sql !== "string") {
       return NextResponse.json({ error: "Missing or invalid SQL" }, { status: 400 });
     }
 
-    // Extract user information from the request automatically
-    const userInfo = await extractUserFromRequest(req);
-    
-    // Use systemUser if provided, otherwise use extracted user info
-    const userId = systemUser || userInfo.userId;
-    const username = systemUser || userInfo.username || 'ANONYMOUS';
-    const email = userInfo.email;
+    // ─── Auth (same as /api/query) ────────────────────────────────────────────
+    // Snowflake is reached via OAuth token relay, so we need the user's
+    // Cognito ID token and cognito:username from the NextAuth session.
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-    const queryHash = generateQueryHash(sql);
+    if ((session as any).error === "RefreshTokenError") {
+      return NextResponse.json(
+        { error: "Session expired — please sign in again" },
+        { status: 401 }
+      );
+    }
+
+    const cognitoUsername: string | undefined = (session.user as any).username;
+    const snowflakeRole: string | undefined   = (session.user as any).snowflakeRole ?? undefined;
+    const email    = session.user.email ?? undefined;
+    const userId   = cognitoUsername;
+    const username = cognitoUsername;
+
+    if (!cognitoUsername) {
+      return NextResponse.json(
+        { error: "cognito:username not found in session — check NextAuth jwt callback" },
+        { status: 401 }
+      );
+    }
+
+    const Token = (session as any).idToken ?? (session as any).accessToken ?? null;
+    if (!Token) {
+      return NextResponse.json({ error: "No Cognito token in session" }, { status: 401 });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const queryHash = generateQueryHash(sql, cognitoUsername, snowflakeRole);
     const cacheKey = generateCacheKey(queryHash, sql, forceDynamic);
     const shortHash = queryHash.substring(0, 8);
     const strategy = getCacheStrategy(sql, forceDynamic);
@@ -552,7 +542,9 @@ export async function POST(req: NextRequest) {
                 cacheKey,
                 shortHash,
                 sql,
-                username
+                cognitoUsername,
+                Token,
+                snowflakeRole,
               );
               
               if (revalidationResult.dataChanged && revalidationResult.newData) {
@@ -631,7 +623,10 @@ export async function POST(req: NextRequest) {
     // Cache miss - execute query
     console.log(`🔴 [GPS CACHE MISS] [${shortHash}] ${userLabel} (${strategy.type}) - Executing Snowflake`);
     
-    const result = await SnowflakeConnectionManager.executeQuery(sql, username, false);
+    const result = await SnowflakeConnectionManager.executeQuery(sql, cognitoUsername, {
+      Token,
+      snowflakeRole,
+    });
     const rows = result.rows;
 
     // Cache empty results with shorter TTL (1 hour)

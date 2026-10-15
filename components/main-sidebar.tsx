@@ -27,6 +27,7 @@ import {
   Settings, BatteryCharging, LineChart, Hexagon,
   Building2, DollarSign, TrendingUp, BrainCog,
   Bike, ShoppingCart, ChevronRight, Users,
+  Telescope, Database,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useState, useEffect } from "react";
@@ -48,10 +49,11 @@ export function MainSidebar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     dashboard: true,
-    gps:     pathname?.startsWith("/gps")      || false,
-    "360":   pathname?.startsWith("/vehicles") || pathname?.startsWith("/batteries") || pathname?.startsWith("/bss") || false,
-    revenue: pathname?.startsWith("/revenue")  || false,
-    sales:   pathname?.startsWith("/sales")    || false,
+    gps:         pathname?.startsWith("/gps")                 || false,
+    "360":       pathname?.startsWith("/vehicles") || pathname?.startsWith("/batteries") || pathname?.startsWith("/bss") || false,
+    revenue:     pathname?.startsWith("/revenue")              || false,
+    sales:       pathname?.startsWith("/sales")                || false,
+    observatory: pathname?.startsWith("/warehouse-monitoring") || false,
   });
 
   // ── Correct types so user_effect is preserved ─────────────────────────────
@@ -95,7 +97,7 @@ export function MainSidebar() {
   //   a menu override (adhoc) — whichever they set in the admin UI.
   //
   // canAccessRoute(route)
-  //   Used for grouped sub-items (GPS, 360, Revenue children).
+  //   Used for grouped sub-items (GPS, 360, Revenue, Observatory children).
 
   // Replace canAccessMenu in MainSidebar:
   const canAccessMenu = (menuId: string): boolean => {
@@ -107,12 +109,13 @@ export function MainSidebar() {
     permsLoaded && hasRouteAccessSync(routePerms, userRoles, route);
 
   const categoryIcons: Record<string, { icon: React.ReactNode; color: string }> = {
-    gps:      { icon: <MapPin className="h-4 w-4" />,       color: "text-cyan-500"    },
-    "360":    { icon: <Bike className="h-4 w-4" />,         color: "text-amber-500"   },
-    revenue:  { icon: <DollarSign className="h-4 w-4" />,   color: "text-emerald-500" },
-    sales:    { icon: <ShoppingCart className="h-4 w-4" />, color: "text-orange-500"  },
-    fleet:    { icon: <Users className="h-4 w-4" />,        color: "text-blue-500"    },
-    analytics:{ icon: <BarChart3 className="h-4 w-4" />,    color: "text-blue-500"    },
+    gps:         { icon: <MapPin className="h-4 w-4" />,       color: "text-cyan-500"    },
+    "360":       { icon: <Bike className="h-4 w-4" />,         color: "text-amber-500"   },
+    revenue:     { icon: <DollarSign className="h-4 w-4" />,   color: "text-emerald-500" },
+    sales:       { icon: <ShoppingCart className="h-4 w-4" />, color: "text-orange-500"  },
+    fleet:       { icon: <Users className="h-4 w-4" />,        color: "text-blue-500"    },
+    analytics:   { icon: <BarChart3 className="h-4 w-4" />,    color: "text-blue-500"    },
+    observatory: { icon: <Telescope className="h-4 w-4" />,    color: "text-violet-500"  },
   };
 
   const menuCategories = [
@@ -151,6 +154,19 @@ export function MainSidebar() {
         { path: "/revenue/analytics",             label: "Analytics",             icon: <TrendingUp className="h-4 w-4" />   },
         { path: "/revenue/transaction-analytics", label: "Transaction Analytics", icon: <ShoppingCart className="h-4 w-4" /> },
         { path: "/revenue/customer",              label: "Customer Analytics",    icon: <Users className="h-4 w-4" />        },
+      ],
+    },
+    {
+      id: "observatory",
+      label: "Observatory",
+      icon: categoryIcons.observatory,
+      show: true,
+      items: [
+        { path: "/observatory/monitoring", label: "Monitoring", icon: <Database className="h-4 w-4" /> },
+        // Future: data validity, pipeline SLAs, query performance, etc.
+        // just add more { path, label, icon } entries here — the group
+        // rendering + permission checks below already handle any number
+        // of items generically.
       ],
     },
   ];
@@ -268,6 +284,7 @@ export function MainSidebar() {
                                 ? `bg-gradient-to-r ${
                                     category.icon.color.includes("cyan")      ? "from-cyan-500/15 to-cyan-600/10 border border-cyan-500/20"
                                     : category.icon.color.includes("emerald") ? "from-emerald-500/15 to-emerald-600/10 border border-emerald-500/20"
+                                    : category.icon.color.includes("violet")  ? "from-violet-500/15 to-violet-600/10 border border-violet-500/20"
                                     : "from-blue-500/15 to-blue-600/10 border border-blue-500/20"
                                   } ${category.icon.color}`
                                 : "hover:bg-slate-800 text-slate-300"

@@ -51,18 +51,18 @@ export default function MapChart({ data, config }: MapChartProps) {
             data.reduce((sum, point) => sum + (point.longitude || 0), 0) /
             data.length;
 
-          // Initialize map with Carto Dark Matter tiles
+          // Initialize map with OpenStreetMap tiles
           mapInstance.current = L.map(mapRef.current, {
             center: [avgLat || 0, avgLng || 0],
             zoom: zoom,
             zoomControl: false,
           });
 
-          // Add Carto Dark Matter tile layer
+          // Add OpenStreetMap tile layer (no API key needed)
           L.tileLayer(
-            "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+            "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
             {
-              attribution: "© OpenStreetMap contributors © CARTO",
+              attribution: "© OpenStreetMap contributors",
               subdomains: "abcd",
               maxZoom: 19,
             }

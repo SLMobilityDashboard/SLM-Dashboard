@@ -25,7 +25,7 @@ export const useAreaStations = () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sql: 'SELECT DISTINCT(LOCATIONNAME) AS AREA, STATIONNAME AS STATION FROM MY_REVENUESUMMARY ORDER BY AREA, STATION',
+            sql: 'SELECT DISTINCT(LOCATIONNAME) AS AREA, STATIONNAME AS STATION FROM DB_DUMP.PUBLIC.MY_REVENUESUMMARY ORDER BY AREA, STATION',
           }),
         });
       
