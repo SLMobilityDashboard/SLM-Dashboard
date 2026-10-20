@@ -70,6 +70,12 @@ interface BatteryFilters {
   selectedVehicleImei?: string | null; // Selected vehicle IMEI
 }
 
+// Max telemetry points per battery the charts need. Raw telemetry can be
+// 34k+ rows (~5MB of JSON) for a 7-day range, which overflows the response
+// size limit and comes back as a 500. The telemetry query below keeps one
+// reading per time bucket instead.
+const TARGET_TELEMETRY_POINTS = 2000;
+
 // Utility function to clean BMS IDs
 function cleanBmsId(bmsId: string): string {
   if (!bmsId || typeof bmsId !== 'string') return '';
@@ -204,11 +210,12 @@ function useHomeCharging(
       }
 
       const result = await response.json();
-      console.log(`${query || 'Query'} result:`, result);
-      
+      // (Removed the per-query console.log of the full result — logging
+      // thousands of rows in the browser is slow.)
+
       return result.data || result.rows || result || [];
     } catch (error) {
-      console.error(`${query || 'Query'} failed:`, error);
+      console.error(`${queryName || 'Query'} failed:`, error);
       throw error;
     }
   }, []);
@@ -253,38 +260,65 @@ function useHomeCharging(
     const whereClause = `WHERE TBOXID = '${effectiveTboxId}' AND ${filterConditions.join(' AND ')}`;
     // console.log("Generated WHERE clause:", whereClause);
 
+    // Size of the time bucket (seconds) used to thin the telemetry query to
+    // about TARGET_TELEMETRY_POINTS rows. Minimum 60s so short ranges keep
+    // full resolution.
+    const rangeSeconds =
+      filters.startTimestamp && filters.endTimestamp
+        ? filters.endTimestamp - filters.startTimestamp
+        : (filters.timeRange ?? 168) * 3600;
+    const bucketSeconds = Math.max(60, Math.ceil(rangeSeconds / TARGET_TELEMETRY_POINTS));
+
     return {
-      // OPTIMIZED: Only fetch essential columns for telemetry
+      // OPTIMIZED: Only fetch essential columns, and thin to ONE reading per
+      // time bucket per battery. Partitioning by BMS_ID means every battery
+      // present in a bucket keeps a point, so swap transitions still show.
       batteryTelemetry: `
-        SELECT
-          BATTEMP,
-          BATVOLT,
-          COALESCE(
-            NULLIF(BATCELLDIFFMAX, 0),
+        WITH base AS (
+          SELECT
+            BATTEMP,
+            BATVOLT,
+            COALESCE(
+              NULLIF(BATCELLDIFFMAX, 0),
+              CASE 
+                WHEN BATVOLT IS NOT NULL AND BATVOLT > 0 THEN 
+                  ABS(BATVOLT - 52.0) * 10.0
+                ELSE 0 
+              END
+            ) as BATCELLDIFFMAX,
+            BATCYCLECOUNT,
+            BATSOH,
+            BATPERCENT,
+            BATCURRENT,
+            COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR,
+            CTIME,
+            MOTORRPM,
             CASE 
-              WHEN BATVOLT IS NOT NULL AND BATVOLT > 0 THEN 
-                ABS(BATVOLT - 52.0) * 10.0
-              ELSE 0 
-            END
-          ) as BATCELLDIFFMAX,
-          BATCYCLECOUNT,
-          BATSOH,
-          BATPERCENT,
-          BATCURRENT,
-          COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR,
-          CTIME,
-          MOTORRPM,
-          CASE 
-            WHEN BMSID IS NOT NULL AND BMSID != '' THEN 
-              UPPER(TRIM(REGEXP_REPLACE(BMSID, '[\\x00-\\x1F\\x7F-\\x9F]', '')))
-            WHEN TBOX_ID IS NOT NULL THEN CONCAT('BMS_', RIGHT(TBOX_ID, 2))
-            ELSE CONCAT('BMS_', SUBSTRING(TBOXID, LENGTH(TBOXID)-1, 2))
-          END as BMS_ID,
-          COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
-          COALESCE(STATE, 'UNKNOWN') as STATE,
-          THROTTLEPERCENT
-        FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-        ${whereClause}
+              WHEN BMSID IS NOT NULL AND BMSID != '' THEN 
+                UPPER(TRIM(REGEXP_REPLACE(BMSID, '[\\x00-\\x1F\\x7F-\\x9F]', '')))
+              WHEN TBOX_ID IS NOT NULL THEN CONCAT('BMS_', RIGHT(TBOX_ID, 2))
+              ELSE CONCAT('BMS_', SUBSTRING(TBOXID, LENGTH(TBOXID)-1, 2))
+            END as BMS_ID,
+            COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
+            COALESCE(STATE, 'UNKNOWN') as STATE,
+            THROTTLEPERCENT
+          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+          ${whereClause}
+        ),
+        bucketed AS (
+          SELECT *,
+            ROW_NUMBER() OVER (
+              PARTITION BY BMS_ID, FLOOR(CTIME / ${bucketSeconds})
+              ORDER BY CTIME
+            ) AS rn
+          FROM base
+        )
+        SELECT
+          BATTEMP, BATVOLT, BATCELLDIFFMAX, BATCYCLECOUNT, BATSOH, BATPERCENT,
+          BATCURRENT, BATTERY_ERROR, CTIME, MOTORRPM, BMS_ID,
+          TOTAL_DISTANCE_KM, STATE, THROTTLEPERCENT
+        FROM bucketed
+        WHERE rn = 1
         ORDER BY CTIME ASC
       `,
 
@@ -490,7 +524,7 @@ function useHomeCharging(
                  bs.charge_consumed, bs.active_days
       `
     };
-  }, [tboxId, filters.selectedVehicleImei, buildFilterConditions]);
+  }, [tboxId, filters.selectedVehicleImei, buildFilterConditions, filters.startTimestamp, filters.endTimestamp, filters.timeRange]);
 
   const loadData = useCallback(async () => {
     // Only load if we have a valid IMEI
@@ -510,9 +544,8 @@ function useHomeCharging(
     setDebugInfo(null);
     
     try {
-      // Fetch main telemetry data
+      // Fetch main telemetry data (thinned in SQL — see batteryTelemetry)
       const telemetryResult = await fetchSnowflakeData(queries.batteryTelemetry, "batteryTelemetry");
-      console.log("Query" , queries.batteryTelemetry, "returned", telemetryResult.length, "rows");
       setBatteryData(telemetryResult || []);
       
       // Fetch and process battery swaps
