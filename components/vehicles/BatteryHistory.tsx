@@ -335,7 +335,7 @@ const FiltersPanel: React.FC<{
     const endTime = new Date(defaultEnd + "T23:59:59").getTime() / 1000;
 
     setPendingFilters({
-      timeRange: 168,
+      timeRange: 48,
       startTimestamp: startTime,
       endTimestamp: endTime,
       includeIdleData: false,
