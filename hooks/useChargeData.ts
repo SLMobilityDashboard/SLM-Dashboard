@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 // Core interfaces for battery diagnostics
 interface TboxData {
@@ -70,20 +70,21 @@ interface BatteryFilters {
   selectedVehicleImei?: string | null; // Selected vehicle IMEI
 }
 
-// Max telemetry points per battery the charts need. Raw telemetry can be
-// 34k+ rows (~5MB of JSON) for a 7-day range, which overflows the response
-// size limit and comes back as a 500. The telemetry query below keeps one
-// reading per time bucket instead.
-const TARGET_TELEMETRY_POINTS = 2000;
+// Full-resolution telemetry is fetched in small time windows so no single
+// response gets near the size limit (which caused the 500s). Every raw row is
+// kept: no thinning, no averaging. Windows are merged client-side in order.
+// If a window ever fails on size, lower this (e.g. 3 * 3600).
+const TELEMETRY_CHUNK_SECONDS = 6 * 3600;
+const TELEMETRY_CONCURRENCY = 3;
 
 // Utility function to clean BMS IDs
 function cleanBmsId(bmsId: string): string {
-  if (!bmsId || typeof bmsId !== 'string') return '';
-  
+  if (!bmsId || typeof bmsId !== "string") return "";
+
   return bmsId
-    .replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, "")
     .trim()
-    .replace(/\s+/g, '')
+    .replace(/\s+/g, "")
     .toUpperCase();
 }
 
@@ -91,44 +92,49 @@ function cleanBmsId(bmsId: string): string {
 function areSameBattery(bmsId1: string, bmsId2: string): boolean {
   const clean1 = cleanBmsId(bmsId1);
   const clean2 = cleanBmsId(bmsId2);
-  
+
   if (clean1 === clean2) return true;
-  
+
   if (clean1.length > 10 && clean2.length > 10) {
     const minLength = Math.min(clean1.length, clean2.length);
     if (minLength > 10) {
       return clean1.substring(0, minLength) === clean2.substring(0, minLength);
     }
   }
-  
+
   return false;
 }
 
 // Consolidate rapid swaps within time window
-function consolidateRapidSwaps(swaps: BatterySwapEvent[], timeWindowMinutes: number = 10): BatterySwapEvent[] {
+function consolidateRapidSwaps(
+  swaps: BatterySwapEvent[],
+  timeWindowMinutes: number = 10
+): BatterySwapEvent[] {
   if (swaps.length === 0) return [];
-  
+
   const consolidated: BatterySwapEvent[] = [];
   const timeWindowSeconds = timeWindowMinutes * 60;
-  
+
   const sortedSwaps = [...swaps].sort((a, b) => b.TIMESTAMP - a.TIMESTAMP);
-  
+
   let i = 0;
   while (i < sortedSwaps.length) {
     const currentSwap = sortedSwaps[i];
     const swapGroup: BatterySwapEvent[] = [currentSwap];
-    
+
     let j = i + 1;
     while (j < sortedSwaps.length) {
       const nextSwap = sortedSwaps[j];
       const timeDiff = currentSwap.TIMESTAMP - nextSwap.TIMESTAMP;
-      
+
       if (timeDiff <= timeWindowSeconds) {
-        const sameOldNew = (areSameBattery(currentSwap.OLDBMSID, nextSwap.OLDBMSID) && 
-                           areSameBattery(currentSwap.NEWBMSID, nextSwap.NEWBMSID));
-        const sameNewOld = (areSameBattery(currentSwap.OLDBMSID, nextSwap.NEWBMSID) && 
-                           areSameBattery(currentSwap.NEWBMSID, nextSwap.OLDBMSID));
-        
+        const sameOldNew =
+          areSameBattery(currentSwap.OLDBMSID, nextSwap.OLDBMSID) &&
+          areSameBattery(currentSwap.NEWBMSID, nextSwap.NEWBMSID);
+        const sameNewOld =
+          areSameBattery(currentSwap.OLDBMSID, nextSwap.NEWBMSID) &&
+          areSameBattery(currentSwap.NEWBMSID, nextSwap.OLDBMSID);
+
         if (sameOldNew || sameNewOld) {
           swapGroup.push(nextSwap);
           sortedSwaps.splice(j, 1);
@@ -139,11 +145,11 @@ function consolidateRapidSwaps(swaps: BatterySwapEvent[], timeWindowMinutes: num
         break;
       }
     }
-    
+
     if (swapGroup.length > 1) {
       const firstSwap = swapGroup[swapGroup.length - 1];
       const lastSwap = swapGroup[0];
-      
+
       const consolidatedSwap: BatterySwapEvent = {
         TIMESTAMP: lastSwap.TIMESTAMP,
         OLDBMSID: cleanBmsId(firstSwap.OLDBMSID),
@@ -152,7 +158,7 @@ function consolidateRapidSwaps(swaps: BatterySwapEvent[], timeWindowMinutes: num
         NEWSOH: lastSwap.NEWSOH,
         CHARGECHANGE: swapGroup.reduce((sum, swap) => sum + swap.CHARGECHANGE, 0),
       };
-      
+
       if (!areSameBattery(consolidatedSwap.OLDBMSID, consolidatedSwap.NEWBMSID)) {
         consolidated.push(consolidatedSwap);
       }
@@ -160,17 +166,17 @@ function consolidateRapidSwaps(swaps: BatterySwapEvent[], timeWindowMinutes: num
       const cleanedSwap = {
         ...currentSwap,
         OLDBMSID: cleanBmsId(currentSwap.OLDBMSID),
-        NEWBMSID: cleanBmsId(currentSwap.NEWBMSID)
+        NEWBMSID: cleanBmsId(currentSwap.NEWBMSID),
       };
-      
+
       if (!areSameBattery(cleanedSwap.OLDBMSID, cleanedSwap.NEWBMSID)) {
         consolidated.push(cleanedSwap);
       }
     }
-    
+
     i++;
   }
-  
+
   return consolidated.sort((a, b) => b.TIMESTAMP - a.TIMESTAMP);
 }
 
@@ -195,13 +201,12 @@ function useHomeCharging(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sql: query,
-          // Tells /api/query to skip Redis entirely for this request:
-          // no cache read, no cache write, no locks, no analytics keys.
+          // Tells /api/query to skip Redis entirely for this request.
           noCache: true,
           warehouse: process.env.SNOWFLAKE_WAREHOUSE || "AIDASHBOARD",
           database: process.env.SNOWFLAKE_DATABASE || "SOURCE_DATA",
           schema: process.env.SNOWFLAKE_SCHEMA || "VEHICLE_DATA",
-        })
+        }),
       });
 
       if (!response.ok) {
@@ -210,39 +215,20 @@ function useHomeCharging(
       }
 
       const result = await response.json();
-      // (Removed the per-query console.log of the full result — logging
-      // thousands of rows in the browser is slow.)
-
       return result.data || result.rows || result || [];
     } catch (error) {
-      console.error(`${queryName || 'Query'} failed:`, error);
+      console.error(`${queryName || "Query"} failed:`, error);
       throw error;
     }
   }, []);
 
+  // Non-time filters only (time is resolved separately in getTimeRange)
   const buildFilterConditions = useCallback(() => {
     const conditions: string[] = [];
 
-    // Use start/end timestamps if provided, otherwise fall back to timeRange
-    if (filters.startTimestamp && filters.endTimestamp) {
-      conditions.push(`CTIME >= ${filters.startTimestamp}`);
-      conditions.push(`CTIME <= ${filters.endTimestamp}`);
-    } else if (filters.timeRange) {
-      conditions.push(`CTIME >= EXTRACT(EPOCH FROM CURRENT_TIMESTAMP - INTERVAL '${filters.timeRange} HOURS')`);
-    }
-
-    // Optional filters
-    if (filters.minBatteryTemp) {
-      conditions.push(`BATTEMP >= ${filters.minBatteryTemp}`);
-    }
-
-    if (filters.maxBatteryTemp) {
-      conditions.push(`BATTEMP <= ${filters.maxBatteryTemp}`);
-    }
-
-    if (filters.minSOH) {
-      conditions.push(`BATSOH >= ${filters.minSOH}`);
-    }
+    if (filters.minBatteryTemp) conditions.push(`BATTEMP >= ${filters.minBatteryTemp}`);
+    if (filters.maxBatteryTemp) conditions.push(`BATTEMP <= ${filters.maxBatteryTemp}`);
+    if (filters.minSOH) conditions.push(`BATSOH >= ${filters.minSOH}`);
 
     // Exclude idle data if requested
     // if (!filters.includeIdleData) {
@@ -250,79 +236,80 @@ function useHomeCharging(
     // }
 
     return conditions;
-  }, [filters]);
+  }, [filters.minBatteryTemp, filters.maxBatteryTemp, filters.minSOH]);
 
-  const queries = useMemo(() => {
+  // Resolve the time range once, in JS. Called at load time (not memoized)
+  // so a refetch with a relative timeRange uses a fresh "now".
+  const getTimeRange = useCallback(() => {
+    if (filters.startTimestamp && filters.endTimestamp) {
+      return { start: filters.startTimestamp, end: filters.endTimestamp };
+    }
+    const end = Math.floor(Date.now() / 1000);
+    return { start: end - (filters.timeRange ?? 168) * 3600, end };
+  }, [filters.startTimestamp, filters.endTimestamp, filters.timeRange]);
+
+  const buildQueries = useCallback(() => {
     // Use selectedVehicleImei if provided, otherwise fall back to tboxId
     const effectiveTboxId = filters.selectedVehicleImei || tboxId;
-    
-    const filterConditions = buildFilterConditions();
-    const whereClause = `WHERE TBOXID = '${effectiveTboxId}' AND ${filterConditions.join(' AND ')}`;
-    // console.log("Generated WHERE clause:", whereClause);
+    const { start, end } = getTimeRange();
+    const extra = buildFilterConditions();
 
-    // Size of the time bucket (seconds) used to thin the telemetry query to
-    // about TARGET_TELEMETRY_POINTS rows. Minimum 60s so short ranges keep
-    // full resolution.
-    const rangeSeconds =
-      filters.startTimestamp && filters.endTimestamp
-        ? filters.endTimestamp - filters.startTimestamp
-        : (filters.timeRange ?? 168) * 3600;
-    const bucketSeconds = Math.max(60, Math.ceil(rangeSeconds / TARGET_TELEMETRY_POINTS));
+    const where = (s: number, e: number, inclusiveEnd: boolean) =>
+      `WHERE TBOXID = '${effectiveTboxId}'
+         AND CTIME >= ${s} AND CTIME ${inclusiveEnd ? "<=" : "<"} ${e}
+         ${extra.map((c) => `AND ${c}`).join(" ")}`;
+
+    // Full range, used by the aggregate queries
+    const whereClause = where(start, end, true);
+
+    // Full-resolution telemetry for ONE window
+    const telemetryWindow = (s: number, e: number, inclusiveEnd: boolean) => `
+      SELECT
+        BATTEMP,
+        BATVOLT,
+        COALESCE(
+          NULLIF(BATCELLDIFFMAX, 0),
+          CASE
+            WHEN BATVOLT IS NOT NULL AND BATVOLT > 0 THEN
+              ABS(BATVOLT - 52.0) * 10.0
+            ELSE 0
+          END
+        ) as BATCELLDIFFMAX,
+        BATCYCLECOUNT,
+        BATSOH,
+        BATPERCENT,
+        BATCURRENT,
+        COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR,
+        CTIME,
+        MOTORRPM,
+        CASE
+          WHEN BMSID IS NOT NULL AND BMSID != '' THEN
+            UPPER(TRIM(REGEXP_REPLACE(BMSID, '[\\x00-\\x1F\\x7F-\\x9F]', '')))
+          WHEN TBOX_ID IS NOT NULL THEN CONCAT('BMS_', RIGHT(TBOX_ID, 2))
+          ELSE CONCAT('BMS_', SUBSTRING(TBOXID, LENGTH(TBOXID)-1, 2))
+        END as BMS_ID,
+        COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
+        COALESCE(STATE, 'UNKNOWN') as STATE,
+        THROTTLEPERCENT
+      FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
+      ${where(s, e, inclusiveEnd)}
+      ORDER BY CTIME ASC
+    `;
+
+    // Half-open windows [s, e), except the last which is [s, end] so no row
+    // is duplicated or missed at a boundary.
+    const telemetryWindows: string[] = [];
+    for (let s = start; s <= end; s += TELEMETRY_CHUNK_SECONDS) {
+      const e = Math.min(s + TELEMETRY_CHUNK_SECONDS, end);
+      const isLast = e >= end;
+      telemetryWindows.push(telemetryWindow(s, e, isLast));
+      if (isLast) break;
+    }
 
     return {
-      // OPTIMIZED: Only fetch essential columns, and thin to ONE reading per
-      // time bucket per battery. Partitioning by BMS_ID means every battery
-      // present in a bucket keeps a point, so swap transitions still show.
-      batteryTelemetry: `
-        WITH base AS (
-          SELECT
-            BATTEMP,
-            BATVOLT,
-            COALESCE(
-              NULLIF(BATCELLDIFFMAX, 0),
-              CASE 
-                WHEN BATVOLT IS NOT NULL AND BATVOLT > 0 THEN 
-                  ABS(BATVOLT - 52.0) * 10.0
-                ELSE 0 
-              END
-            ) as BATCELLDIFFMAX,
-            BATCYCLECOUNT,
-            BATSOH,
-            BATPERCENT,
-            BATCURRENT,
-            COALESCE(BATTERY_ERROR, '') as BATTERY_ERROR,
-            CTIME,
-            MOTORRPM,
-            CASE 
-              WHEN BMSID IS NOT NULL AND BMSID != '' THEN 
-                UPPER(TRIM(REGEXP_REPLACE(BMSID, '[\\x00-\\x1F\\x7F-\\x9F]', '')))
-              WHEN TBOX_ID IS NOT NULL THEN CONCAT('BMS_', RIGHT(TBOX_ID, 2))
-              ELSE CONCAT('BMS_', SUBSTRING(TBOXID, LENGTH(TBOXID)-1, 2))
-            END as BMS_ID,
-            COALESCE(TOTAL_DISTANCE_KM, 0) as TOTAL_DISTANCE_KM,
-            COALESCE(STATE, 'UNKNOWN') as STATE,
-            THROTTLEPERCENT
-          FROM SOURCE_DATA.VEHICLE_DATA.TBOX_MESSAGE_DATA
-          ${whereClause}
-        ),
-        bucketed AS (
-          SELECT *,
-            ROW_NUMBER() OVER (
-              PARTITION BY BMS_ID, FLOOR(CTIME / ${bucketSeconds})
-              ORDER BY CTIME
-            ) AS rn
-          FROM base
-        )
-        SELECT
-          BATTEMP, BATVOLT, BATCELLDIFFMAX, BATCYCLECOUNT, BATSOH, BATPERCENT,
-          BATCURRENT, BATTERY_ERROR, CTIME, MOTORRPM, BMS_ID,
-          TOTAL_DISTANCE_KM, STATE, THROTTLEPERCENT
-        FROM bucketed
-        WHERE rn = 1
-        ORDER BY CTIME ASC
-      `,
+      telemetryWindows,
 
-      // OPTIMIZED: Only fetch columns needed for swap detection
+      // Only fetch columns needed for swap detection
       batterySwapDetection: `
         WITH cleaned_data AS (
           SELECT
@@ -380,7 +367,7 @@ function useHomeCharging(
         LIMIT 100
       `,
 
-      // OPTIMIZED: Only fetch columns needed for session analysis
+      // Only fetch columns needed for session analysis
       batterySessionAnalysis: `
         WITH cleaned_base_data AS (
             SELECT 
@@ -457,7 +444,7 @@ function useHomeCharging(
         LIMIT 100
         `,
 
-      // OPTIMIZED: Only fetch aggregated metrics for diagnostics
+      // Only fetch aggregated metrics for diagnostics
       systemDiagnostics: `
         WITH cleaned_battery_stats AS (
           SELECT
@@ -522,9 +509,38 @@ function useHomeCharging(
         GROUP BY bs.total_batteries, bs.avg_soh, bs.avg_temp, bs.critical_events, 
                  bs.voltage_anomalies, bs.total_readings, bs.distance_covered, 
                  bs.charge_consumed, bs.active_days
-      `
+      `,
     };
-  }, [tboxId, filters.selectedVehicleImei, buildFilterConditions, filters.startTimestamp, filters.endTimestamp, filters.timeRange]);
+  }, [tboxId, filters.selectedVehicleImei, buildFilterConditions, getTimeRange]);
+
+  // Fetch every telemetry window (full resolution), a few at a time, and
+  // return them merged in chronological order.
+  const fetchAllTelemetry = useCallback(
+    async (windows: string[]): Promise<TboxData[]> => {
+      const parts: TboxData[][] = new Array(windows.length);
+      let next = 0;
+      let failed = false;
+
+      const worker = async () => {
+        while (!failed && next < windows.length) {
+          const idx = next++;
+          try {
+            parts[idx] = await fetchSnowflakeData(windows[idx], `batteryTelemetry[${idx}]`);
+          } catch (err) {
+            failed = true; // stop other workers from starting new windows
+            throw err;
+          }
+        }
+      };
+
+      await Promise.all(
+        Array.from({ length: Math.min(TELEMETRY_CONCURRENCY, windows.length) }, worker)
+      );
+
+      return parts.flat();
+    },
+    [fetchSnowflakeData]
+  );
 
   const loadData = useCallback(async () => {
     // Only load if we have a valid IMEI
@@ -542,28 +558,30 @@ function useHomeCharging(
     setLoading(true);
     setError(null);
     setDebugInfo(null);
-    
+
     try {
-      // Fetch main telemetry data (thinned in SQL — see batteryTelemetry)
-      const telemetryResult = await fetchSnowflakeData(queries.batteryTelemetry, "batteryTelemetry");
-      setBatteryData(telemetryResult || []);
-      
+      const queries = buildQueries();
+
+      // Full-resolution telemetry, fetched in windows and merged
+      const telemetryResult = await fetchAllTelemetry(queries.telemetryWindows);
+      setBatteryData(telemetryResult);
+
       // Fetch and process battery swaps
       const swapResult = await fetchSnowflakeData(queries.batterySwapDetection, "batterySwapDetection");
       const rawSwaps = swapResult || [];
-      
+
       // Apply client-side consolidation for rapid swaps
       const consolidatedSwaps = consolidateRapidSwaps(rawSwaps, 10);
       setBatterySwaps(consolidatedSwaps);
-      
+
       // Fetch battery sessions
       const sessionResult = await fetchSnowflakeData(queries.batterySessionAnalysis, "batterySessionAnalysis");
       setBatterySessions(sessionResult || []);
-      
+
       // Fetch system diagnostics
       const diagnosticResult = await fetchSnowflakeData(queries.systemDiagnostics, "systemDiagnostics");
       const rawDiagnostics = diagnosticResult?.[0];
-      
+
       if (rawDiagnostics) {
         const safeNumber = (value: any, defaultValue: number = 0): number => {
           const num = Number(value);
@@ -573,38 +591,47 @@ function useHomeCharging(
         const processedDiagnostics: DiagnosticMetrics = {
           totalBatteries: safeNumber(rawDiagnostics.TOTAL_BATTERIES),
           totalSwaps: consolidatedSwaps.length,
-          avgSessionDuration: sessionResult?.length > 0 ? 
-            sessionResult.reduce((sum: number, s: any) => sum + safeNumber(s.DURATION), 0) / sessionResult.length : 0,
-          preferredBatteries: rawDiagnostics.PREFERRED_BATTERIES ? 
-            rawDiagnostics.PREFERRED_BATTERIES.split(',').filter(Boolean) : [],
-          problematicBatteries: rawDiagnostics.PROBLEMATIC_BATTERIES ? 
-            rawDiagnostics.PROBLEMATIC_BATTERIES.split(',').filter(Boolean) : [],
-          swapFrequency: consolidatedSwaps.length / Math.max(1, safeNumber(rawDiagnostics.ACTIVE_DAYS, 1)),
+          avgSessionDuration:
+            sessionResult?.length > 0
+              ? sessionResult.reduce((sum: number, s: any) => sum + safeNumber(s.DURATION), 0) /
+                sessionResult.length
+              : 0,
+          preferredBatteries: rawDiagnostics.PREFERRED_BATTERIES
+            ? rawDiagnostics.PREFERRED_BATTERIES.split(",").filter(Boolean)
+            : [],
+          problematicBatteries: rawDiagnostics.PROBLEMATIC_BATTERIES
+            ? rawDiagnostics.PROBLEMATIC_BATTERIES.split(",").filter(Boolean)
+            : [],
+          swapFrequency:
+            consolidatedSwaps.length / Math.max(1, safeNumber(rawDiagnostics.ACTIVE_DAYS, 1)),
           batteryEfficiency: safeNumber(rawDiagnostics.BATTERY_EFFICIENCY),
           thermalPerformance: (() => {
             const temp = safeNumber(rawDiagnostics.AVG_TEMP);
-            return temp < 35 ? "Excellent" : 
-                   temp < 45 ? "Good" : 
-                   temp < 55 ? "Fair" : "Poor";
+            return temp < 35 ? "Excellent" : temp < 45 ? "Good" : temp < 55 ? "Fair" : "Poor";
           })(),
           voltageStability: (() => {
             const anomalies = safeNumber(rawDiagnostics.VOLTAGE_ANOMALIES);
             const readings = safeNumber(rawDiagnostics.TOTAL_READINGS, 1);
-            return (anomalies / readings) < 0.05 ? "Stable" : "Unstable";
+            return anomalies / readings < 0.05 ? "Stable" : "Unstable";
           })(),
           overallHealth: (() => {
             const soh = safeNumber(rawDiagnostics.AVG_SOH);
             const criticalEvents = safeNumber(rawDiagnostics.CRITICAL_EVENTS);
-            return soh > 90 && criticalEvents < 5 ? "Excellent" :
-                   soh > 80 && criticalEvents < 15 ? "Good" :
-                   soh > 70 ? "Fair" : "Poor";
-          })()
+            return soh > 90 && criticalEvents < 5
+              ? "Excellent"
+              : soh > 80 && criticalEvents < 15
+              ? "Good"
+              : soh > 70
+              ? "Fair"
+              : "Poor";
+          })(),
         };
         setDiagnostics(processedDiagnostics);
       }
-      
+
       setDebugInfo({
-        telemetryCount: telemetryResult?.length || 0,
+        telemetryCount: telemetryResult.length,
+        telemetryWindowCount: queries.telemetryWindows.length,
         rawSwapCount: rawSwaps.length,
         consolidatedSwapCount: consolidatedSwaps.length,
         sessionCount: sessionResult?.length || 0,
@@ -614,14 +641,16 @@ function useHomeCharging(
         endTimestamp: filters.endTimestamp,
         selectedVehicleImei: filters.selectedVehicleImei,
         effectiveTboxId,
-        uniqueBatteries: [...new Set(telemetryResult?.map((d: any) => d.BMS_ID) || [])].length,
+        uniqueBatteries: [...new Set(telemetryResult.map((d: any) => d.BMS_ID))].length,
         swapsConsolidated: rawSwaps.length - consolidatedSwaps.length,
-        dataDateRange: filters.startTimestamp && filters.endTimestamp ? {
-          from: new Date(filters.startTimestamp * 1000).toISOString(),
-          to: new Date(filters.endTimestamp * 1000).toISOString()
-        } : null
+        dataDateRange:
+          filters.startTimestamp && filters.endTimestamp
+            ? {
+                from: new Date(filters.startTimestamp * 1000).toISOString(),
+                to: new Date(filters.endTimestamp * 1000).toISOString(),
+              }
+            : null,
       });
-      
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to load battery data";
       console.error("Battery data loading error:", error);
@@ -633,7 +662,7 @@ function useHomeCharging(
     } finally {
       setLoading(false);
     }
-  }, [queries, fetchSnowflakeData, filters, tboxId]);
+  }, [buildQueries, fetchAllTelemetry, fetchSnowflakeData, filters, tboxId]);
 
   useEffect(() => {
     const effectiveTboxId = filters.selectedVehicleImei || tboxId;
@@ -662,12 +691,6 @@ function useHomeCharging(
   };
 }
 
-export type {
-  TboxData,
-  BatterySwapEvent,
-  BatterySession,
-  DiagnosticMetrics,
-  BatteryFilters
-};
+export type { TboxData, BatterySwapEvent, BatterySession, DiagnosticMetrics, BatteryFilters };
 
 export default useHomeCharging;
