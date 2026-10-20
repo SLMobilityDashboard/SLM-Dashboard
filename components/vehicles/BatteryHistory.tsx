@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from "react";
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,
@@ -16,14 +15,10 @@ import {
   Battery,
   Thermometer,
   Zap,
-  TrendingUp,
   AlertTriangle,
-  CheckCircle,
   XCircle,
   Activity,
   Gauge,
-  Clock,
-  AlertCircle,
   RefreshCw,
   ArrowUpDown,
   Target,
@@ -34,138 +29,130 @@ import {
   X,
 } from "lucide-react";
 
-// Import the optimized hook and types
 import useBatteryData, {
   TboxData,
-  BatterySwapEvent,
-  BatterySession,
-  DiagnosticMetrics,
   BatteryFilters,
 } from "@/hooks/useChargeData";
 
 interface ProcessedDataPoint extends TboxData {
-  continuousTemp?: number;
-  continuousVoltage?: number;
-  continuousCurrent?: number;
-  continuousCellDiff?: number;
   swapTransition?: boolean;
 }
 
-// Helper function to safely convert values to numbers
 const safeNumber = (value: any, defaultValue: number = 0): number => {
   if (value === null || value === undefined) return defaultValue;
   const num = Number(value);
   return isNaN(num) ? defaultValue : num;
 };
 
-// Function to create continuous data with smooth battery swap transitions
-const createContinuousData = (data: TboxData[]): ProcessedDataPoint[] => {
-  if (data.length === 0) return [];
+/* -------------------------------------------------------------------------- */
+/*  Data helpers                                                              */
+/* -------------------------------------------------------------------------- */
 
-  const processedData: ProcessedDataPoint[] = [];
-  const swapPoints: number[] = [];
-
-  for (let i = 1; i < data.length; i++) {
-    if (data[i].BMS_ID !== data[i - 1].BMS_ID) {
-      swapPoints.push(i);
-    }
-  }
-
-  for (let i = 0; i < data.length; i++) {
-    const currentPoint = { ...data[i] } as ProcessedDataPoint;
-    const isSwapPoint = swapPoints.includes(i);
-
-    if (isSwapPoint && i > 0) {
-      const prevPoint = data[i - 1];
-      const currentBatteryPoint = data[i];
-
-      currentPoint.continuousTemp =
-        (safeNumber(prevPoint.BATTEMP) +
-          safeNumber(currentBatteryPoint.BATTEMP)) /
-        2;
-      currentPoint.continuousVoltage =
-        (safeNumber(prevPoint.BATVOLT) +
-          safeNumber(currentBatteryPoint.BATVOLT)) /
-        2;
-      currentPoint.continuousCurrent =
-        (safeNumber(prevPoint.BATCURRENT) +
-          safeNumber(currentBatteryPoint.BATCURRENT)) /
-        2;
-      currentPoint.continuousCellDiff =
-        (safeNumber(prevPoint.BATCELLDIFFMAX) +
-          safeNumber(currentBatteryPoint.BATCELLDIFFMAX)) /
-        2;
-      currentPoint.swapTransition = true;
-    } else {
-      currentPoint.continuousTemp = safeNumber(currentPoint.BATTEMP);
-      currentPoint.continuousVoltage = safeNumber(currentPoint.BATVOLT);
-      currentPoint.continuousCurrent = safeNumber(currentPoint.BATCURRENT);
-      currentPoint.continuousCellDiff = safeNumber(currentPoint.BATCELLDIFFMAX);
-      currentPoint.swapTransition = false;
-    }
-
-    processedData.push(currentPoint);
-  }
-
-  return processedData;
+// Marks the first reading of each new battery. Values are the REAL readings
+// (no averaging between the old and new battery).
+const markSwapPoints = (data: TboxData[]): ProcessedDataPoint[] => {
+  return data.map((d, i) => ({
+    ...d,
+    swapTransition: i > 0 && d.BMS_ID !== data[i - 1].BMS_ID,
+  }));
 };
 
-// Function to create BMS-segmented data for area charts
-const createBMSSegmentedData = (data: ProcessedDataPoint[], metric: string) => {
-  if (!data.length) return [];
+// Render-time decimation. The full data stays in state (stats, counts and
+// exports are untouched); this only limits what recharts has to draw.
+// Per bucket it keeps the first row, last row, and the rows holding the MIN
+// and MAX of the charted value, so spikes and dips are always drawn. It also
+// always keeps battery changes and the onset of every error.
+const decimate = (
+  data: ProcessedDataPoint[],
+  valueOf: (d: ProcessedDataPoint) => number,
+  buckets: number = 800
+): ProcessedDataPoint[] => {
+  if (data.length <= buckets * 4) return data;
 
-  const uniqueBMSIds = [...new Set(data.map((d) => d.BMS_ID))];
-  const segmentedData = [];
+  const size = Math.ceil(data.length / buckets);
+  const keep = new Set<number>();
 
-  for (let i = 0; i < data.length; i++) {
-    const dataPoint = { ...data[i] };
+  for (let start = 0; start < data.length; start += size) {
+    const end = Math.min(start + size, data.length);
+    let minI = start;
+    let maxI = start;
+    let minV = Infinity;
+    let maxV = -Infinity;
 
-    uniqueBMSIds.forEach((bmsId) => {
-      const key = `${metric}_${bmsId}`;
-      if (data[i].BMS_ID === bmsId) {
-        switch (metric) {
-          case "temp":
-            dataPoint[key] = safeNumber(
-              data[i].continuousTemp || data[i].BATTEMP
-            );
-            break;
-          case "voltage":
-            dataPoint[key] = safeNumber(
-              data[i].continuousVoltage || data[i].BATVOLT
-            );
-            break;
-          case "current":
-            dataPoint[key] = safeNumber(
-              data[i].continuousCurrent || data[i].BATCURRENT
-            );
-            break;
-          case "cellDiff":
-            dataPoint[key] = safeNumber(
-              data[i].continuousCellDiff || data[i].BATCELLDIFFMAX
-            );
-            break;
-          case "soh":
-            dataPoint[key] = safeNumber(data[i].BATSOH);
-            break;
-          case "charge":
-            dataPoint[key] = safeNumber(data[i].BATPERCENT);
-            break;
-          default:
-            dataPoint[key] = 0;
-        }
-      } else {
-        dataPoint[key] = null;
+    for (let i = start; i < end; i++) {
+      const v = valueOf(data[i]);
+      if (v < minV) {
+        minV = v;
+        minI = i;
       }
-    });
+      if (v > maxV) {
+        maxV = v;
+        maxI = i;
+      }
 
-    segmentedData.push(dataPoint);
+      if (i > 0 && data[i].BMS_ID !== data[i - 1].BMS_ID) {
+        keep.add(i - 1);
+        keep.add(i);
+      }
+      if (
+        data[i].BATTERY_ERROR &&
+        data[i].BATTERY_ERROR !== (i > 0 ? data[i - 1].BATTERY_ERROR : "")
+      ) {
+        keep.add(i);
+      }
+    }
+
+    keep.add(start);
+    keep.add(end - 1);
+    keep.add(minI);
+    keep.add(maxI);
   }
 
-  return segmentedData;
+  return Array.from(keep)
+    .sort((a, b) => a - b)
+    .map((i) => data[i]);
 };
 
-// Enhanced tooltip
-const ScooterTooltip: React.FC<any> = ({ active, payload, label }) => {
+type Metric = "temp" | "voltage" | "current" | "cellDiff";
+
+const METRIC_VALUE: Record<Metric, (d: TboxData) => number> = {
+  temp: (d) => safeNumber(d.BATTEMP),
+  voltage: (d) => safeNumber(d.BATVOLT),
+  current: (d) => safeNumber(d.BATCURRENT),
+  cellDiff: (d) => safeNumber(d.BATCELLDIFFMAX),
+};
+
+// One series key per battery, null where that battery isn't the active one
+const segmentByBms = (
+  data: ProcessedDataPoint[],
+  metric: Metric,
+  bmsIds: string[]
+) =>
+  data.map((d) => {
+    const row: Record<string, any> = { ...d };
+    for (const id of bmsIds) {
+      row[`${metric}_${id}`] = d.BMS_ID === id ? METRIC_VALUE[metric](d) : null;
+    }
+    return row;
+  });
+
+const makeTickFormatter = (spanDays: number) => (value: number) => {
+  const date = new Date(safeNumber(value) * 1000);
+  return spanDays <= 2
+    ? date.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
+/* -------------------------------------------------------------------------- */
+/*  Tooltip                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const ScooterTooltip: React.FC<any> = ({ active, payload }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload as ProcessedDataPoint;
 
@@ -190,8 +177,9 @@ const ScooterTooltip: React.FC<any> = ({ active, payload, label }) => {
         <div className="grid gap-1 text-xs max-h-32 overflow-y-auto">
           {payload.map(
             (entry: any, index: number) =>
-              entry.value !== null && (
-                <div key={index} className="flex justify-between">
+              entry.value !== null &&
+              entry.value !== undefined && (
+                <div key={index} className="flex justify-between gap-3">
                   <span style={{ color: entry.color }}>{entry.name}:</span>
                   <span className="font-medium text-slate-200">
                     {typeof entry.value === "number"
@@ -201,6 +189,9 @@ const ScooterTooltip: React.FC<any> = ({ active, payload, label }) => {
                 </div>
               )
           )}
+          {data.BATTERY_ERROR && (
+            <div className="text-red-400 mt-1">Error: {data.BATTERY_ERROR}</div>
+          )}
         </div>
       </div>
     );
@@ -208,14 +199,140 @@ const ScooterTooltip: React.FC<any> = ({ active, payload, label }) => {
   return null;
 };
 
-// Filters Panel Component with Apply Button
+/* -------------------------------------------------------------------------- */
+/*  Reusable per-BMS metric chart                                             */
+/* -------------------------------------------------------------------------- */
+
+interface RefLineDef {
+  y: number;
+  color: string;
+  label: string;
+}
+
+const MetricChart: React.FC<{
+  title: string;
+  icon: React.ReactNode;
+  metric: Metric;
+  data: ProcessedDataPoint[];
+  bmsIds: string[];
+  bmsColors: Record<string, string>;
+  swaps: { TIMESTAMP: number }[];
+  yLabel: string;
+  yDomain?: [number, number];
+  refLines: RefLineDef[];
+  seriesLabel: string;
+  tickFormatter: (v: number) => string;
+  emptyMessage?: React.ReactNode;
+  hasData?: boolean;
+}> = ({
+  title,
+  icon,
+  metric,
+  data,
+  bmsIds,
+  bmsColors,
+  swaps,
+  yLabel,
+  yDomain,
+  refLines,
+  seriesLabel,
+  tickFormatter,
+  emptyMessage,
+  hasData = true,
+}) => {
+  const chartData = useMemo(
+    () => segmentByBms(decimate(data, METRIC_VALUE[metric]), metric, bmsIds),
+    [data, metric, bmsIds]
+  );
+
+  return (
+    <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
+      <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
+        {icon}
+        {title}
+      </h3>
+      {hasData ? (
+        <ResponsiveContainer width="100%" height={320}>
+          <AreaChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
+            <XAxis
+              type="number"
+              dataKey="CTIME"
+              domain={["dataMin", "dataMax"]}
+              tick={{ fontSize: 12, fill: "#94a3b8" }}
+              tickFormatter={tickFormatter}
+            />
+            <YAxis
+              tick={{ fontSize: 12, fill: "#94a3b8" }}
+              domain={yDomain}
+              label={{
+                value: yLabel,
+                angle: -90,
+                position: "insideLeft",
+                style: { fill: "#94a3b8" },
+              }}
+            />
+            <Tooltip content={<ScooterTooltip />} />
+
+            {bmsIds.map((bmsId) => (
+              <Area
+                key={bmsId}
+                type="monotone"
+                dataKey={`${metric}_${bmsId}`}
+                stroke={bmsColors[bmsId]}
+                fill={bmsColors[bmsId]}
+                fillOpacity={0.4}
+                name={`${bmsId} ${seriesLabel}`}
+                connectNulls={false}
+                dot={false}
+                isAnimationActive={false}
+              />
+            ))}
+
+            {refLines.map((r) => (
+              <ReferenceLine
+                key={r.label}
+                y={r.y}
+                stroke={r.color}
+                strokeDasharray="5 5"
+                label={{
+                  value: r.label,
+                  position: "insideTopRight",
+                  fontSize: 10,
+                  fill: r.color,
+                }}
+              />
+            ))}
+
+            {swaps.map((swap, idx) => (
+              <ReferenceLine
+                key={idx}
+                x={safeNumber(swap.TIMESTAMP)}
+                stroke="#a855f7"
+                strokeDasharray="1 1"
+                strokeWidth={1}
+                opacity={0.6}
+              />
+            ))}
+          </AreaChart>
+        </ResponsiveContainer>
+      ) : (
+        <div className="flex items-center justify-center h-80">{emptyMessage}</div>
+      )}
+    </div>
+  );
+};
+
+/* -------------------------------------------------------------------------- */
+/*  Filters panel (unchanged)                                                 */
+/* -------------------------------------------------------------------------- */
+
 const FiltersPanel: React.FC<{
   filters: BatteryFilters;
   onFiltersChange: (filters: BatteryFilters) => void;
   isOpen: boolean;
   onToggle: () => void;
 }> = ({ filters, onFiltersChange, isOpen, onToggle }) => {
-  // Calculate default dates (last 7 days)
   const getDefaultEndDate = () => {
     const date = new Date();
     return date.toISOString().split("T")[0];
@@ -227,7 +344,6 @@ const FiltersPanel: React.FC<{
     return date.toISOString().split("T")[0];
   };
 
-  // Local state for pending filter changes
   const [pendingFilters, setPendingFilters] = useState<BatteryFilters>(filters);
   const [startDate, setStartDate] = useState<string>(
     filters.startTimestamp
@@ -241,7 +357,6 @@ const FiltersPanel: React.FC<{
   );
   const [dateRangeError, setDateRangeError] = useState<string>("");
 
-  // Check if there are unapplied changes
   const hasUnappliedChanges =
     JSON.stringify(pendingFilters) !== JSON.stringify(filters);
 
@@ -348,7 +463,6 @@ const FiltersPanel: React.FC<{
   };
 
   const handleCancel = () => {
-    // Reset to current applied filters
     setPendingFilters(filters);
     if (filters.startTimestamp) {
       setStartDate(
@@ -403,7 +517,6 @@ const FiltersPanel: React.FC<{
           </div>
 
           <div className="space-y-4">
-            {/* Date Range Filter */}
             <div className="pb-4 border-b border-slate-700">
               <label className="block text-sm text-slate-300 mb-2 font-medium flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-blue-400" />
@@ -457,7 +570,6 @@ const FiltersPanel: React.FC<{
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex gap-2 pt-2 border-t border-slate-700">
               <button
                 onClick={handleReset}
@@ -484,16 +596,30 @@ const FiltersPanel: React.FC<{
   );
 };
 
+/* -------------------------------------------------------------------------- */
+/*  Main component                                                            */
+/* -------------------------------------------------------------------------- */
+
+const BMS_PALETTE = [
+  "#8b5cf6",
+  "#06b6d4",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#ec4899",
+  "#84cc16",
+  "#f97316",
+];
+
 const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
   const [selectedTboxId, setSelectedTboxId] = useState<string>(IMEI || "");
   const [inputTboxId, setInputTboxId] = useState<string>("");
   const [filters, setFilters] = useState<BatteryFilters>({
-    timeRange: 168, // 7 days default
+    timeRange: 168,
     includeIdleData: false,
   });
   const [showFilters, setShowFilters] = useState(false);
 
-  // Use the optimized hook
   const {
     batteryData,
     batterySwaps,
@@ -505,60 +631,40 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
     refetch,
   } = useBatteryData(selectedTboxId, filters);
 
-  // Process the data for continuous charts
-  const processedData = useMemo(() => {
-    return createContinuousData(batteryData);
-  }, [batteryData]);
+  // Full-resolution data with swap markers (charts decimate this themselves)
+  const processedData = useMemo(() => markSwapPoints(batteryData), [batteryData]);
 
-  // Color mapping for different BMS IDs
+  const uniqueBMSIds = useMemo(
+    () => [...new Set(batteryData.map((d) => d.BMS_ID))],
+    [batteryData]
+  );
+
   const bmsColors = useMemo(() => {
-    const uniqueBmsIds = [...new Set(batteryData.map((d) => d.BMS_ID))];
-    const colors = [
-      "#8b5cf6",
-      "#06b6d4",
-      "#10b981",
-      "#f59e0b",
-      "#ef4444",
-      "#ec4899",
-      "#84cc16",
-      "#f97316",
-    ];
-    return uniqueBmsIds.reduce((acc, bmsId, index) => {
-      acc[bmsId] = colors[index % colors.length];
+    return uniqueBMSIds.reduce((acc, bmsId, index) => {
+      acc[bmsId] = BMS_PALETTE[index % BMS_PALETTE.length];
       return acc;
     }, {} as Record<string, string>);
+  }, [uniqueBMSIds]);
+
+  // Data for the main timeline chart (decimated for drawing only)
+  const timelineData = useMemo(
+    () => decimate(processedData, (d) => safeNumber(d.BATPERCENT)),
+    [processedData]
+  );
+
+  const spanDays = useMemo(() => {
+    if (batteryData.length < 2) return 1;
+    const first = safeNumber(batteryData[0].CTIME);
+    const last = safeNumber(batteryData[batteryData.length - 1].CTIME);
+    return (last - first) / 86400;
   }, [batteryData]);
+  const tickFormatter = useMemo(() => makeTickFormatter(spanDays), [spanDays]);
 
-  // Create segmented data for each metric
-  const temperatureData = useMemo(
-    () => createBMSSegmentedData(processedData, "temp"),
-    [processedData]
+  const hasCellDiffData = useMemo(
+    () => batteryData.some((d) => safeNumber(d.BATCELLDIFFMAX) > 0),
+    [batteryData]
   );
-  const voltageData = useMemo(
-    () => createBMSSegmentedData(processedData, "voltage"),
-    [processedData]
-  );
-  const currentData = useMemo(
-    () => createBMSSegmentedData(processedData, "current"),
-    [processedData]
-  );
-  const cellDiffData = useMemo(() => {
-    const data = createBMSSegmentedData(processedData, "cellDiff");
-    const hasData = data.some((d: any) => {
-      return Object.keys(d).some(
-        (key) => key.startsWith("cellDiff_") && d[key] !== null && d[key] !== 0
-      );
-    });
-    if (!hasData && processedData.length > 0) {
-      console.warn("Cell imbalance data appears to be empty or all zeros");
-      console.log("Sample data point:", processedData[0]);
-    }
-    return data;
-  }, [processedData]);
 
-  const uniqueBMSIds = [...new Set(batteryData.map((d) => d.BMS_ID))];
-
-  // Handle TBOX ID submission
   const handleTboxSubmit = () => {
     if (inputTboxId.trim()) {
       setSelectedTboxId(inputTboxId.trim());
@@ -566,7 +672,6 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
     }
   };
 
-  // Loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
@@ -578,22 +683,11 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
           <p className="text-slate-500 text-sm">
             Analyzing data for {selectedTboxId}
           </p>
-          {debugInfo && (
-            <div className="mt-4 text-xs text-slate-500 space-y-1">
-              <p>Telemetry Records: {safeNumber(debugInfo.telemetryCount)}</p>
-              <p>
-                Battery Swaps: {safeNumber(debugInfo.consolidatedSwapCount)}
-              </p>
-              <p>Battery Sessions: {safeNumber(debugInfo.sessionCount)}</p>
-              <p>Unique Batteries: {safeNumber(debugInfo.uniqueBatteries)}</p>
-            </div>
-          )}
         </div>
       </div>
     );
   }
 
-  // Error state
   if (error && selectedTboxId) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
@@ -625,7 +719,6 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
     );
   }
 
-  // No TBOX ID selected state
   if (!selectedTboxId) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
@@ -644,10 +737,8 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
               value={inputTboxId}
               onChange={(e) => setInputTboxId(e.target.value)}
               className="w-full bg-slate-800 border border-slate-700 text-slate-200 px-4 py-3 rounded-lg focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-              onKeyPress={(e) => {
-                if (e.key === "Enter") {
-                  handleTboxSubmit();
-                }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleTboxSubmit();
               }}
             />
             <button
@@ -668,7 +759,6 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
     );
   }
 
-  // No data available - only show after loading completes
   if (!loading && batteryData.length === 0) {
     return (
       <div className="min-h-screen text-slate-100 flex items-center justify-center">
@@ -710,13 +800,19 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
     );
   }
 
-  // Main dashboard view with data
+  const chartCommon = {
+    data: processedData,
+    bmsIds: uniqueBMSIds,
+    bmsColors,
+    swaps: batterySwaps,
+    tickFormatter,
+  };
+
   return (
     <div className="min-h-screen text-slate-100">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-          {/* LEFT SIDE */}
           <div>
             <h1 className="text-3xl font-bold text-slate-100 flex items-center gap-3">
               <Battery className="w-8 h-8 text-purple-400" />
@@ -735,7 +831,8 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
               {debugInfo && (
                 <div className="text-xs text-slate-500 flex items-center gap-4">
                   <span>
-                    {safeNumber(debugInfo.telemetryCount)} data points
+                    {safeNumber(debugInfo.telemetryCount).toLocaleString()} data
+                    points
                   </span>
                   <span>•</span>
                   <span>
@@ -748,7 +845,6 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
             </div>
           </div>
 
-          {/* RIGHT SIDE (Filters) */}
           <div className="flex justify-start lg:justify-end">
             <FiltersPanel
               filters={filters}
@@ -759,7 +855,7 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
           </div>
         </div>
 
-        {/* Quick Status Overview - Only show if diagnostics exist */}
+        {/* Quick Status Overview */}
         {diagnostics && (
           <div
             className={`rounded-lg p-6 border-2 ${
@@ -831,7 +927,6 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
             Battery Usage Timeline
           </h3>
 
-          {/* BMS Legend */}
           <div className="flex flex-wrap gap-3 mb-4 p-3 bg-slate-800/50 rounded-lg">
             {Object.entries(bmsColors).map(([bmsId, color]) => (
               <div key={bmsId} className="flex items-center gap-2">
@@ -847,23 +942,20 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
           </div>
 
           <ResponsiveContainer width="100%" height={400}>
-            <ComposedChart data={processedData}>
+            <ComposedChart data={timelineData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
               <XAxis
+                type="number"
                 dataKey="CTIME"
+                domain={["dataMin", "dataMax"]}
                 tick={{ fontSize: 12, fill: "#94a3b8" }}
-                tickFormatter={(value) => {
-                  const date = new Date(safeNumber(value) * 1000);
-                  return date.toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                  });
-                }}
+                tickFormatter={tickFormatter}
               />
               <YAxis
                 yAxisId="percent"
                 tick={{ fontSize: 12, fill: "#94a3b8" }}
-                domain={[0, 100]}
+                domain={[-10, 100]}
+                allowDataOverflow
                 label={{
                   value: "Charge %",
                   angle: -90,
@@ -888,14 +980,13 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
               <Area
                 yAxisId="percent"
                 type="monotone"
-                dataKey={(data: ProcessedDataPoint) =>
-                  safeNumber(data.BATPERCENT)
-                }
+                dataKey={(data: ProcessedDataPoint) => safeNumber(data.BATPERCENT)}
                 fill="#10b981"
                 fillOpacity={0.3}
                 stroke="#10b981"
                 strokeWidth={2}
                 name="Charge Level (%)"
+                isAnimationActive={false}
               />
 
               <Line
@@ -906,9 +997,10 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
                 strokeWidth={3}
                 dot={false}
                 name="Battery Health (%)"
+                isAnimationActive={false}
               />
 
-              {/* Battery indicator line at the bottom */}
+              {/* Active-battery indicator along the bottom */}
               {uniqueBMSIds.map((bmsId) => (
                 <Line
                   key={`indicator_${bmsId}`}
@@ -922,12 +1014,14 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
                   dot={false}
                   connectNulls={false}
                   name={`${bmsId} Active`}
+                  isAnimationActive={false}
                 />
               ))}
 
               {batterySwaps.map((swap, idx) => (
                 <ReferenceLine
                   key={idx}
+                  yAxisId="percent"
                   x={safeNumber(swap.TIMESTAMP)}
                   stroke="#a855f7"
                   strokeDasharray="2 2"
@@ -944,390 +1038,82 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
           </ResponsiveContainer>
         </div>
 
-        {/* Main Analytics Grid */}
+        {/* Analytics grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Temperature Analysis */}
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
-              <Thermometer className="w-5 h-5 text-orange-400" />
-              Battery Temperature by BMS
-            </h3>
-            <ResponsiveContainer width="100%" height={320}>
-              <AreaChart data={temperatureData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
-                <XAxis
-                  dataKey="CTIME"
-                  tick={{ fontSize: 12, fill: "#94a3b8" }}
-                  tickFormatter={(value) => {
-                    const date = new Date(safeNumber(value) * 1000);
-                    return date.toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    });
-                  }}
-                />
-                <YAxis
-                  tick={{ fontSize: 12, fill: "#94a3b8" }}
-                  label={{
-                    value: "°C",
-                    angle: -90,
-                    position: "insideLeft",
-                    style: { fill: "#94a3b8" },
-                  }}
-                />
-                <Tooltip content={<ScooterTooltip />} />
+          <MetricChart
+            {...chartCommon}
+            title="Battery Temperature by BMS"
+            icon={<Thermometer className="w-5 h-5 text-orange-400" />}
+            metric="temp"
+            yLabel="°C"
+            seriesLabel="Temp (°C)"
+            refLines={[
+              { y: 45, color: "#f59e0b", label: "Warning (45°C)" },
+              { y: 65, color: "#ef4444", label: "Critical (65°C)" },
+            ]}
+          />
 
-                {/* Create separate Area for each BMS */}
-                {uniqueBMSIds.map((bmsId) => (
-                  <Area
-                    key={bmsId}
-                    type="monotone"
-                    dataKey={`temp_${bmsId}`}
-                    stackId="temp"
-                    stroke={bmsColors[bmsId]}
-                    fill={bmsColors[bmsId]}
-                    fillOpacity={0.6}
-                    name={`${bmsId} Temp (°C)`}
-                    connectNulls={false}
-                  />
-                ))}
+          <MetricChart
+            {...chartCommon}
+            title="Battery Voltage by BMS"
+            icon={<Zap className="w-5 h-5 text-blue-400" />}
+            metric="voltage"
+            yLabel="V"
+            yDomain={[42, 56]}
+            seriesLabel="Voltage (V)"
+            refLines={[
+              { y: 44, color: "#ef4444", label: "Min Safe (44V)" },
+              { y: 52, color: "#10b981", label: "Nominal (52V)" },
+            ]}
+          />
 
-                <ReferenceLine
-                  y={45}
-                  stroke="#f59e0b"
-                  strokeDasharray="5 5"
-                  label={{
-                    value: "Warning (45°C)",
-                    position: "topRight",
-                    fontSize: 10,
-                    fill: "#f59e0b",
-                  }}
-                />
-                <ReferenceLine
-                  y={65}
-                  stroke="#ef4444"
-                  strokeDasharray="5 5"
-                  label={{
-                    value: "Critical (65°C)",
-                    position: "topRight",
-                    fontSize: 10,
-                    fill: "#ef4444",
-                  }}
-                />
-
-                {/* Swap event markers */}
-                {batterySwaps.map((swap, idx) => (
-                  <ReferenceLine
-                    key={idx}
-                    x={safeNumber(swap.timestamp)}
-                    stroke="#a855f7"
-                    strokeDasharray="1 1"
-                    strokeWidth={1}
-                    opacity={0.5}
-                  />
-                ))}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Voltage Analysis */}
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
-              <Zap className="w-5 h-5 text-blue-400" />
-              Battery Voltage by BMS
-            </h3>
-            <ResponsiveContainer width="100%" height={320}>
-              <AreaChart data={voltageData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
-                <XAxis
-                  dataKey="CTIME"
-                  tick={{ fontSize: 12, fill: "#94a3b8" }}
-                  tickFormatter={(value) => {
-                    const date = new Date(safeNumber(value) * 1000);
-                    return date.toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    });
-                  }}
-                />
-                <YAxis
-                  tick={{ fontSize: 12, fill: "#94a3b8" }}
-                  domain={[42, 56]}
-                  label={{
-                    value: "V",
-                    angle: -90,
-                    position: "insideLeft",
-                    style: { fill: "#94a3b8" },
-                  }}
-                />
-                <Tooltip content={<ScooterTooltip />} />
-
-                {/* Create separate Area for each BMS */}
-                {uniqueBMSIds.map((bmsId) => (
-                  <Area
-                    key={bmsId}
-                    type="monotone"
-                    dataKey={`voltage_${bmsId}`}
-                    stackId="voltage"
-                    stroke={bmsColors[bmsId]}
-                    fill={bmsColors[bmsId]}
-                    fillOpacity={0.6}
-                    name={`${bmsId} Voltage (V)`}
-                    connectNulls={false}
-                  />
-                ))}
-
-                <ReferenceLine
-                  y={44}
-                  stroke="#ef4444"
-                  strokeDasharray="5 5"
-                  label={{
-                    value: "Min Safe (44V)",
-                    position: "topRight",
-                    fontSize: 10,
-                    fill: "#ef4444",
-                  }}
-                />
-                <ReferenceLine
-                  y={52}
-                  stroke="#10b981"
-                  strokeDasharray="5 5"
-                  label={{
-                    value: "Nominal (52V)",
-                    position: "topRight",
-                    fontSize: 10,
-                    fill: "#10b981",
-                  }}
-                />
-
-                {/* Swap event markers */}
-                {batterySwaps.map((swap, idx) => (
-                  <ReferenceLine
-                    key={idx}
-                    x={safeNumber(swap.timestamp)}
-                    stroke="#a855f7"
-                    strokeDasharray="1 1"
-                    strokeWidth={1}
-                    opacity={0.5}
-                  />
-                ))}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          {/* Cell Imbalance Analysis */}
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
-              <Activity className="w-5 h-5 text-cyan-400" />
-              Cell Imbalance by BMS
-            </h3>
-            {cellDiffData.length > 0 &&
-            cellDiffData.some((d: any) =>
-              Object.keys(d).some(
-                (key) => key.startsWith("cellDiff_") && d[key] > 0
-              )
-            ) ? (
-              <ResponsiveContainer width="100%" height={320}>
-                <AreaChart data={cellDiffData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
-                  <XAxis
-                    dataKey="CTIME"
-                    tick={{ fontSize: 12, fill: "#94a3b8" }}
-                    tickFormatter={(value) => {
-                      const date = new Date(safeNumber(value) * 1000);
-                      return date.toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                      });
-                    }}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 12, fill: "#94a3b8" }}
-                    label={{
-                      value: "mV",
-                      angle: -90,
-                      position: "insideLeft",
-                      style: { fill: "#94a3b8" },
-                    }}
-                  />
-                  <Tooltip content={<ScooterTooltip />} />
-
-                  {/* Create separate Area for each BMS */}
-                  {uniqueBMSIds.map((bmsId) => (
-                    <Area
-                      key={bmsId}
-                      type="monotone"
-                      dataKey={`cellDiff_${bmsId}`}
-                      stackId="cellDiff"
-                      stroke={bmsColors[bmsId]}
-                      fill={bmsColors[bmsId]}
-                      fillOpacity={0.6}
-                      name={`${bmsId} Cell Diff (mV)`}
-                      connectNulls={false}
-                    />
-                  ))}
-
-                  <ReferenceLine
-                    y={300}
-                    stroke="#f59e0b"
-                    strokeDasharray="5 5"
-                    label={{
-                      value: "Warning (300mV)",
-                      position: "topRight",
-                      fontSize: 10,
-                      fill: "#f59e0b",
-                    }}
-                  />
-                  <ReferenceLine
-                    y={500}
-                    stroke="#ef4444"
-                    strokeDasharray="5 5"
-                    label={{
-                      value: "Critical (500mV)",
-                      position: "topRight",
-                      fontSize: 10,
-                      fill: "#ef4444",
-                    }}
-                  />
-
-                  {/* Swap event markers */}
-                  {batterySwaps.map((swap, idx) => (
-                    <ReferenceLine
-                      key={idx}
-                      x={safeNumber(swap.timestamp)}
-                      stroke="#a855f7"
-                      strokeDasharray="1 1"
-                      strokeWidth={1}
-                      opacity={0.5}
-                    />
-                  ))}
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-80">
-                <div className="text-center text-slate-400">
-                  <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p className="text-lg mb-1">
-                    No Cell Imbalance Data Available
-                  </p>
-                  <p className="text-sm text-slate-500">
-                    BATCELLDIFFMAX values may not be present in the telemetry
-                    data
-                  </p>
-                  <p className="text-xs text-slate-600 mt-2">
-                    This could indicate: Missing BMS sensor data, or all cells
-                    are perfectly balanced
-                  </p>
-                </div>
+          <MetricChart
+            {...chartCommon}
+            title="Cell Imbalance by BMS"
+            icon={<Activity className="w-5 h-5 text-cyan-400" />}
+            metric="cellDiff"
+            yLabel="mV"
+            seriesLabel="Cell Diff (mV)"
+            hasData={hasCellDiffData}
+            refLines={[
+              { y: 300, color: "#f59e0b", label: "Warning (300mV)" },
+              { y: 500, color: "#ef4444", label: "Critical (500mV)" },
+            ]}
+            emptyMessage={
+              <div className="text-center text-slate-400">
+                <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p className="text-lg mb-1">No Cell Imbalance Data Available</p>
+                <p className="text-sm text-slate-500">
+                  BATCELLDIFFMAX values may not be present in the telemetry data
+                </p>
               </div>
-            )}
-          </div>
+            }
+          />
 
-          {/* Current Flow Analysis */}
-          <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
-            <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
-              <Gauge className="w-5 h-5 text-green-400" />
-              Battery Current by BMS
-            </h3>
-            <ResponsiveContainer width="100%" height={320}>
-              <AreaChart data={currentData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#475569" />
-                <XAxis
-                  dataKey="CTIME"
-                  tick={{ fontSize: 12, fill: "#94a3b8" }}
-                  tickFormatter={(value) => {
-                    const date = new Date(safeNumber(value) * 1000);
-                    return date.toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    });
-                  }}
-                />
-                <YAxis
-                  tick={{ fontSize: 12, fill: "#94a3b8" }}
-                  label={{
-                    value: "A",
-                    angle: -90,
-                    position: "insideLeft",
-                    style: { fill: "#94a3b8" },
-                  }}
-                />
-                <Tooltip content={<ScooterTooltip />} />
-
-                {/* Create separate Area for each BMS */}
-                {uniqueBMSIds.map((bmsId) => (
-                  <Area
-                    key={bmsId}
-                    type="monotone"
-                    dataKey={`current_${bmsId}`}
-                    stackId="current"
-                    stroke={bmsColors[bmsId]}
-                    fill={bmsColors[bmsId]}
-                    fillOpacity={0.6}
-                    name={`${bmsId} Current (A)`}
-                    connectNulls={false}
-                  />
-                ))}
-
-                <ReferenceLine
-                  y={0}
-                  stroke="#64748b"
-                  strokeDasharray="2 2"
-                  label={{
-                    value: "Zero Current",
-                    position: "topLeft",
-                    fontSize: 10,
-                    fill: "#64748b",
-                  }}
-                />
-                <ReferenceLine
-                  y={-25}
-                  stroke="#ef4444"
-                  strokeDasharray="5 5"
-                  label={{
-                    value: "High Discharge (-25A)",
-                    position: "topRight",
-                    fontSize: 10,
-                    fill: "#ef4444",
-                  }}
-                />
-                <ReferenceLine
-                  y={25}
-                  stroke="#10b981"
-                  strokeDasharray="5 5"
-                  label={{
-                    value: "Fast Charge (+25A)",
-                    position: "topRight",
-                    fontSize: 10,
-                    fill: "#10b981",
-                  }}
-                />
-
-                {/* Swap event markers */}
-                {batterySwaps.map((swap, idx) => (
-                  <ReferenceLine
-                    key={idx}
-                    x={safeNumber(swap.timestamp)}
-                    stroke="#a855f7"
-                    strokeDasharray="1 1"
-                    strokeWidth={1}
-                    opacity={0.5}
-                  />
-                ))}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <MetricChart
+            {...chartCommon}
+            title="Battery Current by BMS"
+            icon={<Gauge className="w-5 h-5 text-green-400" />}
+            metric="current"
+            yLabel="A"
+            seriesLabel="Current (A)"
+            refLines={[
+              { y: 0, color: "#64748b", label: "Zero Current" },
+              { y: -25, color: "#ef4444", label: "High Discharge (-25A)" },
+              { y: 25, color: "#10b981", label: "Fast Charge (+25A)" },
+            ]}
+          />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Battery Sessions Performance Table */}
+          {/* Sessions */}
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
               <FileText className="w-5 h-5 text-purple-400" />
               Battery Session Analysis
             </h3>
             <div className="overflow-x-auto">
-              <div className="max-h-96 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600 hover:scrollbar-thumb-slate-500">
+              <div className="max-h-96 overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-800/50 sticky top-0">
                     <tr>
@@ -1387,24 +1173,24 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
                         </td>
                         <td className="p-3 text-right">
                           <span
-                            className={`${
+                            className={
                               safeNumber(session.MAXTEMP) > 60
                                 ? "text-red-400"
                                 : safeNumber(session.MAXTEMP) > 45
                                 ? "text-yellow-400"
                                 : "text-slate-300"
-                            }`}
+                            }
                           >
                             {safeNumber(session.MAXTEMP).toFixed(1)}°C
                           </span>
                         </td>
                         <td className="p-3 text-right">
                           <span
-                            className={`${
+                            className={
                               safeNumber(session.ERROREVENTS) > 0
                                 ? "text-red-400 font-semibold"
                                 : "text-green-400"
-                            }`}
+                            }
                           >
                             {safeNumber(session.ERROREVENTS)}
                           </span>
@@ -1422,7 +1208,7 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
             </div>
           </div>
 
-          {/* Battery Swap Events */}
+          {/* Swap events */}
           <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-6">
             <h3 className="text-lg font-semibold text-slate-100 mb-4 flex items-center gap-2">
               <RefreshCw className="w-5 h-5 text-purple-400" />
@@ -1430,62 +1216,56 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
             </h3>
             <div className="space-y-3 max-h-96 overflow-y-auto h-full">
               {batterySwaps.length > 0 ? (
-                batterySwaps
-                  .slice(-10)
-                  .reverse()
-                  .map((swap, idx) => (
-                    <div
-                      key={idx}
-                      className="p-4 bg-purple-900/20 border border-purple-800/50 rounded-lg hover:bg-purple-900/30 transition-colors"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="text-sm font-medium text-purple-300">
-                          {new Date(
-                            safeNumber(swap.TIMESTAMP) * 1000
-                          ).toLocaleString()}
-                        </div>
-                        <div
-                          className={`text-sm px-2 py-1 rounded font-medium ${
-                            safeNumber(swap.CHARGECHANGE) > 0
-                              ? "bg-green-900/50 text-green-400"
-                              : "bg-red-900/50 text-red-400"
-                          }`}
-                        >
-                          {safeNumber(swap.CHARGECHANGE) > 0 ? "+" : ""}
-                          {safeNumber(swap.CHARGECHANGE).toFixed(1)}%
-                        </div>
+                // batterySwaps is already newest-first
+                batterySwaps.slice(0, 10).map((swap, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 bg-purple-900/20 border border-purple-800/50 rounded-lg hover:bg-purple-900/30 transition-colors"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-sm font-medium text-purple-300">
+                        {new Date(
+                          safeNumber(swap.TIMESTAMP) * 1000
+                        ).toLocaleString()}
                       </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-3 h-3 rounded-full"
-                            style={{
-                              backgroundColor: bmsColors[swap.OLDBMSID],
-                            }}
-                          ></div>
-                          <span className="text-slate-400 font-mono text-xs">
-                            {swap.OLDBMSID}
-                          </span>
-                          <ArrowUpDown className="w-3 h-3 text-slate-500" />
-                          <div
-                            className="w-3 h-3 rounded-full"
-                            style={{
-                              backgroundColor: bmsColors[swap.NEWBMSID],
-                            }}
-                          ></div>
-                          <span className="text-blue-400 font-mono text-xs">
-                            {swap.NEWBMSID}
-                          </span>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xs text-slate-400">
-                            SOH: {safeNumber(swap.OLDSOH).toFixed(1)}% →{" "}
-                            {safeNumber(swap.NEWSOH).toFixed(1)}%
-                          </div>
+                      <div
+                        className={`text-sm px-2 py-1 rounded font-medium ${
+                          safeNumber(swap.CHARGECHANGE) > 0
+                            ? "bg-green-900/50 text-green-400"
+                            : "bg-red-900/50 text-red-400"
+                        }`}
+                      >
+                        {safeNumber(swap.CHARGECHANGE) > 0 ? "+" : ""}
+                        {safeNumber(swap.CHARGECHANGE).toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: bmsColors[swap.OLDBMSID] }}
+                        ></div>
+                        <span className="text-slate-400 font-mono text-xs">
+                          {swap.OLDBMSID}
+                        </span>
+                        <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: bmsColors[swap.NEWBMSID] }}
+                        ></div>
+                        <span className="text-blue-400 font-mono text-xs">
+                          {swap.NEWBMSID}
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-slate-400">
+                          SOH: {safeNumber(swap.OLDSOH).toFixed(1)}% →{" "}
+                          {safeNumber(swap.NEWSOH).toFixed(1)}%
                         </div>
                       </div>
                     </div>
-                  ))
+                  </div>
+                ))
               ) : (
                 <div className="flex items-center justify-center h-full">
                   <div className="text-center text-slate-400 py-8">
@@ -1501,12 +1281,12 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
           </div>
         </div>
 
-        {/* Footer Status */}
+        {/* Footer */}
         <div className="text-center text-slate-500 text-sm py-4 border-t border-slate-800">
-          <div className="flex justify-center items-center gap-6 text-xs">
+          <div className="flex justify-center items-center gap-6 text-xs flex-wrap">
             <span>Scooter: {selectedTboxId}</span>
             <span>•</span>
-            <span>Data Points: {batteryData.length}</span>
+            <span>Data Points: {batteryData.length.toLocaleString()}</span>
             <span>•</span>
             <span>Time Range: {filters.timeRange}h</span>
             <span>•</span>
@@ -1532,6 +1312,11 @@ const BatteryHistory: React.FC<{ IMEI: string }> = ({ IMEI }) => {
               </>
             )}
           </div>
+          <p className="text-slate-600 text-xs mt-2">
+            Charts draw each period's first, last, minimum and maximum readings
+            (plus swaps and error onsets), so peaks are never hidden. All
+            statistics use every row.
+          </p>
         </div>
       </div>
     </div>
