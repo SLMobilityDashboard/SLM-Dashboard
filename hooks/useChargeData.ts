@@ -184,9 +184,14 @@ function useHomeCharging(
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/query`, {
         method: "POST",
+        // Never let the browser / Next fetch cache serve these.
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sql: query,
+          // Tells /api/query to skip Redis entirely for this request:
+          // no cache read, no cache write, no locks, no analytics keys.
+          noCache: true,
           warehouse: process.env.SNOWFLAKE_WAREHOUSE || "AIDASHBOARD",
           database: process.env.SNOWFLAKE_DATABASE || "SOURCE_DATA",
           schema: process.env.SNOWFLAKE_SCHEMA || "VEHICLE_DATA",

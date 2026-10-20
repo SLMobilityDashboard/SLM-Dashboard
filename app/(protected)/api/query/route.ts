@@ -452,7 +452,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
 
-    const { sql, forceDynamic } = JSON.parse(text);
+    // noCache: opt-in per request. Only callers that send `noCache: true`
+    // (the battery history hook) skip Redis entirely — see the bypass below.
+    const { sql, forceDynamic, noCache } = JSON.parse(text);
 
     if (!sql || typeof sql !== "string") {
       return NextResponse.json({ error: "Missing or invalid SQL" }, { status: 400 });
@@ -490,6 +492,34 @@ export async function POST(req: NextRequest) {
     const Token = (session as any).idToken ?? (session as any).accessToken ?? null;
     if (!Token) {
       return NextResponse.json({ error: "No Cognito token in session" }, { status: 401 });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ─── No-cache bypass (opt-in per request) ────────────────────────────────
+    // Straight to Snowflake. Never touches Redis: no read, no write, no
+    // miss/revalidation locks, no analytics keys. Runs under the same
+    // user + role as every other request, so access control is unchanged.
+    if (noCache === true) {
+      const result   = await SnowflakeConnectionManager.executeQuery(sql, cognitoUsername, {
+        Token,
+        snowflakeRole,
+      });
+      const rows     = result.rows ?? [];
+      const duration = Date.now() - startTime;
+
+      console.log(`⚪ [NO-CACHE] [${cognitoUsername}] — ${rows.length} rows — ${duration}ms`);
+
+      return NextResponse.json(rows, {
+        status: 200,
+        headers: {
+          "Cache-Control":    "no-store",
+          "X-Cache-Status":   "BYPASS",
+          "X-Row-Count":      rows.length.toString(),
+          "X-Query-Duration": duration.toString(),
+          "X-User":           cognitoUsername,
+          "X-Role":           snowflakeRole ?? "(default)",
+        },
+      });
     }
     // ─────────────────────────────────────────────────────────────────────────
 
